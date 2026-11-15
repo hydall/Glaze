@@ -27,7 +27,6 @@ class FlutterBackupImporter extends BackupHelpers {
   /// Table entries larger than this are decompressed to a temp file and read
   /// back from disk instead of being materialised in memory.
   static const int _spillToDiskBytes = 8 * 1024 * 1024;
-  static const int _maxSchemaVersion = 15;
 
   @override
   final AppDatabase db;
@@ -37,6 +36,27 @@ class FlutterBackupImporter extends BackupHelpers {
   final List<Map<String, dynamic>> _legacyStudioRuntimeRows = [];
 
   FlutterBackupImporter(this.db, this.imageStorage, [this._cancel = noCancel]);
+
+  /// Whether the Glaze backup at [filePath] was written by a newer app than
+  /// this one, so part of it may not come over. False when the file has no
+  /// readable manifest; the import itself reports that.
+  static bool isFromNewerApp(String filePath) {
+    final input = InputFileStream(filePath);
+    try {
+      final archive = ZipDecoder().decodeStream(input);
+      for (final f in archive.files) {
+        if (!f.isFile || f.name != 'manifest.json') continue;
+        final manifest = jsonDecode(utf8.decode(f.readBytes()!));
+        final version = manifest is Map ? manifest['schemaVersion'] : null;
+        return version is int && version > BackupExporter.schemaVersion;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    } finally {
+      input.closeSync();
+    }
+  }
 
   /// Imports a v2 Glaze backup (ZIP container with manifest.json and
   /// tables/*.jsonl). Streamed — file is never read fully into memory.
@@ -100,11 +120,9 @@ class FlutterBackupImporter extends BackupHelpers {
         'Glaze backup schema is too old. Please re-export from the source app.',
       );
     }
-    if (schemaVersion > _maxSchemaVersion) {
-      throw const FormatException(
-        'Glaze backup was created by a newer app version.',
-      );
-    }
+    // A backup from a newer app (see [isFromNewerApp]) is restored as far as
+    // this build understands it: tables and columns it does not have are
+    // skipped below. The UI warns before the restore starts.
 
     final tableFiles = archive.files
         .where(

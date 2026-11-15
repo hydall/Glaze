@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/services/backup/backup_cancel.dart';
+import 'package:glaze_flutter/core/services/backup/backup_exporter.dart';
 import 'package:glaze_flutter/core/services/backup/flutter_backup_importer.dart';
 import 'package:glaze_flutter/core/services/backup/js_api_config_importer.dart';
 import 'package:glaze_flutter/core/services/backup/js_lorebook_importer.dart';
@@ -1058,18 +1059,69 @@ void main() {
       }
     }
 
-    test('rejects backups from a newer schema version', () async {
+    test('restores what it knows from a newer schema version', () async {
       final archive = Archive()
         ..addFile(
           ArchiveFile.bytes(
             'manifest.json',
-            utf8.encode(jsonEncode({'schemaVersion': 16})),
+            utf8.encode(
+              jsonEncode({'schemaVersion': BackupExporter.schemaVersion + 1}),
+            ),
+          ),
+        )
+        ..addFile(
+          ArchiveFile.bytes(
+            'tables/rewrite_jobs.jsonl',
+            utf8.encode(
+              jsonEncode({
+                'id': 'fresh',
+                'chat_session_id': 's1',
+                'character_id': 'c1',
+                'column_from_the_future': 1,
+              }),
+            ),
+          ),
+        )
+        ..addFile(
+          ArchiveFile.bytes(
+            'tables/table_from_the_future.jsonl',
+            utf8.encode(jsonEncode({'id': 'x'})),
           ),
         );
 
-      await expectLater(
-        importArchive(archive),
-        throwsA(isA<FormatException>()),
+      await importArchive(archive);
+
+      final rows = await db.customSelect('SELECT id FROM rewrite_jobs').get();
+      expect(rows.map((r) => r.read<String>('id')), ['fresh']);
+    });
+
+    test('tells a backup from a newer app apart', () async {
+      String write(int version) {
+        final path =
+            '${Directory.systemTemp.path}/glaze-newer-$version-${DateTime.now().microsecondsSinceEpoch}.glz';
+        final archive = Archive()
+          ..addFile(
+            ArchiveFile.bytes(
+              'manifest.json',
+              utf8.encode(jsonEncode({'schemaVersion': version})),
+            ),
+          );
+        File(path).writeAsBytesSync(ZipEncoder().encode(archive));
+        addTearDown(() => File(path).deleteSync());
+        return path;
+      }
+
+      expect(
+        FlutterBackupImporter.isFromNewerApp(
+          write(BackupExporter.schemaVersion + 1),
+        ),
+        isTrue,
+      );
+      expect(
+        FlutterBackupImporter.isFromNewerApp(
+          write(BackupExporter.schemaVersion),
+        ),
+        isFalse,
       );
     });
 

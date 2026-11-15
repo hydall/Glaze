@@ -202,9 +202,11 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
 
     final service = await ref.read(backupServiceProvider.future);
     TavoBackupInspection? tavo;
+    var fromNewerApp = false;
     if (mounted) setState(() => _isInspecting = true);
     try {
-      tavo = await service.inspectTavoBackup(path);
+      fromNewerApp = await service.isBackupFromNewerApp(path);
+      if (!fromNewerApp) tavo = await service.inspectTavoBackup(path);
     } catch (_) {
       // An unreadable backup fails the import itself, with the real error.
     } finally {
@@ -217,8 +219,13 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
       bigInfo: BottomSheetBigInfo(
         icon: Icons.warning_amber_rounded,
         // The title already asks the question; the body only carries what a
-        // Tavo backup needs said before its restore.
-        description: tavo == null ? '' : _tavoNotice(tavo),
+        // Tavo backup, or one from a newer Glaze, needs said before its
+        // restore.
+        description: fromNewerApp
+            ? 'backup_newer_version_warning'.tr()
+            : tavo == null
+            ? ''
+            : _tavoNotice(tavo),
       ),
       items: [
         BottomSheetItem(
