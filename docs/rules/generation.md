@@ -335,6 +335,7 @@ Provider notes:
 - OpenAI-compatible/custom transports omit `reasoning_effort` when reasoning is omitted.
 - Anthropic/Gemini transports omit their native thinking config when reasoning is omitted.
 - Gemini 3.x may still think internally by default and may report/bill thought tokens. Gemini 3.1 Pro documents thinking levels, not a guaranteed full off switch.
+- Gemini 4 (`gemini-4-*`) takes thinking levels only — `low | medium | high`, plus `xhigh` on Hydrogen; `thinkingBudget` is deprecated and thinking cannot be turned off. `gemini4ThinkingLevel` maps the six steps for both the native `thinkingLevel` and `reasoning_effort` on Custom Chat Completion. Thought tokens count toward `maxOutputTokens`.
 - Avoid sending undocumented fields such as `reasoning: { exclude: true }` globally. Add provider-specific body fields only behind explicit protocol/provider support and tests.
 
 Studio Mode (tracker-around-generator, Phase 5+):

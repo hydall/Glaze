@@ -43,7 +43,7 @@ class GeminiBuiltRequest {
 ///   consecutive same-role turns are squashed inside `contents`.
 /// - Safety settings: all five HARM_* categories set to `OFF`.
 /// - Extended thinking: `generationConfig.thinkingConfig.thinkingBudget`
-///   (int) or `.thinkingLevel` (string for Gemini 3) per
+///   (int) or `.thinkingLevel` (string for Gemini 3 and 4) per
 ///   `calculateGoogleBudgetTokens`. `includeThoughts: true` so the response
 ///   stream interleaves thinking parts.
 class GeminiChatTransport implements ChatTransport {
@@ -124,7 +124,9 @@ class GeminiChatTransport implements ChatTransport {
       generationConfig['stopSequences'] = request.stop;
     }
 
-    // Thinking config: only emit for known 2.5+ / 3.x thinking models.
+    // Thinking config: only emit for known 2.5+ / 3.x / 4.x thinking models.
+    // Without it a Gemini 4 model ignores the effort setting and runs at its
+    // default level.
     final useThinking = request.requestReasoning && !request.omitReasoning;
     if (useThinking && _isThinkingModel(request.model)) {
       final budget = calculateGoogleBudgetTokens(
@@ -177,7 +179,8 @@ class GeminiChatTransport implements ChatTransport {
 
   static bool _isThinkingModel(String model) {
     return RegExp(r'^gemini-2\.5-(flash|pro)').hasMatch(model) ||
-        RegExp(r'^gemini-3[\.\d]*-(flash|pro)').hasMatch(model);
+        RegExp(r'^gemini-3[\.\d]*-(flash|pro)').hasMatch(model) ||
+        isGemini4Model(model);
   }
 
   @override

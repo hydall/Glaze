@@ -7,7 +7,8 @@
 /// Both return one of:
 /// - `int` — explicit token budget (Claude pre-Opus-4.6, Gemini 2.x).
 /// - `String` — symbolic effort (`'low'`, `'medium'`, `'high'`, `'max'`,
-///   `'minimal'`) for adaptive-thinking models (Opus 4.6+, Gemini 3.x).
+///   `'minimal'`, `'xhigh'`) for adaptive-thinking models (Opus 4.6+,
+///   Gemini 3.x and 4).
 /// - `null` — caller should omit the thinking config entirely (effort: auto).
 ///
 /// Caller is responsible for picking adaptive vs explicit by model id.
@@ -83,7 +84,7 @@ Object? calculateClaudeBudgetTokens({
 
 /// Gemini budget. Caller selects sub-formula by model name; falls back to
 /// `null` for unrecognised models. Returns `int` (explicit budget),
-/// `String` symbolic effort (Gemini 3), or `null`.
+/// `String` symbolic effort (Gemini 3 and 4), or `null`.
 ///
 /// Gemini-specific quirk: returning `-1` token budget means "auto" in
 /// Gemini's API (different from `null` which omits the config). Keep
@@ -93,6 +94,11 @@ Object? calculateGoogleBudgetTokens({
   required String reasoningEffort,
   required String model,
 }) {
+  // First, so a Gemini 4 name that also contains `flash` or `pro` never falls
+  // into the token-budget branches below.
+  if (isGemini4Model(model)) {
+    return gemini4ThinkingLevel(reasoningEffort: reasoningEffort, model: model);
+  }
   if (RegExp(r'gemini-3[.\d]*-pro').hasMatch(model)) {
     return _gemini3Symbolic(
       reasoningEffort,
@@ -127,6 +133,38 @@ Object? calculateGoogleBudgetTokens({
   }
   if (model.contains('pro')) {
     return _proBudget(maxTokens: maxTokens, effort: reasoningEffort);
+  }
+  return null;
+}
+
+/// Gemini 4 family. Matched loosely because proxies prefix the model
+/// (`google/gemini-4-carbon`).
+final RegExp _gemini4Models = RegExp(r'gemini-4[.\d]*-', caseSensitive: false);
+
+bool isGemini4Model(String model) => _gemini4Models.hasMatch(model);
+
+/// Thinking level for a Gemini 4 model, or `null` to leave the model default
+/// (`auto`, unknown step).
+///
+/// Gemini 4 has no token budgets: `thinkingBudget` is deprecated and thinking
+/// cannot be turned off. The levels are `low | medium | high`, plus `xhigh` on
+/// Hydrogen only, so `min` lands on `low` and `max` on the highest level the
+/// model has. The same strings are valid for native `thinkingLevel` and for
+/// `reasoning_effort` on an OpenAI-compatible endpoint.
+String? gemini4ThinkingLevel({
+  required String reasoningEffort,
+  required String model,
+}) {
+  switch (reasoningEffort) {
+    case ReasoningEffort.min:
+    case ReasoningEffort.low:
+      return 'low';
+    case ReasoningEffort.medium:
+      return 'medium';
+    case ReasoningEffort.high:
+      return 'high';
+    case ReasoningEffort.max:
+      return model.toLowerCase().contains('hydrogen') ? 'xhigh' : 'high';
   }
   return null;
 }
