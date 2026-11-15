@@ -21,6 +21,28 @@ The general platform-exclusion request remains open in
 [dart-lang/native#2480](https://github.com/dart-lang/native/issues/2480), but it
 no longer blocks this dependency combination.
 
+## Old Visual C++ runtime on the user's machine
+
+**Symptom:** Glaze closes without a word when a chat opens. Windows' event log
+shows an access violation (`0xc0000005`) in `C:\WINDOWS\SYSTEM32\MSVCP140.dll`
+with a version below 14.40.
+
+**Cause:** Visual Studio 2022 17.10 (MSVC 14.40) changed the layout of
+`std::mutex`. Code built with it, Glaze's plugins included, crashes the first
+time it locks a mutex against an older `msvcp140.dll`. Many Windows 10 machines
+still carry 14.2x or 14.3x, and nothing used to ship a newer one with Glaze.
+
+**Fix (active):**
+
+- `windows/CMakeLists.txt` and the setup window's own CMakeLists install the
+  Visual C++ runtime DLLs (`InstallRequiredSystemLibraries`) next to the
+  executable in Profile and Release builds. Windows loads them from there
+  before System32, so the zip and the setup both carry a matching runtime.
+  A configure warning says so if the DLLs cannot be found.
+- `windows/runner/runtime_check.cpp` reads the version of the `msvcp140.dll`
+  the process actually loaded before Flutter starts. Below 14.40 (a copy with
+  the DLLs missing) it shows a dialog offering Microsoft's download page.
+
 ## MSVC 14.51+ rejects `<experimental/coroutine>`
 
 **Symptom:** `flutter build windows` fails while compiling Windows plugins with:

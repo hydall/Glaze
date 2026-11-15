@@ -97,6 +97,23 @@ if(PLUGIN_BUNDLED_LIBRARIES)
     COMPONENT Runtime)
 endif()
 
+# The Visual C++ runtime (msvcp140.dll and the rest) next to Glaze.exe. Windows
+# loads a DLL from the program's folder before System32, so Glaze runs on the
+# runtime it was built with instead of whatever the machine has: code built by
+# MSVC 14.40+ crashes against an older msvcp140.dll (std::mutex changed), and
+# many Windows 10 machines still carry 14.2x/14.3x. See docs/BUILD_NOTES.md.
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+include(InstallRequiredSystemLibraries)
+if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+  install(FILES ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS}
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    CONFIGURATIONS Profile;Release
+    COMPONENT Runtime)
+else()
+  message(WARNING "Visual C++ runtime DLLs not found: the build will use "
+    "whatever runtime the machine has, which may be too old.")
+endif()
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"

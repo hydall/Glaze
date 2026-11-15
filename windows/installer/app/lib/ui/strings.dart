@@ -23,6 +23,19 @@ class S {
     'Клиент для ИИ ролевых чатов.\nЛокальный, дружественный новичкам, с открытым исходным кодом.',
   );
   String get installTo => _('Install to', 'Папка установки');
+  String get changeFolder => _('Change…', 'Изменить…');
+  String get folderFixed => _(
+    'To install it somewhere else, remove it first.',
+    'Чтобы установить в другое место, сначала удалите её.',
+  );
+  String folderNotEmpty(String path) => _(
+    'Can\'t install into $path: it already holds other files. Pick another folder.',
+    'Нельзя установить в $path: там уже есть другие файлы. Выберите другую папку.',
+  );
+  String folderNotWritable(String path) => _(
+    'Can\'t write to $path. Folders like Program Files need administrator rights, which this setup does not ask for. Pick a folder of your own.',
+    'Нет доступа на запись в $path. Для папок вроде Program Files нужны права администратора, а установщик их не запрашивает. Выберите другую папку.',
+  );
   String get desktopShortcut => _('Desktop shortcut', 'Ярлык на рабочем столе');
   String get desktopShortcutHint => _(
     'The Start menu gets one either way.',
