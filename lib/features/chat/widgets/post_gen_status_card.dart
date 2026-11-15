@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/post_gen_status_provider.dart';
+import '../chrome/chat_chrome_channel.dart';
 import 'chat_status_card_shell.dart';
 
 /// Longest a post-generation task may advertise itself as running.
@@ -20,8 +21,14 @@ const Duration kPostGenRunningWatchdog = Duration(minutes: 12);
 /// 2.5s after the last task completes, and can always be dismissed by hand
 /// while running so a stranded indicator never blocks the chat header.
 class PostGenStatusCard extends ConsumerStatefulWidget {
-  const PostGenStatusCard({super.key, required this.sessionId});
+  const PostGenStatusCard({
+    super.key,
+    required this.channel,
+    required this.sessionId,
+  });
 
+  /// The chat chrome the card is drawn in.
+  final ChatChromeChannel channel;
   final String? sessionId;
 
   @override
@@ -166,17 +173,17 @@ class _PostGenStatusCardState extends ConsumerState<PostGenStatusCard> {
     }
 
     return ChatStatusCardShell(
+      channel: widget.channel,
+      slot: 'statusPostGen',
       label: label,
       icon: icon,
       accent: accent,
       showSpinner: showSpinner,
       action: showSpinner
-          ? IconButton(
-              icon: const Icon(Icons.close, size: 16),
+          ? ChatStatusCardAction(
+              icon: Icons.close,
               tooltip: 'Hide status',
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              size: 16,
               // Hides the indicator only. The underlying task keeps running and
               // is cancelled from its own control, so this can never leave the
               // pipeline in a half-stopped state.
