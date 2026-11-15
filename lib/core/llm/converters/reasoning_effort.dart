@@ -9,7 +9,9 @@
 ///
 /// - `auto` → `null`: the field is omitted and the provider default wins.
 /// - Official OpenAI and OpenRouter accept up to `high`, so `max` becomes
-///   `high`. Custom Chat Completion endpoints receive `max` unchanged.
+///   `high`. Custom Chat Completion endpoints receive `max` unchanged, except
+///   for Gemini 4 models, which get the highest level they have (`high`, or
+///   `xhigh` on Hydrogen).
 /// - The UI's `min` step becomes `minimal` on the GPT-5 family or `low` on
 ///   older models.
 /// - Anthropic and Gemini read the raw step as a share of the thinking budget
@@ -17,6 +19,7 @@
 library;
 
 import '../transport/llm_protocol.dart';
+import 'thinking_budget.dart';
 
 /// The steps offered in the UI, coarsest first.
 const List<String> reasoningEffortSteps = [
@@ -50,6 +53,11 @@ String? resolveReasoningEffort({
       // Budget fractions — the full scale is meaningful, pass it through.
       return effort;
     case LlmProtocol.customChatCompletion:
+      // Gemini 4 behind an OpenAI-compatible endpoint takes its own levels:
+      // there is no `max`, and `xhigh` exists on Hydrogen only.
+      if (isGemini4Model(model)) {
+        return gemini4ThinkingLevel(reasoningEffort: effort, model: model);
+      }
       switch (effort) {
         case 'min':
           return _minimalEffortModels.hasMatch(model) ? 'minimal' : 'low';

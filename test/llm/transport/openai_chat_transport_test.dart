@@ -12,6 +12,7 @@ import '_sse_adapter.dart';
 
 ChatTransportRequest _req({
   String endpoint = 'https://api.openai.com',
+  String model = 'gpt-test',
   String sessionIdMode = 'openrouter',
   int? receiveTimeoutMs,
   int maxTokens = 100,
@@ -32,7 +33,7 @@ ChatTransportRequest _req({
   return ChatTransportRequest(
     endpoint: endpoint,
     apiKey: 'sk-test',
-    model: 'gpt-test',
+    model: model,
     messages: messages,
     maxTokens: maxTokens,
     temperature: 0.7,
@@ -189,6 +190,16 @@ void main() {
     );
 
     expect(body['reasoning_effort'], 'max');
+  });
+
+  test('Custom Chat Completion sends Gemini 4 its own top level', () {
+    String? effort(String model) => OpenAiChatTransport.buildBody(
+      _req(requestReasoning: true, reasoningEffort: 'max', model: model),
+      protocol: LlmProtocol.customChatCompletion,
+    )['reasoning_effort'] as String?;
+
+    expect(effort('gemini-4-carbon'), 'high');
+    expect(effort('google/gemini-4-hydrogen'), 'xhigh');
   });
 
   group('extra request parameters', () {
