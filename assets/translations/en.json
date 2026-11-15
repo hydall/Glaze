@@ -1152,6 +1152,7 @@
   "label_backup_include_keys": "Include API keys",
   "desc_backup_include_keys": "Provider keys, catalog logins and cloud sync tokens. Leave off if you are sharing the file",
   "backup_hint_import_tavo": "<b>Tavo (.tbk):</b> characters, personas, lorebooks, presets, chats with swipes and memory, APIs, regex",
+  "backup_newer_version_warning": "This backup was made in a newer version of Glaze. It can still be restored, but data this version does not know about will be lost.",
   "backup_tavo_version_warning": "This backup was made in Tavo {version} (database format {format}). The importer was written and tested against Tavo {tested_version} (format {tested_format}), so some data may not come over.",
   "backup_tavo_skipped_title": "Will not be imported:",
   "backup_tavo_skipped_group_chats": "group chats",

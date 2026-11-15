@@ -1163,6 +1163,7 @@
   "label_backup_include_keys": "Включить API ключи",
   "desc_backup_include_keys": "Ключи провайдеров, входы в каталоги и токены облачной синхронизации. Не включайте, если отправляете файл кому-то",
   "backup_hint_import_tavo": "<b>Tavo (.tbk):</b> персонажи, персоны, лорбуки, пресеты, чаты со свайпами и памятью, API, regex",
+  "backup_newer_version_warning": "Этот бэкап сделан в более новой версии Glaze. Его можно восстановить, но данные, которых эта версия не знает, будут утеряны.",
   "backup_tavo_version_warning": "Этот бэкап сделан в Tavo {version} (формат базы {format}). Импорт написан и проверен на Tavo {tested_version} (формат {tested_format}), поэтому часть данных может не перенестись.",
   "backup_tavo_skipped_title": "Не будет импортировано:",
   "backup_tavo_skipped_group_chats": "групповые чаты",
