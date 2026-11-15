@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/llm/converters/reasoning_effort.dart';
+import '../../core/llm/converters/thinking_budget.dart';
 import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/model_fetcher.dart';
 import '../../core/llm/transport/endpoint_normalizer.dart';
@@ -2495,6 +2496,18 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   /// the option's hint so `Maximum → high` is not a surprise.
   String? _reasoningEffortHint(String effort) {
     if (effort == 'auto') return 'reasoning_effort_hint_auto'.tr();
+    if (_protocol == LlmProtocol.gemini) {
+      // Level-based Gemini models take a named level, not a budget share.
+      final level = calculateGoogleBudgetTokens(
+        maxTokens: 0,
+        reasoningEffort: effort,
+        model: _modelCtrl.text.trim(),
+      );
+      if (level is String) {
+        if (level == effort) return null;
+        return 'reasoning_effort_hint_sent'.tr(namedArgs: {'value': level});
+      }
+    }
     if (_protocol == LlmProtocol.anthropic || _protocol == LlmProtocol.gemini) {
       return 'reasoning_effort_hint_budget'.tr();
     }
