@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:path/path.dart' as p;
 
 /// Everything the setup asks of Windows, behind one interface so the steps can
@@ -41,6 +42,10 @@ abstract class SetupSystem {
   Future<void> kill(String exe);
 
   Future<void> launch(String exe);
+
+  /// Asks the reader for a folder, opening at [initial] or the nearest folder
+  /// above it that exists. Null when they cancel.
+  Future<String?> pickFolder({String? initial});
 
   /// Deletes [paths] (folders, recursively) a few seconds after the setup has
   /// exited — the uninstaller cannot delete the folder it runs from — and
@@ -173,6 +178,16 @@ class WindowsSystem implements SetupSystem {
       workingDirectory: p.dirname(exe),
       mode: ProcessStartMode.detached,
     );
+  }
+
+  @override
+  Future<String?> pickFolder({String? initial}) async {
+    var start = initial;
+    while (start != null && !await Directory(start).exists()) {
+      final up = p.dirname(start);
+      start = up == start ? null : up;
+    }
+    return getDirectoryPath(initialDirectory: start);
   }
 
   @override

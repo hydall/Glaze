@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 import 'args.dart';
 import 'engine.dart';
@@ -32,6 +33,50 @@ class SetupController extends ChangeNotifier implements SetupListener {
 
   /// Version of the install this one replaces, from its Apps entry.
   String? installedVersion;
+
+  /// Glaze of this channel is already installed. An update or reinstall goes
+  /// into its folder, so the folder cannot be changed then.
+  bool alreadyInstalled = false;
+
+  bool get canChooseFolder =>
+      mode == SetupMode.install && !alreadyInstalled && !args.silent;
+
+  /// The folder the reader picked, already checked; null for the default.
+  String? _chosenDir;
+
+  /// The last folder picked that cannot take Glaze, and why.
+  FolderProblem? folderProblem;
+  String? refusedDir;
+
+  /// The folder dialog is open or the pick is being checked.
+  bool choosingFolder = false;
+
+  Future<void> chooseFolder() async {
+    if (!canChooseFolder || choosingFolder) return;
+    choosingFolder = true;
+    notifyListeners();
+    try {
+      final current = paths?.installDir;
+      final picked = await engine.system.pickFolder(
+        initial: current == null ? null : p.dirname(current),
+      );
+      if (picked == null) return;
+      final dir = engine.installDirFor(picked);
+      final problem = await engine.checkInstallDir(dir);
+      folderProblem = problem;
+      refusedDir = problem == null ? null : dir;
+      if (problem == null) {
+        _chosenDir = dir;
+        paths = await engine.paths(installDir: dir);
+      }
+    } catch (e) {
+      debugPrint('choosing a folder failed: $e');
+      folderProblem = FolderProblem.notWritable;
+    } finally {
+      choosingFolder = false;
+      notifyListeners();
+    }
+  }
 
   bool desktopShortcut = true;
   bool deleteData = false;
@@ -74,6 +119,7 @@ class SetupController extends ChangeNotifier implements SetupListener {
     try {
       paths = await engine.paths();
       final existing = await engine.existingInstall();
+      alreadyInstalled = existing != null;
       installedVersion = existing?['DisplayVersion'];
       final shortcut = existing?['GlazeDesktopShortcut'];
       if (shortcut != null) desktopShortcut = shortcut == '1';
@@ -111,6 +157,7 @@ class SetupController extends ChangeNotifier implements SetupListener {
           desktopShortcut: desktopShortcut,
           listener: this,
           importFrom: args.importFrom,
+          installDir: _chosenDir,
         );
       }
     } catch (e, st) {

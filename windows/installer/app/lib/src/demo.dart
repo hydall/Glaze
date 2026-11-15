@@ -49,10 +49,16 @@ class DemoEngine extends SetupEngine {
       : {'DisplayVersion': previousVersion!, 'GlazeDesktopShortcut': '1'};
 
   @override
-  Future<InstallPaths> paths() async => InstallPaths(
-    installDir:
-        r'C:\Users\you\AppData\Local\Programs\com.glaze\'
-        '${channel.appName}',
+  String get defaultInstallDir =>
+      r'C:\Users\you\AppData\Local\Programs\com.glaze\'
+      '${channel.appName}';
+
+  @override
+  Future<FolderProblem?> checkInstallDir(String dir) async => null;
+
+  @override
+  Future<InstallPaths> paths({String? installDir}) async => InstallPaths(
+    installDir: installDir ?? defaultInstallDir,
     dataDir:
         r'C:\Users\you\AppData\Roaming\'
         '${channel.dataFolder}',
@@ -83,6 +89,7 @@ class DemoEngine extends SetupEngine {
     required bool desktopShortcut,
     required SetupListener listener,
     String? importFrom,
+    String? installDir,
   }) async {
     listener.onStep(SetupStep.close);
     listener.onProgress(0.02);
@@ -172,6 +179,8 @@ class _NoSystem implements SetupSystem {
   Future<void> kill(String exe) async => _running = false;
   @override
   Future<void> launch(String exe) async {}
+  @override
+  Future<String?> pickFolder({String? initial}) async => r'D:\Apps';
   @override
   Future<void> deleteAfterExit(
     List<String> paths, {

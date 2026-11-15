@@ -56,6 +56,17 @@ class InstallPaths {
   String get desktopLink => p.join(desktopFolder, '$appName.lnk');
 }
 
+/// Why a folder the reader picked cannot take Glaze.
+enum FolderProblem {
+  /// It holds files that are not a Glaze install. Uninstall empties the
+  /// install folder, so it must hold nothing else.
+  notEmpty,
+
+  /// The setup runs without administrator rights and cannot write there
+  /// (Program Files, a drive's root, a read-only drive).
+  notWritable,
+}
+
 /// The install, update and uninstall themselves.
 ///
 /// Install and update are one path: an update is an install over an existing
@@ -76,21 +87,25 @@ class SetupEngine {
   Future<Map<String, String>?> existingInstall() =>
       system.readKey(_uninstallKey);
 
-  Future<InstallPaths> paths() async {
+  /// Where a fresh install goes unless the reader picks another folder.
+  String get defaultInstallDir => p.join(
+    system.localAppData,
+    'Programs',
+    // Not Programs\Glaze: the legacy Electron app sits there, and its
+    // uninstaller deletes that whole folder.
+    'com.glaze',
+    channel.appName,
+  );
+
+  /// [installDir] is the folder the reader picked for a fresh install (see
+  /// [installDirFor]); an earlier install keeps its own folder regardless.
+  Future<InstallPaths> paths({String? installDir}) async {
     final existing = await existingInstall();
     final previous = existing?['InstallLocation'];
     return InstallPaths(
-      // An earlier install keeps its folder.
       installDir: previous != null && p.isAbsolute(previous)
           ? previous
-          : p.join(
-              system.localAppData,
-              'Programs',
-              // Not Programs\Glaze: the legacy Electron app sits there, and
-              // its uninstaller deletes that whole folder.
-              'com.glaze',
-              channel.appName,
-            ),
+          : installDir ?? defaultInstallDir,
       dataDir: p.join(system.appData, channel.dataFolder),
       prefsDir: p.join(system.appData, 'com.glaze', 'Glaze'),
       programsFolder: await system.programsFolder(),
@@ -106,14 +121,65 @@ class SetupEngine {
 
   Future<void> closeApp(InstallPaths paths) => system.kill(paths.exe);
 
+  /// The install folder for a folder the reader picked: one named after the
+  /// app inside it, unless the pick already is that folder. Picking "D:\Apps"
+  /// installs into "D:\Apps\Glaze Nightly", so uninstall, which empties the
+  /// install folder, never touches the rest of "D:\Apps".
+  String installDirFor(String picked) {
+    final dir = p.normalize(picked);
+    return p.basename(dir).toLowerCase() == channel.appName.toLowerCase()
+        ? dir
+        : p.join(dir, channel.appName);
+  }
+
+  /// Why Glaze cannot go into [dir], or null when it can. Leaves nothing
+  /// behind: a folder made to try writing is removed again.
+  Future<FolderProblem?> checkInstallDir(String dir) async {
+    if (!p.isAbsolute(dir)) return FolderProblem.notWritable;
+    final folder = Directory(dir);
+    if (await folder.exists() &&
+        !await File(p.join(dir, 'Glaze.exe')).exists() &&
+        !await folder.list().isEmpty) {
+      return FolderProblem.notEmpty;
+    }
+    return await _canWrite(dir) ? null : FolderProblem.notWritable;
+  }
+
+  Future<bool> _canWrite(String dir) async {
+    // The topmost folder this check makes, removed again at the end.
+    String? made;
+    for (var d = dir; !await Directory(d).exists(); d = p.dirname(d)) {
+      if (p.dirname(d) == d) return false; // a drive that is not there
+      made = d;
+    }
+    try {
+      await Directory(dir).create(recursive: true);
+      final probe = File(p.join(dir, '.glaze-setup-write-test'));
+      await probe.writeAsString('');
+      await probe.delete();
+      return true;
+    } on FileSystemException {
+      return false;
+    } finally {
+      if (made != null) {
+        try {
+          await Directory(made).delete(recursive: true);
+        } on FileSystemException {
+          // Nothing in it but what this made; an empty folder left is all.
+        }
+      }
+    }
+  }
+
   Future<void> install({
     required File payload,
     required File? package,
     required bool desktopShortcut,
     required SetupListener listener,
     String? importFrom,
+    String? installDir,
   }) async {
-    final paths = await this.paths();
+    final paths = await this.paths(installDir: installDir);
     final existing = await existingInstall() ?? const <String, String>{};
     final zip = ZipReader(payload);
 
@@ -277,9 +343,15 @@ class SetupEngine {
     // The uninstaller runs from uninstall\, so that and the folders around it
     // go once this window has closed. The install folder goes only when it is
     // empty by then: a kept WebView2 profile stays where Glaze will find it.
+    // com.glaze above it goes too, but never the folder around one the
+    // reader picked: that one was theirs before Glaze came.
+    final parent = p.dirname(paths.installDir);
     await system.deleteAfterExit(
       [paths.uninstallDir],
-      thenIfEmpty: [paths.installDir, p.dirname(paths.installDir)],
+      thenIfEmpty: [
+        paths.installDir,
+        if (p.equals(parent, p.dirname(defaultInstallDir))) parent,
+      ],
     );
     listener.onProgress(1);
   }
