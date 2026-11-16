@@ -29,6 +29,7 @@ import 'memory_retrieval_mode.dart';
 import 'game_time.dart';
 import 'message_recall_service.dart';
 import 'memory_selector.dart';
+import 'retrieval_timing.dart';
 import 'generation_context_inputs.dart';
 import 'prompt_builder.dart';
 import 'prompt/arc_state_builder.dart';
@@ -162,7 +163,11 @@ class PromptPayloadBuilder {
     bool Function()? shouldAbort,
     CancelToken? cancelToken,
     void Function(GenerationPhase)? onPhase,
+    bool logRetrievalTiming = false,
   }) async {
+    final retrievalTiming = logRetrievalTiming && session != null
+        ? RetrievalTiming(session.id)
+        : null;
     void throwIfAborted() {
       if (shouldAbort?.call() == true) {
         throw const _GenerationAbortedException();
@@ -320,7 +325,9 @@ class PromptPayloadBuilder {
       // endpoint is slow. The final memory refilter against the visible
       // window happens later inside buildPrompt (see
       // docs/INVARIANTS.md §5.5).
-      final lorebookFuture = (!skipVectorSearch && allowRemoteRetrieval)
+      retrievalTiming?.retrievalStarted();
+      final lorebookActive = !skipVectorSearch && allowRemoteRetrieval;
+      final lorebookSearch = lorebookActive
           ? _vectorSearcher
                 .search(
                   session.messages,
@@ -332,11 +339,25 @@ class PromptPayloadBuilder {
                   chatId: session.id,
                   cancelToken: cancelToken,
                 )
-                .timeout(const Duration(seconds: 30), onTimeout: () => const [])
+                .timeout(
+                  const Duration(seconds: 30),
+                  onTimeout: () {
+                    retrievalTiming?.timedOut('lorebook');
+                    return const [];
+                  },
+                )
           : Future<List<LorebookEntry>>.value(const []);
+      final lorebookFuture =
+          retrievalTiming?.part(
+            'lorebook',
+            lorebookSearch,
+            active: lorebookActive,
+          ) ??
+          lorebookSearch;
 
-      final memoryFuture =
-          allowRemoteRetrieval && memoryGraphEnabled && memoryBook != null
+      final memoryActive =
+          allowRemoteRetrieval && memoryGraphEnabled && memoryBook != null;
+      final memoryCandidates = memoryActive
           ? memoryService.buildCandidatesWithDiagnostics(
               sessionId: session.id,
               history: session.messages,
@@ -354,6 +375,13 @@ class PromptPayloadBuilder {
                 settings: memoryBook?.settings,
               ),
             );
+      final memoryFuture =
+          retrievalTiming?.part(
+            'memory',
+            memoryCandidates,
+            active: memoryActive,
+          ) ??
+          memoryCandidates;
 
       // NEW (patch #3): raw-message recall — cosine search over
       // `sourceType='chat_message'` chunks embedded by
@@ -363,7 +391,7 @@ class PromptPayloadBuilder {
       // Rationale (patch #3): raw-message recall is a lossless backstop for
       // the lossy MemoryBook compression — chunk=5 messages → cosine search →
       // `<recalled_messages>` injection (Marinara memory-recall analog).
-      final recallFuture = allowRemoteRetrieval
+      final recallSearch = allowRemoteRetrieval
           ? _ref
                 .read(messageRecallServiceProvider)
                 .recall(
@@ -379,17 +407,32 @@ class PromptPayloadBuilder {
                 )
                 .timeout(
                   const Duration(seconds: 30),
-                  onTimeout: () => const MessageRecallResult(),
+                  onTimeout: () {
+                    retrievalTiming?.timedOut('recall');
+                    return const MessageRecallResult();
+                  },
                 )
           : Future.value(const MessageRecallResult());
+      final recallFuture =
+          retrievalTiming?.part(
+            'recall',
+            recallSearch,
+            active: allowRemoteRetrieval,
+          ) ??
+          recallSearch;
 
-      throwIfAborted();
-      onPhase?.call(GenerationPhase.retrieving);
-      final results = await Future.wait([
-        memoryFuture,
-        lorebookFuture,
-        recallFuture,
-      ]);
+      final List<Object> results;
+      try {
+        throwIfAborted();
+        onPhase?.call(GenerationPhase.retrieving);
+        results = await Future.wait([
+          memoryFuture,
+          lorebookFuture,
+          recallFuture,
+        ]);
+      } finally {
+        retrievalTiming?.log(aborted: shouldAbort?.call() == true);
+      }
       throwIfAborted();
       final memoryResult = results[0] as MemoryCandidateBuildResult;
       memorySelection = memoryResult.selection;
