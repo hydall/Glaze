@@ -16,16 +16,16 @@ const kActiveEmbeddingConfigIdKey = 'activeEmbeddingConfigId';
 /// [EmbeddingPresetListNotifier.build].
 const kEmbeddingPresetsSeededKey = 'embeddingPresetsSeeded';
 
-/// `ApiConfig.mode` of a preset that belongs to the Embeddings tab. Chat and
+/// `ApiConfig.mode` of a preset that belongs to the Embeddings screen. Chat and
 /// embedding presets share one table but never the same list: the LLM tab,
 /// Studio slots and every model picker read [apiListProvider], which excludes
-/// this mode, while the Embeddings tab reads [embeddingPresetListProvider].
+/// this mode, while the Embeddings screen reads [embeddingPresetListProvider].
 const kEmbeddingPresetMode = 'embedding';
 
 final activeApiPresetIdProvider = StateProvider<String?>((ref) => null);
 
 /// The embedding preset the vector side runs on — picked on the API screen's
-/// Embeddings tab and stored apart from [activeApiPresetIdProvider].
+/// Embeddings screen and stored apart from [activeApiPresetIdProvider].
 ///
 /// Embeddings are a connection of their own: switching the chat preset must
 /// never drag the vector index onto another endpoint, because every stored
@@ -63,7 +63,7 @@ final apiListProvider = AsyncNotifierProvider<ApiListNotifier, List<ApiConfig>>(
   ApiListNotifier.new,
 );
 
-/// The presets of the Embeddings tab, kept in the same table under
+/// The presets of the Embeddings screen, kept in the same table under
 /// `mode == 'embedding'`.
 final embeddingPresetListProvider =
     AsyncNotifierProvider<EmbeddingPresetListNotifier, List<ApiConfig>>(
@@ -134,7 +134,7 @@ class EmbeddingPresetListNotifier extends AsyncNotifier<List<ApiConfig>>
 
   /// Carries the embedding settings that used to live on a chat preset over
   /// into an embedding preset of its own — once, on the first run after the
-  /// Embeddings tab got its own list.
+  /// Embeddings screen got its own list.
   ///
   /// The new preset keeps pointing at the chat preset it came from
   /// ([ApiConfig.embeddingLlmPresetId]), so "use LLM API" resolves to exactly
@@ -245,7 +245,7 @@ class EmbeddingPresetListNotifier extends AsyncNotifier<List<ApiConfig>>
     ]);
   }
 
-  /// A preset saved from the Embeddings tab is an embedding preset whatever
+  /// A preset saved from the Embeddings screen is an embedding preset whatever
   /// the caller passed, so it can never land in the chat list.
   ApiConfig _asEmbeddingPreset(ApiConfig config) =>
       config.mode == kEmbeddingPresetMode

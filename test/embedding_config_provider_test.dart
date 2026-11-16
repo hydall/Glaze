@@ -255,8 +255,9 @@ void main() {
     test('lorebook vector settings stay visible and lead to the setup', () {
       // The lorebook screens keep their vector controls on screen; without
       // a working connection they send the user to the embedding settings.
+      // (The lorebook list's embeddings button opens the Embeddings screen,
+      // which carries its own setup, so it needs no gate.)
       const routed = [
-        'lib/features/lorebooks/lorebook_list_screen.dart',
         'lib/features/lorebooks/widgets/lorebook_global_settings_section.dart',
         'lib/features/lorebooks/widgets/lorebook_book_settings_section.dart',
         'lib/features/lorebooks/lorebook_editor_screen.dart',
@@ -273,6 +274,8 @@ void main() {
           anyOf(
             contains('ensureVectorsReady'),
             contains('showVectorSetupSheet'),
+            // The shared search-type picker, gated by ensureVectorsReady.
+            contains('showLorebookSearchTypeSheet'),
           ),
           reason: '$path must send the user to the embedding setup',
         );
