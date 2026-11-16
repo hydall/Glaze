@@ -17,7 +17,7 @@ import 'package:glaze_flutter/features/settings/theme_preset_screen.dart';
 import 'package:glaze_flutter/features/menu/about_screen.dart';
 import 'package:glaze_flutter/features/menu/hall_of_fame_screen.dart';
 import 'package:glaze_flutter/features/lorebooks/lorebook_list_screen.dart';
-import 'package:glaze_flutter/features/lorebooks/embedding_settings_screen.dart';
+import 'package:glaze_flutter/features/embeddings/embeddings_screen.dart';
 import 'package:glaze_flutter/features/settings/api_settings_screen.dart';
 import 'package:glaze_flutter/shared/widgets/glaze_spinner.dart';
 import 'package:glaze_flutter/features/personas/persona_list_screen.dart';
@@ -122,9 +122,9 @@ const screenRegistry = <ScreenEntry>[
   ),
   ScreenEntry(
     path: '/tools/embeddings',
-    screenType: EmbeddingSettingsScreen,
+    screenType: EmbeddingsScreen,
     parentPath: '/tools',
-    description: 'Embedding settings',
+    description: 'Embeddings',
   ),
 ];
 

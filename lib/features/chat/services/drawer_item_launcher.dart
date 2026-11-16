@@ -13,6 +13,7 @@ import '../../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../character_list/character_detail_screen.dart';
+import '../../embeddings/embeddings_screen.dart';
 import '../../extensions/widgets/ext_blocks_settings_sheet.dart';
 import '../../glossary/glossary_sheet.dart';
 import '../../image_gen/widgets/image_gen_sheet.dart';
@@ -112,6 +113,8 @@ class DrawerItemLauncher {
           isScrollControlled: true,
           builder: (_) => const ApiSettingsScreen(),
         );
+      case 'embeddings':
+        await showEmbeddingsSheet(context);
       case 'presets':
         await showGlazeSheet<void>(
           context: context,
@@ -180,9 +183,12 @@ class DrawerItemLauncher {
       'lorebooks' => (_) => const LorebookListScreen(startExpanded: true),
       'regex' => (_) => const RegexSheet(startExpanded: true),
       'api' => (_) => const ApiSettingsScreen(startExpanded: true),
+      'embeddings' => (_) => const EmbeddingsScreen(startExpanded: true),
       'presets' => (_) => PresetListScreen(startExpanded: true, charId: charId),
-      'personas' => (_) =>
-          const PersonaListScreen(startExpanded: true, forChat: true),
+      'personas' => (_) => const PersonaListScreen(
+        startExpanded: true,
+        forChat: true,
+      ),
       'image-gen' => (_) => ImageGenSheet(charId: charId),
       'authors-note' => (_) => AuthorsNoteSheet(charId: charId),
       'glossary' => (_) => const GlossarySheet(startExpanded: true),

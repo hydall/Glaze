@@ -5,7 +5,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/import/st_lorebook_importer.dart';
 import '../../core/models/folder.dart';
@@ -15,7 +14,6 @@ import '../../core/services/st_lorebook_exporter.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/folder_provider.dart';
-import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/state/lorebook_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/folder_section.dart';
@@ -25,17 +23,14 @@ import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_spinner.dart';
-import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/help_tip.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
-import 'embedding_settings_screen.dart';
+import '../embeddings/embeddings_screen.dart';
 import 'lorebook_connections_sheet.dart';
 import 'lorebook_editor_screen.dart';
-import '../settings/api_list_provider.dart';
 import 'widgets/lorebook_global_settings_section.dart';
-import 'widgets/vector_setup_gate.dart';
 
 class LorebookListScreen extends ConsumerStatefulWidget {
   /// True when presented as a fullscreen route (`/tools/lorebooks`); false when
@@ -105,28 +100,8 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
     );
   }
 
-  /// Opens the vector settings — or, without a configured embedding
-  /// connection, their setup.
-  Future<void> _openEmbeddingSettings() async {
-    await ref.read(apiListProvider.future);
-    if (!mounted) return;
-    if (!ref.read(embeddingConfiguredProvider)) {
-      showVectorSetupSheet(context);
-      return;
-    }
-    // On desktop a window; a page would cover the whole app.
-    await (isDesktopLayout(context)
-        ? showGlazeSheet<void>(
-            context: context,
-            useRootNavigator: true,
-            builder: (_) => const EmbeddingSettingsScreen(),
-          )
-        : Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => const EmbeddingSettingsScreen(),
-            ),
-          ));
-  }
+  /// Opens the Embeddings screen, which also walks through a missing setup.
+  Future<void> _openEmbeddingSettings() => showEmbeddingsSheet(context);
 
   void _handleBack() {
     if (_searchExpanded) {

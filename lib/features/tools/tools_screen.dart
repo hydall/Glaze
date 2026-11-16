@@ -311,6 +311,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
       case 'personas':
       case 'presets':
       case 'api':
+      case 'embeddings':
       case 'lorebooks':
       case 'regex':
         _openTool(context, ref, id);
@@ -642,32 +643,35 @@ class _HeaderEditToggle extends StatelessWidget {
         button: true,
         toggled: editing,
         label: label,
-        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: editing
-                  ? context.cs.primary.withValues(alpha: 0.22)
-                  : Colors.transparent,
-              border: Border.all(
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
                 color: editing
-                    ? context.cs.primary.withValues(alpha: 0.38)
+                    ? context.cs.primary.withValues(alpha: 0.22)
                     : Colors.transparent,
+                border: Border.all(
+                  color: editing
+                      ? context.cs.primary.withValues(alpha: 0.38)
+                      : Colors.transparent,
+                ),
+              ),
+              child: Icon(
+                editing ? Icons.check : Icons.edit_outlined,
+                size: 18,
+                color: editing
+                    ? context.cs.primary
+                    : context.cs.onSurface.withValues(alpha: 0.55),
               ),
             ),
-            child: Icon(
-              editing ? Icons.check : Icons.edit_outlined,
-              size: 18,
-              color: editing
-                  ? context.cs.primary
-                  : context.cs.onSurface.withValues(alpha: 0.55),
-            ),
           ),
-        )),
+        ),
       ),
     );
   }

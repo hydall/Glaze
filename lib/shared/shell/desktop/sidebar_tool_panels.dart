@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../../features/embeddings/embeddings_screen.dart';
 import '../../../features/lorebooks/lorebook_list_screen.dart';
 import '../../../features/personas/persona_list_screen.dart';
 import '../../../features/presets/preset_list_screen.dart';
@@ -10,7 +11,7 @@ import 'sidebar_sheet_provider.dart';
 
 /// One entry of the desktop right sidebar's tool strip.
 ///
-/// Single source of truth for the five tools the strip offers, shared by the
+/// Single source of truth for the tools the strip offers, shared by the
 /// strip itself and by the Tools hub rendered underneath it, so the two cannot
 /// list different things or open different screens.
 class SidebarTool {
@@ -47,6 +48,12 @@ final List<SidebarTool> sidebarTools = [
     label: () => 'tab_api'.tr(),
     icon: Icons.cloud_outlined,
     builder: (_) => const ApiSettingsScreen(startExpanded: true),
+  ),
+  SidebarTool(
+    id: 'embeddings',
+    label: () => 'tab_embeddings'.tr(),
+    icon: Icons.hub_outlined,
+    builder: (_) => const EmbeddingsScreen(startExpanded: true),
   ),
   SidebarTool(
     id: 'lorebooks',

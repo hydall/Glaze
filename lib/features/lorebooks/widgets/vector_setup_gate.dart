@@ -12,7 +12,7 @@ import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../settings/api_list_provider.dart';
-import '../../settings/api_settings_screen.dart';
+import '../../embeddings/embeddings_screen.dart';
 
 /// Sends one test request to an embedding connection and remembers the ones
 /// that answered, so turning vector features on costs one request per
@@ -63,7 +63,7 @@ final embeddingProbeProvider = Provider<EmbeddingProbe>(
 /// model, and the connection answers a test request.
 ///
 /// On any failure the user is shown [showVectorSetupSheet], which leads to the
-/// Embeddings tab of the API settings, and false is returned so the caller
+/// Embeddings screen, and false is returned so the caller
 /// leaves the feature off.
 Future<bool> ensureVectorsReady(BuildContext context, WidgetRef ref) async {
   await ref.read(apiListProvider.future);
@@ -108,9 +108,9 @@ void showVectorSetupSheet(BuildContext context, {Object? error}) {
   );
 }
 
-/// Opens the API settings on their Embeddings tab.
+/// Opens the Embeddings screen.
 Future<void> openEmbeddingSetup(BuildContext context) =>
-    showApiSettingsSheet(context, focusSection: ApiSettingsSection.embeddings);
+    showEmbeddingsSheet(context);
 
 /// A row for a vector settings group while embeddings are not set up: says
 /// so, and opens the embedding settings on tap.

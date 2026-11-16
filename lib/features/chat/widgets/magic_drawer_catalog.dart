@@ -57,6 +57,12 @@ List<MagicDrawerItemDef> buildMagicDrawerItems() => [
     category: MagicDrawerCategory.config,
   ),
   MagicDrawerItemDef(
+    id: 'embeddings',
+    label: 'tab_embeddings'.tr(),
+    icon: Icons.hub_outlined,
+    category: MagicDrawerCategory.config,
+  ),
+  MagicDrawerItemDef(
     id: 'presets',
     label: 'tab_presets'.tr(),
     icon: Icons.description,

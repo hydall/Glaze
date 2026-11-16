@@ -11,6 +11,7 @@ import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/widgets/menu_group.dart';
 import 'lorebook_option_sheet.dart';
+import 'lorebook_search_type.dart';
 import 'vector_setup_gate.dart';
 
 /// The global lorebook knobs, as a collapsible block at the top of the
@@ -51,39 +52,7 @@ class _LorebookGlobalSettingsSectionState
     super.dispose();
   }
 
-  void _update(LorebookGlobalSettings s) {
-    ref.read(lorebookSettingsProvider.notifier).state = s;
-    saveLorebookSettings(s);
-  }
-
-  /// A vector mode is only kept when there is a working embedding connection
-  /// to run it on. Without one it would silently behave as keyword search, so
-  /// the mode goes back to keys and the user is pointed at the setup instead.
-  Future<void> _selectSearchType(String type) async {
-    if (type == 'keyword') {
-      _update(ref.read(lorebookSettingsProvider).copyWith(searchType: type));
-      return;
-    }
-    final ready = await ensureVectorsReady(context, ref);
-    if (!mounted) return;
-    final current = ref.read(lorebookSettingsProvider);
-    if (!ready) {
-      if (current.searchType != 'keyword') {
-        _update(current.copyWith(searchType: 'keyword'));
-      }
-      return;
-    }
-    _update(current.copyWith(searchType: type));
-    if (current.autoIndexVectors) {
-      unawaited(ref.read(lorebookAutoIndexerProvider.notifier).scheduleAll());
-    }
-  }
-
-  static String _searchTypeHint(String type) => switch (type) {
-    'vector' => 'search_type_vector_hint'.tr(),
-    'both' => 'search_type_both_hint'.tr(),
-    _ => 'search_type_keys_hint'.tr(),
-  };
+  void _update(LorebookGlobalSettings s) => updateLorebookSettings(ref, s);
 
   void _setAutoIndex(LorebookGlobalSettings s, bool value) {
     _update(s.copyWith(autoIndexVectors: value));
@@ -121,26 +90,10 @@ class _LorebookGlobalSettingsSectionState
         items: [
           MenuSelectorItem(
             label: 'label_search_type'.tr(),
-            description: _searchTypeHint(searchType),
-            currentValue: switch (searchType) {
-              'vector' => 'search_type_vector'.tr(),
-              'both' => 'search_type_both'.tr(),
-              _ => 'search_type_keys'.tr(),
-            },
-            onTap: () => showLorebookOptionSheet<String>(
-              context,
-              title: 'label_search_type'.tr(),
-              current: searchType,
-              options: [
-                for (final (type, label) in [
-                  ('keyword', 'search_type_keys'),
-                  ('vector', 'search_type_vector'),
-                  ('both', 'search_type_both'),
-                ])
-                  LorebookOption(type, label.tr(), hint: _searchTypeHint(type)),
-              ],
-              onSelect: _selectSearchType,
-            ),
+            description: lorebookSearchTypeHint(searchType),
+            currentValue: lorebookSearchTypeLabel(searchType),
+            onTap: () =>
+                showLorebookSearchTypeSheet(context, ref, current: searchType),
           ),
           if (isVector)
             MenuSwitchItem(
