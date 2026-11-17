@@ -47,6 +47,7 @@ account_box
 library_books
 code
 cloud
+hub_outlined
 description
 manage_accounts
 image
