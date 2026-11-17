@@ -38,10 +38,14 @@ class PreparedBlockRun {
   const PreparedBlockRun({
     required this.placeholderId,
     required this.placeholder,
+    this.previousContent = '',
   });
 
   final String placeholderId;
   final InfoBlock placeholder;
+
+  /// The reused row's content before it was cleared; empty for a new row.
+  final String previousContent;
 }
 
 class BlockStatusTracker {
@@ -214,6 +218,7 @@ class BlockStatusTracker {
     return PreparedBlockRun(
       placeholderId: reuseBlockId,
       placeholder: placeholder,
+      previousContent: row?.content ?? '',
     );
   }
 

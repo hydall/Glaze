@@ -485,6 +485,7 @@
 .ext-block-btn:hover { background-color: rgba(var(--primary-rgb, 121, 150, 206), 0.16); }
 .ext-block-btn:active { transform: scale(0.9); }
 .ext-block-btn svg { width: 14px; height: 14px; fill: currentColor; pointer-events: none; }
+.ext-block-btn:disabled { opacity: 0.45; cursor: default; transform: none; }
 .ext-block-btn-danger { color: #ff6b6b; }
 .ext-block-btn-danger:hover { background-color: rgba(255, 107, 107, 0.16); }
 
@@ -692,6 +693,40 @@
   max-width: 680px;
   width: 100%;
 }
+
+/* ‹ n/m › over a card picture that holds more than one image — the same pill
+ * a message's image blocks show (renderer/shadow_style.js, .imggen-variants). */
+.ext-block-variants {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  height: 18px;
+  padding: 0 2px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 10px;
+  line-height: 1;
+}
+.ext-block-variant-btn {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.ext-block-variant-btn svg { width: 12px; height: 12px; fill: currentColor; pointer-events: none; }
+.ext-block-variant-btn:active { opacity: 0.6; }
+.ext-block-variant-count { min-width: 20px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* ============================================================
  * Guidance (header block + inline edit)

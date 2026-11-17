@@ -14,6 +14,7 @@ import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
 import '../models/block_config.dart';
 import '../models/block_modes.dart';
+import '../models/block_run_status.dart';
 import '../models/extension_preset.dart';
 import '../models/info_block.dart';
 import '../providers/info_blocks_provider.dart';
@@ -25,6 +26,7 @@ import 'blocks/block_context.dart';
 import 'blocks/block_grouping.dart';
 import 'blocks/block_handler.dart';
 import 'blocks/block_image_renderer.dart';
+import 'blocks/block_image_rerun_queue.dart';
 import 'blocks/block_panel_updater.dart';
 import 'blocks/generated_block_handler.dart';
 import 'blocks/js_block_executor.dart';
@@ -57,6 +59,9 @@ class ExtensionPostGenService {
   /// so a single mutable token would orphan older runs; and a background block
   /// outlives its chain, so it holds the token until it is done.
   final Map<CancelToken, int> _blocksCancelTokens = <CancelToken, int>{};
+
+  /// Image redraws, one at a time per block row (issue #839).
+  final BlockImageRerunQueue _imageReruns = BlockImageRerunQueue();
 
   final BlockProcessor _blockProcessor = const BlockProcessor();
 
@@ -632,15 +637,55 @@ class ExtensionPostGenService {
     final blockConfig = preset.blocks.where((b) => b.id == blockId).firstOrNull;
     if (blockConfig == null) return;
 
-    final rows = await _repo.getByMessageId(
-      sessionId,
-      messageId,
-      swipeId: swipeId,
-      agentSwipeId: agentSwipeId,
-    );
-    final existing = rows.where((b) => b.blockId == blockId).firstOrNull;
-    if (existing == null || existing.content.isEmpty) return;
+    Future<InfoBlock?> readRow() async {
+      final rows = await _repo.getByMessageId(
+        sessionId,
+        messageId,
+        swipeId: swipeId,
+        agentSwipeId: agentSwipeId,
+      );
+      return rows.where((b) => b.blockId == blockId).firstOrNull;
+    }
 
+    final row = await readRow();
+    if (row == null || row.content.isEmpty) return;
+
+    await _imageReruns.run(row.id, imageIndex, () async {
+      // Read again: a redraw queued behind another one must start from what
+      // that one wrote, not from the text it saw when it was tapped.
+      final existing = await readRow();
+      if (existing == null || existing.content.isEmpty) return;
+      // A whole-block run owns the row until it finishes.
+      if (existing.status == BlockRunStatus.running) return;
+      await _rerunImageNow(
+        existing: existing,
+        blockConfig: blockConfig,
+        preset: preset,
+        messageId: messageId,
+        swipeId: swipeId,
+        agentSwipeId: agentSwipeId,
+        sessionId: sessionId,
+        charId: charId,
+        character: character,
+        persona: persona,
+        imageIndex: imageIndex,
+      );
+    });
+  }
+
+  Future<void> _rerunImageNow({
+    required InfoBlock existing,
+    required BlockConfig blockConfig,
+    required ExtensionPreset preset,
+    required String messageId,
+    required int swipeId,
+    required int agentSwipeId,
+    required String sessionId,
+    required String charId,
+    required Character character,
+    required Persona? persona,
+    required int? imageIndex,
+  }) async {
     final cancelToken = _startBlockRun();
     try {
       await BlockImageRenderer(

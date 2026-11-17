@@ -266,6 +266,44 @@ export class InteractionDispatch {
     })]);
   }
 
+  // The ext-block card's counterpart of `_stepImageVariant`: the picture is
+  // swapped in place and Flutter stores the choice in the block's row.
+  _stepExtBlockImageVariant(el, direction) {
+    const wrapper = el.closest('.ext-block-image-wrapper');
+    if (!wrapper) return;
+    const variants = (wrapper.dataset.variants || '').split(';;').filter(Boolean);
+    if (variants.length < 2) return;
+
+    const current = parseInt(wrapper.dataset.variantIndex, 10);
+    const from = Number.isInteger(current) ? current : 0;
+    const next = from + direction;
+    if (next < 0 || next >= variants.length) return;
+
+    const src = variants[next];
+    const img = wrapper.querySelector('img.ext-block-image');
+    if (img) {
+      img.src = src;
+      img.dataset.src = src;
+      delete img.dataset.retryAttempt;
+    }
+    const download = wrapper.querySelector('.img-download-btn');
+    if (download) download.dataset.src = src;
+    const count = wrapper.querySelector('.ext-block-variant-count');
+    if (count) count.textContent = `${next + 1}/${variants.length}`;
+    wrapper.dataset.variantIndex = String(next);
+
+    const blockId = el.closest('.ext-block-item')?.dataset.blockId || '';
+    const messageId = el.closest('[data-message-id]')?.dataset.messageId || '';
+    const imgIndex = parseInt(el.dataset.imgIndex, 10);
+    if (!blockId || !messageId || !Number.isInteger(imgIndex) || imgIndex < 0) return;
+    this.bridge._sendToFlutter('onExtBlockImgVariant', [JSON.stringify({
+      blockId,
+      messageId,
+      imgIndex,
+      variantIndex: next,
+    })]);
+  }
+
   get _actionMap() {
     const bridge = this.bridge;
     return {
@@ -274,8 +312,22 @@ export class InteractionDispatch {
       'output-limit-click': (e, el) => bridge._sendToFlutter('onOutputLimitClick', [el.dataset.messageId]),
       'ext-blocks-run-all': (e, el) => bridge._sendToFlutter('onExtBlocksRunAll', [el.dataset.messageId]),
       'ext-block-stop': (e, el) => bridge._sendToFlutter('onExtBlockStop', [el.dataset.blockId, el.dataset.messageId]),
-      'ext-block-regen': (e, el) => bridge._sendToFlutter('onExtBlockRegen', [el.dataset.blockId, el.dataset.messageId]),
-      'ext-block-regen-image': (e, el) => bridge._sendToFlutter('onExtBlockRegenImage', [el.dataset.blockId, el.dataset.messageId]),
+      // Both run controls go dead on the first tap: a run takes a while to
+      // show up in the card, and a second tap would start a second paid
+      // request on the same block (issue #839). The next render of the panel
+      // brings fresh buttons back.
+      'ext-block-regen': (e, el) => {
+        if (el.disabled) return;
+        el.disabled = true;
+        bridge._sendToFlutter('onExtBlockRegen', [el.dataset.blockId, el.dataset.messageId]);
+      },
+      'ext-block-regen-image': (e, el) => {
+        if (el.disabled) return;
+        el.disabled = true;
+        bridge._sendToFlutter('onExtBlockRegenImage', [el.dataset.blockId, el.dataset.messageId]);
+      },
+      'ext-block-img-variant-prev': (e, el) => this._stepExtBlockImageVariant(el, -1),
+      'ext-block-img-variant-next': (e, el) => this._stepExtBlockImageVariant(el, 1),
       'ext-block-edit': (e, el) => bridge._sendToFlutter('onExtBlockEdit', [el.dataset.blockId, el.dataset.messageId]),
       'ext-block-delete': (e, el) => bridge._sendToFlutter('onExtBlockDelete', [el.dataset.blockId, el.dataset.messageId]),
       // Copies through Flutter, the same way the selection bar does: the page

@@ -419,6 +419,17 @@ class ChatBridgeController {
   void Function(String blockId, String messageId)? onExtBlockEdit;
   void Function(String blockId, String messageId)? onExtBlockDelete;
 
+  /// The reader paged an ext-block card's picture to another image of its
+  /// block: [imageIndex] is the picture among the block's image blocks,
+  /// [variantIndex] the image now on screen.
+  void Function(
+    String blockId,
+    String messageId,
+    int imageIndex,
+    int variantIndex,
+  )?
+  onExtBlockImgVariant;
+
   /// Called when an interactive panel reports its content height changed.
   /// `panelId` identifies the panel, `messageId` the assistant message it
   /// belongs to, `heightPx` the new height in CSS pixels.
@@ -795,6 +806,23 @@ class ChatBridgeController {
             return;
           }
           onImgVariant?.call(messageId, blockIndex, variantIndex);
+        case 'onExtBlockImgVariant':
+          final blockId = data['blockId'] as String? ?? '';
+          final messageId = data['messageId'] as String? ?? '';
+          final imageIndex = _blockIndex(data['imgIndex']);
+          final variantIndex = _blockIndex(data['variantIndex']);
+          if (blockId.isEmpty ||
+              messageId.isEmpty ||
+              imageIndex == null ||
+              variantIndex == null) {
+            return;
+          }
+          onExtBlockImgVariant?.call(
+            blockId,
+            messageId,
+            imageIndex,
+            variantIndex,
+          );
         case 'onPanelEvent':
           final panelId = data['panelId'] as String? ?? '';
           final event = data['event'] as String? ?? 'action';
@@ -1184,6 +1212,8 @@ class ChatBridgeController {
   /// [options] is a free-form JSON object. Recognised keys:
   ///   - `title`: aria-label / accessibility hint for the iframe
   ///   - `minHeight`: starting height in pixels (default 120, clamped 60..2000)
+  ///   - `key`: opening a panel with the key of one already open under the
+  ///     same message replaces that panel
   Future<String?> openInteractivePanel({
     required String messageId,
     required String html,

@@ -2,7 +2,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/db/repositories/info_blocks_repository.dart';
 import '../../../../core/state/active_selection_provider.dart';
+import '../../../chat/bridge/chat_webview_environment.dart'
+    show chatWebViewResolveLocalFileUrl;
 import '../../../chat/chat_provider.dart';
+import '../../../image_gen/services/image_tag_markup.dart';
 import '../../models/block_config.dart';
 import '../../models/block_modes.dart';
 import '../../models/block_run_status.dart';
@@ -15,6 +18,10 @@ import 'block_context.dart';
 import 'block_prompt_regex.dart';
 import 'block_handler.dart';
 import 'block_image_renderer.dart';
+
+/// The key the interactive panel of block [blockId] is opened under: one panel
+/// per block and message, replaced on every run.
+String panelKeyFor(String blockId) => 'ext-block:$blockId';
 
 /// Runs a [BlockType.generated] block: everything that produces content for
 /// the reader rather than executing code.
@@ -129,6 +136,10 @@ class GeneratedBlockHandler implements BlockHandler {
       content = await _applyBlockRegexes(context, content);
     }
 
+    // A regenerate starts from new content; the pictures the block already
+    // had stay reachable through its switcher instead of being orphaned.
+    content = ImageTagMarkup.carryImagesFrom(content, context.previousContent);
+
     // Pictures, if the content asks for any. A block with no image tag never
     // touches the image pipeline, so this costs an ordinary infoblock nothing.
     content = await BlockImageRenderer(
@@ -167,14 +178,23 @@ class GeneratedBlockHandler implements BlockHandler {
   /// Macros are expanded here rather than at render time: the panel's HTML
   /// goes straight into the iframe and never passes the panel builder, so
   /// `{{char}}` inside it used to reach the reader literally.
+  ///
+  /// Image paths are stored relative to the data root, which means nothing
+  /// inside the `srcdoc` frame, so they are turned into URLs the page can load
+  /// first, the same way the card does (issue #839). The panel is keyed by the
+  /// block, so a new run replaces the panel of the previous one instead of
+  /// stacking another under it.
   Future<bool> _openPanel(BlockContext context, String html) async {
-    final expanded = expand(
-      html,
-      MacroContext(
-        character: context.character,
-        persona: context.persona?.name,
-        personaDescription: context.persona?.prompt,
+    final expanded = ImageTagMarkup.rewriteResultPaths(
+      expand(
+        html,
+        MacroContext(
+          character: context.character,
+          persona: context.persona?.name,
+          personaDescription: context.persona?.prompt,
+        ),
       ),
+      (path) => chatWebViewResolveLocalFileUrl(path) ?? path,
     );
     final opened = await ref
         .read(panelHostServiceProvider)
@@ -185,6 +205,7 @@ class GeneratedBlockHandler implements BlockHandler {
           options: {
             'title': context.blockConfig.name,
             'minHeight': context.blockConfig.panelMinHeight,
+            'key': panelKeyFor(context.blockConfig.id),
           },
         );
     return opened != null;
