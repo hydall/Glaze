@@ -72,18 +72,23 @@ class _EmbeddingsScreenState extends ConsumerState<EmbeddingsScreen> {
     // Lorebook search and rebuilds only mean something once there is a
     // connection to embed with.
     final available = ref.watch(vectorSearchAvailableProvider);
-    return ListView(
-      controller: _scrollController,
-      padding: EdgeInsets.only(
-        top:
-            MediaQuery.paddingOf(context).top +
-            (inSidebarPanel(context) ? 0 : 12),
-        bottom: MediaQuery.paddingOf(context).bottom + 16,
+    // The Builder reads MediaQuery from inside SheetView, which pads the
+    // body for its header; the screen's own context would not see that.
+    return Builder(
+      builder: (context) => ListView(
+        controller: _scrollController,
+        // A sidebar panel's header already keeps its gap.
+        padding: EdgeInsets.only(
+          top:
+              MediaQuery.paddingOf(context).top +
+              (inSidebarPanel(context) ? 0 : 12),
+          bottom: MediaQuery.paddingOf(context).bottom + 16,
+        ),
+        children: [
+          const EmbeddingConnectionEditor(),
+          if (available) ...const [VectorSearchGroup(), VectorRebuildGroup()],
+        ],
       ),
-      children: [
-        const EmbeddingConnectionEditor(),
-        if (available) ...const [VectorSearchGroup(), VectorRebuildGroup()],
-      ],
     );
   }
 
