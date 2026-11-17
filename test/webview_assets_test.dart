@@ -1349,8 +1349,8 @@ void main() {
       expect(
         bridgeControllerJs,
         contains(
-          "import { parseImageResultElement, parseImagePendingPayload } from "
-          "'../formatter/formatter.js';",
+          'import { parseImageResultElement, parseImagePendingPayload, '
+          "parseImageResultPayload } from '../formatter/formatter.js';",
         ),
       );
     });
@@ -2319,7 +2319,12 @@ void main() {
     });
 
     test('ExtBlock placeholders do not expose edit or delete buttons', () {
-      expect(bridgeControllerJs, contains('if (block.id)'));
+      // Nor does a running block: Delete would slide under a second tap on
+      // the redraw button (issue #839).
+      expect(
+        bridgeControllerJs,
+        contains("if (block.id && block.status !== 'running')"),
+      );
     });
 
     test('Bridge creates InteractionDispatch instance', () {

@@ -84,6 +84,7 @@ class SingleBlockRunner {
       placeholder: placeholder,
       mainModelContextSnapshot: mainModelContextSnapshot,
       group: group,
+      previousContent: prepared.previousContent,
     );
 
     try {

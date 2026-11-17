@@ -183,6 +183,7 @@ void main() {
           'onImgRegen',
           'onImgCancel',
           'onStop',
+          'onExtBlockImgVariant',
         ];
         for (final name in expectedHandlers) {
           expect(

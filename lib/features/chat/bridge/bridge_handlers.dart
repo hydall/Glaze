@@ -103,6 +103,7 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onExtBlockRegenImage': HandlerSpec(HandlerKind.imageAction),
   'onExtBlockEdit': HandlerSpec(HandlerKind.imageAction),
   'onExtBlockDelete': HandlerSpec(HandlerKind.imageAction),
+  'onExtBlockImgVariant': HandlerSpec(HandlerKind.jsonObject),
   // Interactive panels
   'onPanelResize': HandlerSpec(HandlerKind.jsonObject),
   'onPanelEvent': HandlerSpec(HandlerKind.jsonObject),

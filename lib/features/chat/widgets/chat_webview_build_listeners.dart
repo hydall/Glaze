@@ -385,9 +385,17 @@ class ChatWebViewBuildListeners {
         for (final b in next) b.messageId,
       };
       final allIds = assistantIds.union(blockIds.intersection(assistantIds));
-      for (final msgId in allIds) {
-        unawaited(onRefreshExtBlocksPanel(sid, msgId));
-      }
+      // Deferred by a microtask: listeners are notified in subscription
+      // order, so when this one was added before the panel providers watched
+      // the blocks, reading them right away returns the list from before
+      // this change. The card then missed states such as "running" after a
+      // redraw tap, depending on when the chat last rebuilt (issue #839).
+      scheduleMicrotask(() {
+        if (bridge == null || !ready()) return;
+        for (final msgId in allIds) {
+          unawaited(onRefreshExtBlocksPanel(sid, msgId));
+        }
+      });
       // A block shown inside the message changes the message's own text.
       final b = bridge!;
       for (final message in messagesWithChangedInlineBlocks(

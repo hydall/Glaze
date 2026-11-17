@@ -884,6 +884,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onExtBlockRegenImage = extBlocks.onRegenImage();
     bridge.onExtBlockEdit = extBlocks.onEdit();
     bridge.onExtBlockDelete = extBlocks.onDelete();
+    bridge.onExtBlockImgVariant = extBlocks.onImgVariant();
   }
 
   Future<void> applyIdentity({

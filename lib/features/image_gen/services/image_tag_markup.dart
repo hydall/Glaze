@@ -698,8 +698,15 @@ class ImageTagMarkup {
   /// `<img>` element with `[IMG:GEN]` in its `src` and its images in
   /// [variantsAttribute]: the bracket tag has nowhere to keep them, and the
   /// picture the regeneration brings would lose the card's layout.
-  static String pendingTag(ImageBlockPayload payload) {
-    if (payload.presentation.isEmpty) {
+  ///
+  /// [asElement] keeps the element spelling even without presentation, for a
+  /// block that was written as an element: its instruction is JSON that may
+  /// hold a `]`, which would end the bracket tag early.
+  static String pendingTag(
+    ImageBlockPayload payload, {
+    bool asElement = false,
+  }) {
+    if (payload.presentation.isEmpty && !asElement) {
       final encoded = payload.encodePending();
       return encoded.isEmpty ? '[IMG:GEN]' : '[IMG:GEN:$encoded]';
     }
@@ -868,6 +875,50 @@ class ImageTagMarkup {
           payload
               .withPresentation(tag.presentation)
               .withPaths(kept, activeIndex: active),
+        ),
+      );
+    }
+    return result;
+  }
+
+  /// [fresh] with the images of [previous] handed to its pending blocks, the
+  /// [i]-th image block of one to the [i]-th of the other.
+  ///
+  /// A block regenerated as a whole gets new content from the model, which
+  /// knows nothing of the pictures the old content had. Without this every
+  /// earlier file stays on disk with nothing pointing at it; with it the new
+  /// picture is added to the block's switcher next to them, the way redrawing
+  /// a single picture does (issue #839).
+  static String carryImagesFrom(String fresh, String previous) {
+    if (previous.isEmpty) return fresh;
+    final old = scanImageBlocks(previous);
+    if (old.isEmpty) return fresh;
+    final current = scanImageBlocks(fresh);
+    var result = fresh;
+    // Right to left: rewriting one block must not move the spans of the rest.
+    for (var i = current.length - 1; i >= 0; i--) {
+      if (i >= old.length) continue;
+      final block = current[i];
+      if (block.kind != ImageBlockKind.pending) continue;
+      final carried = old[i].paths;
+      if (carried.isEmpty) continue;
+      final paths = [
+        ...carried,
+        for (final path in block.paths)
+          if (!carried.contains(path)) path,
+      ];
+      final source = fresh.substring(block.start, block.end);
+      result = result.replaceRange(
+        block.start,
+        block.end,
+        pendingTag(
+          ImageBlockPayload(
+            paths: paths,
+            activeIndex: paths.length - 1,
+            instruction: block.instruction,
+            presentation: block.presentation,
+          ),
+          asElement: source.startsWith('<'),
         ),
       );
     }

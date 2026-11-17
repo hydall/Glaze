@@ -13,7 +13,7 @@ import { PanelHost } from './panel_host.js';
 import { sanitizeExtBlockHtml } from './html_sanitizer.js';
 import { stripExternalMedia } from './external_media.js';
 import { dropExternalHoists } from '../renderer/message_document.js';
-import { parseImageResultElement, parseImagePendingPayload } from '../formatter/formatter.js';
+import { parseImageResultElement, parseImagePendingPayload, parseImageResultPayload } from '../formatter/formatter.js';
 
 /* Breathing room the caret keeps from the chrome it is being revealed past.
  * Landing the caret exactly on the input bar's edge reads as though it is
@@ -2149,7 +2149,10 @@ export class Bridge {
       };
 
       // Pending entries are preset placeholders and have no persisted row yet.
-      if (block.id) {
+      // A running block shows Stop alone: with Edit and Delete still there,
+      // Delete slid into the spot "Regenerate image" had a moment before, and
+      // a quick second tap asked to delete the block (issue #839).
+      if (block.id && block.status !== 'running') {
         btnGroup.appendChild(makeButton('ext-block-edit', ICON.edit, 'Редактировать'));
         btnGroup.appendChild(makeButton('ext-block-delete', ICON.trash, 'Удалить', true));
       }
@@ -2273,7 +2276,28 @@ export class Bridge {
     return normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`;
   }
 
-  _renderExtBlockImageHtml(payload) {
+  /**
+   * One picture of a card. [payload] is an `[IMG:RESULT:…]` payload, which may
+   * list every image of the block (see `_extBlockLegacyImageTokens`); [at] is
+   * the block's position among the image blocks of the content, the numbering
+   * Flutter addresses it by. A block holding more than one image gets the same
+   * ‹ n/m › switcher a message shows (issue #839).
+   */
+  _renderExtBlockImageHtml(payload, at = 0) {
+    const parsed = parseImageResultPayload(payload);
+    const variants = parsed.paths.map((p) => this._extBlockImageSrc(p));
+    if (variants.length < 2) return this._renderExtBlockSingleImageHtml(payload);
+    const active = Math.min(Math.max(parsed.activeIndex || 0, 0), variants.length - 1);
+    const src = this._escapeAttr(variants[active]);
+    const list = this._escapeAttr(variants.join(';;'));
+    const index = Number.isInteger(at) && at >= 0 ? at : 0;
+    const button = (action, icon, title) =>
+      `<button class="ext-block-variant-btn" type="button" data-action="${action}" data-img-index="${index}" title="${title}">${icon}</button>`;
+    const switcher = `<span class="ext-block-variants">${button('ext-block-img-variant-prev', ICON.swipeLeft, 'Previous image')}<span class="ext-block-variant-count">${active + 1}/${variants.length}</span>${button('ext-block-img-variant-next', ICON.swipeRight, 'Next image')}</span>`;
+    return `<span class="ext-block-image-wrapper img-result-wrapper" data-variants="${list}" data-variant-index="${active}"><img src="${src}" class="ext-block-image" loading="eager" decoding="sync" data-action="image-click" data-src="${src}"><button class="img-download-btn" data-action="img-download" data-src="${src}" title="Save image">⤓</button>${switcher}</span>`;
+  }
+
+  _renderExtBlockSingleImageHtml(payload) {
     const src = this._escapeAttr(this._extBlockImageSrc(payload));
     // loading="eager" (not "lazy"): the ext-block panel hangs off the last
     // assistant message, i.e. at the very bottom edge of the WebView next to
@@ -2300,8 +2324,14 @@ export class Bridge {
       (tag) => {
         const parsed = parseImageResultElement(tag);
         if (!parsed) return tag;
-        const src = parsed.paths[parsed.activeIndex] || parsed.paths[0] || '';
-        return src ? `[IMG:RESULT:${src}]` : tag;
+        const paths = parsed.paths.filter(Boolean);
+        if (!paths.length) return tag;
+        // Every image of the block is kept, the visible one marked, so the
+        // card can page through them like a message does.
+        if (paths.length === 1) return `[IMG:RESULT:${paths[0]}]`;
+        const active = Math.min(Math.max(parsed.activeIndex || 0, 0), paths.length - 1);
+        const list = paths.map((p, i) => (i === active ? `*${p}` : p)).join(';;');
+        return `[IMG:RESULT:${list}]`;
       },
     );
   }
@@ -2375,7 +2405,7 @@ export class Bridge {
     if (hasImgResult && !hasImgGen && !hasImgError && !hasHtmlMarkup) {
       const imgMatch = content.match(imgResultRegex);
       const wrapper = document.createElement('span');
-      wrapper.innerHTML = this._extBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
+      wrapper.innerHTML = this._extBlockHtml(this._renderExtBlockImageHtml(imgMatch[1], 0));
       body.appendChild(wrapper.firstElementChild);
       retryFailedLocalImages(body);
       return;
@@ -2385,14 +2415,21 @@ export class Bridge {
     // branch: a block's content goes through the same pipeline a message's
     // does, so it can hold a finished picture, one still generating and one
     // that failed, all at the same time.
+    //
+    // One pass over all three kinds, in document order, so each picture knows
+    // its position among the block's images — the index its switcher reports.
+    let imageAt = 0;
     const html = content
       .replace(/<p class="ext-block-image-pending">[\s\S]*?<\/p>/g, '')
-      .replace(/\[IMG:ERROR:([\s\S]*?)\]/g, (match, payload) =>
-        this._extBlockImageErrorMarkup(payload))
-      .replace(/\[IMG:GEN(?::([\s\S]*?))?\]/g, (match, instruction) =>
-        this._extBlockImageGenMarkup(instruction || ''))
-      .replace(/\[IMG:RESULT:([^\]]+)\]/g, (match, payload) =>
-        this._renderExtBlockImageHtml(payload));
+      .replace(
+        /\[IMG:ERROR:([\s\S]*?)\]|\[IMG:GEN(?::([\s\S]*?))?\]|\[IMG:RESULT:([^\]]+)\]/g,
+        (match, error, instruction, result) => {
+          const at = imageAt++;
+          if (error !== undefined) return this._extBlockImageErrorMarkup(error);
+          if (result !== undefined) return this._renderExtBlockImageHtml(result, at);
+          return this._extBlockImageGenMarkup(instruction || '');
+        },
+      );
 
     const htmlEl = document.createElement('div');
     htmlEl.className = 'ext-block-content';

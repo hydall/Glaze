@@ -273,6 +273,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     bridge.onExtBlockRegenImage = extBlocks.onRegenImage();
     bridge.onExtBlockEdit = extBlocks.onEdit();
     bridge.onExtBlockDelete = extBlocks.onDelete();
+    bridge.onExtBlockImgVariant = extBlocks.onImgVariant();
 
     final isAlive = await controller.isLoading() == false;
     if (isAlive && _callbackIsActive(epoch)) {
