@@ -2789,7 +2789,10 @@ void main() {
       final idx = bridgeControllerJs.indexOf(marker);
       expect(idx, isNot(-1));
       final body = _extractBlockBody(bridgeControllerJs, idx);
-      expect(body, contains("rerun.className = 'msg-rerun-cleaner'"));
+      expect(
+        body,
+        contains("rerun.className = 'msg-rerun-cleaner tavo-action-bar-button'"),
+      );
       expect(body, contains("rerun.dataset.action = 'rerun-cleaner'"));
       expect(body, contains('agentSwipeTotal >= 1'));
     });

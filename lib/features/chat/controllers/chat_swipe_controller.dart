@@ -260,16 +260,7 @@ class ChatSwipeController {
       final msg = current.messages[messageIndex];
       if (msg.role != 'assistant') return;
 
-      final character = await _ref.read(characterRepoProvider).getById(_charId);
-      if (character == null) return;
-      final persona = await ChatSessionService(
-        _ref,
-      ).resolvePersona(_charId, sessionId: current.session!.id);
-      final greetings = InitialMessageBuilder.resolveGreetings(
-        character: character,
-        persona: persona,
-        sessionId: current.session!.id,
-      );
+      final greetings = await _resolveGreetings(current.session!.id);
       if (greetings.length <= 1) return;
 
       final currentIdx = msg.greetingIndex ?? 0;
@@ -286,5 +277,26 @@ class ChatSwipeController {
       if (!_writes.isCurrentPublication(token)) return;
       _publish(updated);
     });
+  }
+
+  /// The character's greetings as the first message would show them (macros
+  /// resolved against the chat's persona), for the variation picker.
+  Future<List<String>> greetingOptions() async {
+    final session = _getState().value?.session;
+    if (session == null) return const [];
+    return _resolveGreetings(session.id);
+  }
+
+  Future<List<String>> _resolveGreetings(String sessionId) async {
+    final character = await _ref.read(characterRepoProvider).getById(_charId);
+    if (character == null) return const [];
+    final persona = await ChatSessionService(
+      _ref,
+    ).resolvePersona(_charId, sessionId: sessionId);
+    return InitialMessageBuilder.resolveGreetings(
+      character: character,
+      persona: persona,
+      sessionId: sessionId,
+    );
   }
 }

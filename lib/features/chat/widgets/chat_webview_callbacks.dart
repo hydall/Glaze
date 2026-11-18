@@ -60,6 +60,10 @@ class ChatWebViewCallbacks {
     messageActions.onChangeGreeting?.call(id, direction);
   }
 
+  void onOpenVariants(String id, String kind) {
+    messageActions.onOpenVariants?.call(id, kind);
+  }
+
   void onHeaderScroll(bool hidden) {
     scrollActions.onHeaderScroll?.call(hidden);
   }

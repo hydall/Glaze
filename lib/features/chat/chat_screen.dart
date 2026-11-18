@@ -38,6 +38,7 @@ import 'widgets/chat_header_search.dart';
 import 'widgets/message_actions.dart';
 import 'widgets/message_delete_confirmation.dart';
 import 'widgets/output_limit_sheet.dart';
+import 'widgets/variant_picker_sheet.dart';
 import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
@@ -2106,6 +2107,17 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             ref
                                 .read(chatProvider(widget.charId).notifier)
                                 .setGreeting(idx, dir);
+                          },
+                          onOpenVariants: (id, kind) {
+                            unawaited(
+                              showVariantPickerSheet(
+                                context: context,
+                                ref: ref,
+                                charId: widget.charId,
+                                messageId: id,
+                                kind: kind,
+                              ),
+                            );
                           },
                           onRegenerate: (id, mode) async {
                             if (!await _maybeSeedGameTime()) return;

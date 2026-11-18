@@ -36,6 +36,7 @@ imports the assets by their real paths, and ES modules do not load over
 | `specs/virtual_window.spec.js` | the render window of the virtualised list — the chat must never go blank |
 | `specs/search_navigation.spec.js` | walking the search hits — every arrow press lands on its own match |
 | `specs/selection_window.spec.js` | selecting messages the render window does not hold |
+| `specs/rapid_variant_switch.spec.js` | quick taps on the variation arrows all land; the counter opens the picker |
 
 ## The rule
 

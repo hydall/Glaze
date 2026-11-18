@@ -407,6 +407,13 @@ export class InteractionDispatch {
           bridge._sendToFlutter('onChangeGreeting', [id, 1])
         );
       },
+      // The counter between the arrows: Flutter opens a sheet listing every
+      // variation of that switcher so the reader can jump straight to one.
+      'open-variants': (e, el) => {
+        const id = el.dataset.messageId;
+        if (!id || this._swipeState(id).busy) return;
+        bridge._sendToFlutter('onOpenVariants', [id, el.dataset.kind || 'swipe']);
+      },
       'stop': (e, el) => bridge._sendToFlutter('onStop', []),
       'regenerate': (e, el) => bridge._sendToFlutter('onRegenerate', [el.dataset.messageId, el.dataset.mode || 'magic']),
       'toggle-guided': (e, el) => bridge._swipeHandler.toggleGuidedSwipe(el.dataset.messageId),

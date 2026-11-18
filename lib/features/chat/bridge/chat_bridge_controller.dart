@@ -363,6 +363,10 @@ class ChatBridgeController {
   void Function(String id, String direction)? onSwipe;
   void Function(String id, String direction)? onAgentSwipe;
   void Function(String id, int direction)? onChangeGreeting;
+
+  /// The variation counter between a switcher's arrows was tapped. [kind] is
+  /// the switcher it belongs to: `swipe`, `agent-swipe` or `greeting`.
+  void Function(String id, String kind)? onOpenVariants;
   void Function(String id, String mode)? onRegenerate;
 
   /// Called when the user taps the "Re-run cleaner" icon on an assistant
@@ -845,6 +849,8 @@ class ChatBridgeController {
         onEditSave?.call(id, restoreImgResults(s));
       case 'onRegenerate':
         onRegenerate?.call(id, s);
+      case 'onOpenVariants':
+        onOpenVariants?.call(id, s);
     }
   }
 

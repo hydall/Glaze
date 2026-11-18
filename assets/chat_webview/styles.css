@@ -1070,6 +1070,14 @@
   font-size: 11px;
   min-width: 28px;
   text-align: center;
+  /* Tapping the counter opens the variation picker. */
+  cursor: pointer;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Nested swipes: blue agent-switcher (tertiary accent). */

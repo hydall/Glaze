@@ -736,6 +736,12 @@ class _GlazeBottomSheetContentState
                                           visible: cardItemsVisible,
                                           animateFilter: animateFilter,
                                           onReorder: cards?.onReorder,
+                                          // One target key per sheet: the
+                                          // plain item list claims it first.
+                                          scrollToIndex: widget.items == null
+                                              ? widget.scrollToIndex
+                                              : null,
+                                          scrollTargetKey: _scrollTargetKey,
                                         ),
                                       if (widget.searchable)
                                         _SheetReveal(
@@ -1739,11 +1745,18 @@ class _CardList extends StatelessWidget {
   /// Set by [BottomSheetCards.onReorder] — see there.
   final ReorderCallback? onReorder;
 
+  /// The card the sheet scrolls into view when it opens (not in the
+  /// drag-ordered list, which is short enough to need no scrolling).
+  final int? scrollToIndex;
+  final GlobalKey? scrollTargetKey;
+
   const _CardList({
     required this.items,
     this.visible,
     this.animateFilter = false,
     this.onReorder,
+    this.scrollToIndex,
+    this.scrollTargetKey,
   });
 
   @override
@@ -1762,6 +1775,7 @@ class _CardList extends StatelessWidget {
                       visible: visible == null || visible![i],
                       animate: animateFilter,
                       child: Padding(
+                        key: i == scrollToIndex ? scrollTargetKey : null,
                         padding: const EdgeInsets.only(bottom: 10),
                         child: _CardRow(item: items[i]),
                       ),
