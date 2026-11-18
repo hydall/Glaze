@@ -447,6 +447,7 @@ void main() {
         'presets',
         'api',
         'embeddings',
+        'agents',
         'lorebooks',
         'regex',
       ]);

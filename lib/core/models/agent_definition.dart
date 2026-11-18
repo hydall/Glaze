@@ -1,3 +1,5 @@
+// ignore_for_file: invalid_annotation_target
+
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import 'preset.dart';
@@ -156,6 +158,8 @@ abstract class AgentInjection with _$AgentInjection {
 abstract class AgentDefinition with _$AgentDefinition {
   const AgentDefinition._();
 
+  // Nested models serialize to maps, so toJson is plain JSON without encoding.
+  @JsonSerializable(explicitToJson: true)
   const factory AgentDefinition({
     required String id,
     @Default('') String name,

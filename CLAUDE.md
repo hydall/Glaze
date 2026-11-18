@@ -145,6 +145,7 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 | Characters | Drift `Characters` table | Repository |
 | Chat sessions | Drift `ChatSessions` table | Repository |
 | Regular presets | Drift `presets` table | `PresetRepo` |
+| Agents | Drift `agent_definitions` / `agent_bindings` / `agent_runs` | `AgentRepo` / `AgentBindingRepo` / `AgentRunRepo` |
 | API config | Drift `ApiConfigs` table | Repository |
 | Personas | Drift `Personas` table | Repository |
 | Images | File system (`dart:io` Platform) | Image storage service |
@@ -175,9 +176,10 @@ Roleplay presets live in the `presets` table, behind
 `lib/core/models/preset.dart` and the screens are in `lib/features/presets/`.
 The table declarations live in `lib/core/db/tables/studio_and_presets.dart`.
 
-Studio (agentic presets) is removed; the agents that replace it are planned in
-`docs/plans/AGENTS.md`. The default prompts of the engines it left behind
-(Post Clean, Tracker) live in `lib/core/llm/default_aux_prompt_blocks.dart`.
+Studio (agentic presets) is removed. Agents replace it: helpers around the
+ordinary reply, with built-in Post Clean, Tracker and Card Rewriter agents —
+see `docs/ARCHITECTURE.md` § Agents. Their default prompts live in
+`lib/core/llm/default_aux_prompt_blocks.dart`.
 
 ## Architecture Layers
 
@@ -209,6 +211,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 | Any screen, sheet or dialog — which widget to reach for | `docs/UI_KIT.md` |
 | JS extension bridge (`glaze.*`), panel iframe, headless engine, capability permissions, periodic/afterUser triggers, `executeCommand`, audio, connection profiles | `docs/ARCHITECTURE.md` § 9 + `docs/INVARIANTS.md` (INV-EG1–8, INV-JS1–6) |
 | Plugins (`.glzp`, `plugin.json`), `glaze.*` bridge, consent, plugin frames and hooks, Tavo `.tpg` compatibility — `lib/features/plugins/`, `assets/chat_webview/plugins/` | `docs/ARCHITECTURE.md` § 9.1 |
+| Agents — `lib/features/agents/`, `lib/core/llm/agents/`, `lib/features/chat/services/agents/` | `docs/ARCHITECTURE.md` § Agents + `docs/INVARIANTS.md` (INV-AG1–6) |
 | Variable storage (`chat` / `character` / `global` / `message` scopes) | `docs/rules/database.md` (atomic repo methods) |
 | Build channels, dev-mode / watermark defaults, `--dart-define` wiring | `docs/RELEASE_CHANNELS.md` |
 | Windows installer (`windows/installer/`), in-app updates (`lib/core/services/installer_update/`) | `docs/WINDOWS_INSTALLER.md` |

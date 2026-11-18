@@ -220,7 +220,7 @@ memory retrieval, prompt assembly and the whole wait for the first token.
 | `preparing` | `ChatNotifier._runGeneration`, `PromptPayloadBuilder.collectGenerationContext` | character, persona, API config, history, summary |
 | `retrieving` | `collectGenerationContext` (`onPhase`) | memory candidates + lorebook vector search + message recall, awaited together |
 | `prompt` | `StreamGenerationService` | payload build + `buildPromptInIsolate` |
-| `agents` | reserved for agents that run before the reply (not reported yet) | — |
+| `agents` | `StreamGenerationService` | pre-generation agents (`AgentTurnService.runBeforeReply`) |
 | `waiting` | `StreamGenerationService` | request sent, no token back yet |
 | `reasoning` / `streaming` | SSE `onUpdate` | reasoning-only output vs. visible reply |
 | `finalizing` | `PostGenCoordinator._beginForegroundPostGen` | cleaner, ledger, ext blocks, image tags |
@@ -338,9 +338,14 @@ Provider notes:
 - Gemini 4 (`gemini-4-*`) takes thinking levels only — `low | medium | high`, plus `xhigh` on Hydrogen; `thinkingBudget` is deprecated and thinking cannot be turned off. `gemini4ThinkingLevel` maps the six steps for both the native `thinkingLevel` and `reasoning_effort` on Custom Chat Completion. Thought tokens count toward `maxOutputTokens`.
 - Avoid sending undocumented fields such as `reasoning: { exclude: true }` globally. Add provider-specific body fields only behind explicit protocol/provider support and tests.
 
-Post-generation engines (Post Clean, Tracker) — Studio is removed and nothing
-calls these in a normal turn until the agents system wires them
-(`docs/plans/AGENTS.md`):
+Agents (`docs/ARCHITECTURE.md` § Agents, INV-AG1–6):
+- One `AgentTurnPlan` per turn; pre-generation agents run before the prompt is
+  built, parallel ones beside the stream, post ones in the post-generation
+  stage. A failed agent is recorded and skipped; Stop cancels them all.
+- Results reach the prompt only as runtime prompt blocks; the preset is never
+  changed.
+
+Post-generation engines (Post Clean, Tracker), driven by the built-in agents:
 - They run on one immutable `PostGenEngineConfig` per turn; mid-turn settings
   or API changes affect the next turn only (INV-ST8).
 - POST-cleaner runs after the full reply and writes a blue `'cleaned'` agent

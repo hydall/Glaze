@@ -597,11 +597,55 @@ path writes MemoryBook entries.
 
 ---
 
+## 4a. Agent Invariants
+
+### INV-AG1: The agent plan is turn-scoped ✅ ENFORCED
+
+`StreamGenerationService` builds one `AgentTurnPlan` per turn
+(`AgentTurnService.planFor`) and records it in `AgentTurnRegistry` under the
+turn's genId; `PostGenCoordinator` takes that plan and nothing else. Library,
+binding or settings edits made mid-turn apply from the next turn. A
+continuation runs no agents.
+
+### INV-AG2: Agents never block the reply on failure ✅ ENFORCED
+
+`AgentCallRunner` never throws: a failed, empty or cancelled call becomes a
+result with `ok == false`, is recorded in `agent_runs`, and contributes nothing
+to the prompt. The reply is generated without it.
+
+### INV-AG3: Stop cancels every agent of the turn ✅ ENFORCED
+
+Pre-generation and parallel agents run on the turn's `CancelToken`; a run
+finished after cancellation is not recorded. Post agents follow the cleaner's
+lease and the existing post-generation abort rules.
+
+### INV-AG4: Agent results reach the main prompt only as runtime blocks ✅ ENFORCED
+
+A `context_injection` result is added to the ordinary payload through
+`PromptPayload.withExtraRuntimePromptBlocks`: a macro value keyed
+`agent:<id>` (read by `{{agent::id}}`) and, unless the agent is macro-only, one
+placed block. The chat's preset is never modified. Parallel answers recorded
+against the message the reply follows are not reused (a regeneration must not
+read an answer written about the reply it replaces).
+
+### INV-AG5: Binding priority ✅ ENFORCED
+
+`resolveAgentState`: a chat binding wins, then a character binding, then the
+agent's `enabledGlobally`. The chat's `glaze_agents_off` session variable turns
+every agent off there without touching bindings. Bindings and runs are removed
+with their chat or character; deleting an agent removes its bindings.
+
+### INV-AG6: Built-in agents keep their engine ✅ ENFORCED
+
+Only the agent whose `builtinKind` is `tracker` may run `ledger_update`, only
+`card_rewriter` may run `card_update_proposal`; `AgentTurnPlan` drops any other
+shape. Seeding never overwrites a stored built-in, and built-ins cannot be
+deleted.
+
 ## 4b. Post-generation Engine Invariants
 
 Studio is removed. These cover the engines it left behind — Post Clean, the
-Tracker (Ledger) and Card Rewriter — which the agents system takes over
-(`docs/plans/AGENTS.md`). INV-ST1, ST2, ST3, ST5, ST6 and ST7 described the
+Tracker (Ledger) and Card Rewriter — which run as built-in agents (§4a). INV-ST1, ST2, ST3, ST5, ST6 and ST7 described the
 Studio tracker / final-writer pipeline and are retired with it; their ids are
 not reused.
 

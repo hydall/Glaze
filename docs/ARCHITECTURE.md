@@ -472,13 +472,11 @@ Shared work starts with awaited cloud-sync and generation notifications. Raw
 message embeddings and empty MemoryBook draft planning are then launched as
 independent background tasks.
 
-ExtBlocks then run in the background, and inline `[IMG:GEN]` processing runs
-in the foreground only when the reply carries an image tag.
-
-Post Clean, the Tracker (Ledger) and Card Rewriter are not called from here at
-the moment: Studio, which used to call them, is removed, and the agents system
-that takes them over is not wired yet (`docs/plans/AGENTS.md`). Their engines
-keep the ordered path they will run on — see *Post-generation engines* below.
+Without post agents, ExtBlocks then run in the background, and inline
+`[IMG:GEN]` processing runs in the foreground only when the reply carries an
+image tag. When the turn's plan has Post Clean or the Tracker, `CleanerStage`
+runs instead (see *Agents* and *Post-generation engines* below) and the memory
+draft and image tags wait for it.
 
 **Continue:** `ChatNotifier.continueMessage()` runs this same pipeline with
 `continueTargetId` set. The prompt gains one system turn — *"Expand your latest
@@ -600,31 +598,85 @@ provider-specific `reasoning: { exclude: true }` or similar body fields unless
 the target provider documents the exact field and we intentionally support that
 contract.
 
+### Agents
+
+Agents are small helpers that run around the ordinary reply, in the spirit of
+Marinara Engine's agents. The reply itself is always built from the chat's
+ordinary preset; agents only add to it or act on it. Plan and decisions:
+`docs/plans/AGENTS.md`.
+
+**Data.** `AgentDefinition` (`core/models/agent_definition.dart`) is one agent:
+name, phase (`pre_generation` / `parallel` / `post_processing`), result type
+(`context_injection` / `text_rewrite` / `ledger_update` /
+`card_update_proposal`), prompt as ordinary `PresetBlock`s, connection (the
+chat's, the shared helper connection in `PipelineSettings.agents`, or a saved
+one, with a model override), parameters (null = connection default), context
+size, cadence (every N-th reply, keywords in the last messages), `dependsOn`,
+`seesOutputsOf`, and where a context result goes. Stored in
+`agent_definitions` (`AgentRepo`, `agentLibraryProvider`); the built-in Post
+Clean, Tracker and Card Rewriter are seeded once (`builtin_agents.dart`) and
+never overwritten. `agent_bindings` switch an agent per character or per chat;
+`resolveAgentState` picks chat → character → the agent's global flag, like
+preset bindings. A session variable (`glaze_agents_off`) switches every agent
+off in one chat. `agent_runs` is the run log (display and debugging only, 300
+rows per chat).
+
+**Turn.** `StreamGenerationService` asks `AgentTurnService.planFor` for one
+immutable `AgentTurnPlan` per turn (bindings, the chat switch, cadence,
+dependencies; pre-generation agents grouped into waves by `seesOutputsOf`) and
+records it in `AgentTurnRegistry` for the post-generation stage. A
+continuation runs no agents.
+
+1. *Before the reply:* pre-generation agents run wave by wave
+   (`AgentPromptBuilder` → `AgentCallRunner` → `AuxLlmClient`, capped by
+   `AgentsSettings.maxConcurrent`). Each result becomes runtime prompt blocks
+   (`injectionBlocksFor`): a `{{agent::id}}` macro value and, unless the agent
+   is macro-only, a block placed at its depth or around the main prompt. The
+   ordinary payload gets them through `withExtraRuntimePromptBlocks`. Parallel
+   agents' answers from earlier turns are added the same way, skipping answers
+   recorded against the message the reply follows (a regeneration).
+2. *With the reply:* parallel agents start beside the stream and are recorded;
+   their answers reach the next turn.
+3. *After the reply:* `PostGenCoordinator` turns the post agents into a
+   `PostGenEngineConfig` (`buildEngineConfig`) and runs the engines below.
+
+A failed agent is recorded and skipped; it never blocks the reply. Stop cancels
+every agent of the turn through the turn's `CancelToken`.
+
+**Agent prompt.** Enabled blocks in order, macros resolved against the turn
+(character, persona, memory, tracker state, `{{agent::id}}` of results so far).
+`{{history}}` stands for the last `contextSize` messages as a `Name: text`
+transcript; without it the transcript is sent as a closing user message.
+
+**UI.** Tools → Agents (`features/agents/agents_screen.dart`): library, editor,
+bindings, import/export (`.glazeagent.json`). Chat drawer → Agents
+(`chat_agents_sheet.dart`): the chat switch, per-agent state with its source,
+the requests a reply costs, the run log. API sheet → Agents tab: the helper
+connection.
+
 ### Post-generation engines (Post Clean, Tracker, Card Rewriter)
 
-Studio is removed. What stays is the engine layer that runs after a reply; the
-agents system (`docs/plans/AGENTS.md`) will drive it as the built-in Post Clean,
-Tracker and Card Rewriter agents. Until then nothing calls these engines in a
-normal turn.
+The built-in post agents run on engines kept from the former Studio:
 
 - **Inputs.** One immutable `PostGenEngineConfig`
-  (`core/llm/post_gen_engine_config.dart`) per turn: pipeline settings, the API
-  config list, the active connection, which engines run, their prompt blocks,
-  their connections, and the Ledger prompt-injection policy.
-  `resolveCleanerConfig` / `resolveLedgerConfig` turn a connection id into an
-  `AuxApiConfig` through `AuxApiConfigResolver`; an empty id falls back to the
-  chat's connection, and the Tracker falls back to Post Clean's connection.
-- **Prompts.** Engine prompts are ordinary `PresetBlock` lists assembled by
-  `AuxPromptAssembler`. The defaults that used to live in the Studio seed are
-  in `core/llm/default_aux_prompt_blocks.dart` (`defaultCleanerBlocks()`,
-  `defaultLedgerBlocks()`).
+  (`core/llm/post_gen_engine_config.dart`) per turn, built from the post agents
+  by `buildEngineConfig`: pipeline settings with the agents' model and
+  parameter overrides folded in, which engines run, their prompt blocks, their
+  connections. `resolveCleanerConfig` / `resolveLedgerConfig` turn a connection
+  id into an `AuxApiConfig` through `AuxApiConfigResolver`; an empty id falls
+  back to the chat's connection.
+- **Prompts.** Engine prompts are the agents' `PresetBlock` lists, assembled by
+  `AuxPromptAssembler`; the defaults are in
+  `core/llm/default_aux_prompt_blocks.dart`. A user agent with
+  `text_rewrite` borrows the Post Clean engine with its own prompt.
 - **Order.** `CleanerStage` owns the canonicalization path: Character & World
   audit, the POST-cleaner rewrite into a blue `'cleaned'` sub-swipe, ExtBlocks
   bound to the selected `(swipeId, agentSwipeId)`, then Ledger extraction from
-  the same canonical text. MemoryBook drafts must wait for the Ledger clock.
-- **Card Rewriter** reads its settings from `PipelineSettings.cardRewriter`
-  (`cardRewriterSettingsProvider`); its collector runs on the Tracker's
-  connection.
+  the same canonical text. MemoryBook drafts and image tags wait for it and
+  read the reloaded session.
+- **Card Rewriter** runs after a Ledger reconciliation when its agent is in the
+  turn's plan; `cardRewriterSettingsProvider` takes its connection and model
+  from that agent.
 
 Beauty is cleaner-owned: `CleanerStage` can derive styling guidance during its
 audit and passes it to the cleaner together with the persisted

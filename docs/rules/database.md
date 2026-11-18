@@ -287,6 +287,10 @@ Migration history:
   steps above that created or reshaped the Studio tables (v36–v49, v54–v71,
   v74, v96–v102, v105, v106, v123) no longer run; the entries are kept as
   history.
+- v148: agents — `agent_definitions` (library, JSON per agent),
+  `agent_bindings` (per character / chat switches, PK agent+scope+target) and
+  `agent_runs` (run log, indexed by session and time). Bindings and runs are
+  deleted with their chat or character.
 
 ---
 
