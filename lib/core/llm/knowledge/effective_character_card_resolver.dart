@@ -15,8 +15,8 @@ class EffectiveCharacterCardResolver {
   }) {
     final sourceChanged = sourceHash != baseline.sourceHashLastSeen;
     final policy = baseline.cardUpdatePolicy;
-    final useSource = !sourceChanged ||
-        policy == CharacterCardUpdatePolicy.followSource;
+    final useSource =
+        !sourceChanged || policy == CharacterCardUpdatePolicy.followSource;
     return EffectiveCharacterCard(
       cardJson: useSource ? sourceCardJson : baseline.baselineCardJson,
       sourceChanged: sourceChanged,

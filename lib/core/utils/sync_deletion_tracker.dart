@@ -5,7 +5,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SyncDeletionTracker {
   static const _key = 'gz_sync_deleted_entries';
 
-  static Future<void> record(String type, String id, [SharedPreferences? prefs]) async {
+  static Future<void> record(
+    String type,
+    String id, [
+    SharedPreferences? prefs,
+  ]) async {
     prefs ??= await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
     final list = raw != null

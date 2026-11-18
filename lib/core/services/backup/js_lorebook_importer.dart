@@ -83,25 +83,32 @@ class JsLorebookImporter extends BackupHelpers {
         settingsJsonStr = '';
       }
 
-      await db.into(db.lorebooks).insertOnConflictUpdate(
+      await db
+          .into(db.lorebooks)
+          .insertOnConflictUpdate(
             LorebooksCompanion.insert(
               lorebookId: lbJson['id'] as String? ?? '',
               name: lbJson['name'] as String? ?? '',
               enabled: Value(lbJson['enabled'] as bool? ?? true),
               activationScope: Value(
-                  lbJson['activationScope'] as String? ??
-                      lbJson['scope'] as String? ??
-                      'global'),
+                lbJson['activationScope'] as String? ??
+                    lbJson['scope'] as String? ??
+                    'global',
+              ),
               activationTargetId: Value(
-                  lbJson['activationTargetId'] as String? ??
-                      lbJson['targetId'] as String?),
+                lbJson['activationTargetId'] as String? ??
+                    lbJson['targetId'] as String?,
+              ),
               entriesJson: jsonEncode(mappedEntries),
               settingsJson: Value(settingsJsonStr),
-              description: Value(lbJson['description'] is String
-                  ? lbJson['description'] as String
-                  : ''),
-              updatedAt:
-                  Value(toInt(lbJson['updatedAt']) ?? currentTimestampSeconds()),
+              description: Value(
+                lbJson['description'] is String
+                    ? lbJson['description'] as String
+                    : '',
+              ),
+              updatedAt: Value(
+                toInt(lbJson['updatedAt']) ?? currentTimestampSeconds(),
+              ),
             ),
           );
     }
@@ -124,8 +131,7 @@ class JsLorebookImporter extends BackupHelpers {
       final charId = char['id'] as String?;
       if (charId == null) continue;
 
-      final cbRaw =
-          char['character_book'] ?? char['data']?['character_book'];
+      final cbRaw = char['character_book'] ?? char['data']?['character_book'];
       if (cbRaw is! Map<String, dynamic>) continue;
 
       final rawEntries = cbRaw['entries'];
@@ -149,14 +155,17 @@ class JsLorebookImporter extends BackupHelpers {
 
       final cbId = cbRaw['id'] as String? ?? 'cb_$charId';
       final existing = (db.select(db.lorebooks)
-            ..where((t) => t.lorebookId.equals(cbId)));
+        ..where((t) => t.lorebookId.equals(cbId)));
       final existingRow = await existing.getSingleOrNull();
       if (existingRow != null) continue;
 
-      await db.into(db.lorebooks).insertOnConflictUpdate(
+      await db
+          .into(db.lorebooks)
+          .insertOnConflictUpdate(
             LorebooksCompanion.insert(
               lorebookId: cbId,
-              name: cbRaw['name'] as String? ??
+              name:
+                  cbRaw['name'] as String? ??
                   '${char['name'] ?? 'Char'} Lorebook',
               // Never carried over from the card. `enabled` here is Glaze's
               // Global switch, while `character_book.enabled` on a card means
@@ -174,7 +183,9 @@ class JsLorebookImporter extends BackupHelpers {
   }
 
   Future<void> importLorebookSettings(
-      Map<String, dynamic> kv, Map<String, dynamic> ls) async {
+    Map<String, dynamic> kv,
+    Map<String, dynamic> ls,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
     Map<String, dynamic> settings = {};
 

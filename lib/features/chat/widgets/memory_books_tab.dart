@@ -611,9 +611,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
       entry: entry,
       // No index badge while semantic search is off in the API — there is
       // nothing to be indexed against.
-      embeddingStatus: vectorAvailable
-          ? _embeddingStatuses[entry.id]
-          : null,
+      embeddingStatus: vectorAvailable ? _embeddingStatuses[entry.id] : null,
       showStatus: keyPrefix.isNotEmpty,
       onEdit: () => _editEntry(entry),
       onDelete: () => _deleteEntry(entry.id),

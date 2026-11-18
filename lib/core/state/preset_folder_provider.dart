@@ -38,19 +38,20 @@ class PresetFolderMemberships {
   int countFor(String folderId) => byFolder[folderId]?.length ?? 0;
 }
 
-final presetFolderMembershipsProvider =
-    StreamProvider<PresetFolderMemberships>((ref) {
-      return ref.watch(presetFolderRepoProvider).watchMembers().map((rows) {
-        final byFolder = <String, Set<String>>{};
-        final byPreset = <String, Set<String>>{};
-        for (final r in rows) {
-          final key = presetMemberKey(
-            r.presetId,
-            PresetKind.fromWireName(r.kind),
-          );
-          (byFolder[r.folderId] ??= <String>{}).add(key);
-          (byPreset[key] ??= <String>{}).add(r.folderId);
-        }
-        return PresetFolderMemberships(byFolder: byFolder, byPreset: byPreset);
-      });
+final presetFolderMembershipsProvider = StreamProvider<PresetFolderMemberships>(
+  (ref) {
+    return ref.watch(presetFolderRepoProvider).watchMembers().map((rows) {
+      final byFolder = <String, Set<String>>{};
+      final byPreset = <String, Set<String>>{};
+      for (final r in rows) {
+        final key = presetMemberKey(
+          r.presetId,
+          PresetKind.fromWireName(r.kind),
+        );
+        (byFolder[r.folderId] ??= <String>{}).add(key);
+        (byPreset[key] ??= <String>{}).add(r.folderId);
+      }
+      return PresetFolderMemberships(byFolder: byFolder, byPreset: byPreset);
     });
+  },
+);

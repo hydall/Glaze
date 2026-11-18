@@ -43,14 +43,13 @@ String? compileCharacterKnowledgeProjection(
     return terms.any(context.contains);
   }
 
-  final tierA =
-      facts.where(_isCanonCriticalFact).toList()
-        ..sort((left, right) => right.importance.compareTo(left.importance));
+  final tierA = facts.where(_isCanonCriticalFact).toList()
+    ..sort((left, right) => right.importance.compareTo(left.importance));
   final tierBAndRelevance =
       <CharacterKnowledgeFact>{
-        ...facts.where(_isRelationshipFact),
-        ...facts.where(relevant),
-      }.where((fact) => !_isCanonCriticalFact(fact)).toList()
+          ...facts.where(_isRelationshipFact),
+          ...facts.where(relevant),
+        }.where((fact) => !_isCanonCriticalFact(fact)).toList()
         ..sort((left, right) {
           final leftPriority = _isRelationshipFact(left);
           final rightPriority = _isRelationshipFact(right);

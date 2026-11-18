@@ -21,6 +21,12 @@ import '../chat_generation_service.dart';
 import '../chat_session_service.dart';
 import '../chat_state.dart';
 import 'stages/post_gen_coordinator.dart';
+import 'stages/cleaner_stage.dart';
+import 'stages/ext_blocks_stage.dart';
+import 'stages/ledger_stage.dart';
+import 'agents/agent_turn_service.dart';
+import '../../../core/llm/agents/agent_turn_plan.dart';
+import '../../../core/models/agent_definition.dart';
 import 'stages/regen_resolver.dart';
 import 'stages/stage_context.dart';
 import 'continuation_message_merger.dart';
@@ -648,6 +654,29 @@ class GenerationPipeline {
             jsonEncode(
               current.agentSwipes.map((swipe) => swipe.toJson()).toList(),
             );
+  }
+
+  /// Re-runs Post Clean on an existing assistant message into a new blue
+  /// sub-swipe, with the post agents switched on in the chat. Does nothing
+  /// when no rewrite agent is on.
+  Future<void> rerunCleaner({
+    required String sessionId,
+    required String messageId,
+    required List<AgentDefinition> postAgents,
+  }) async {
+    final engineConfig = await ctx.ref
+        .read(agentTurnServiceProvider)
+        .engineConfigFor(AgentTurnPlan(postProcessing: postAgents));
+    if (engineConfig == null || !engineConfig.cleanerEnabled) return;
+    await CleanerStage(
+      ctx,
+      extBlocks: ExtBlocksStage(ctx),
+      ledger: LedgerStage(ctx),
+    ).rerun(
+      sessionId: sessionId,
+      messageId: messageId,
+      engineConfig: engineConfig,
+    );
   }
 
   Future<void> _handlePipelineError(

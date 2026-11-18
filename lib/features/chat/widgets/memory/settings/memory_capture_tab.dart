@@ -40,128 +40,128 @@ class MemoryCaptureSections {
 
   List<Widget> build(BuildContext context) {
     return [
-        MenuGroup(
-          items: [
-            MenuSwitchItem(
-              label: 'label_enabled'.tr(),
-              value: draft.enabled,
-              onChanged: (v) {
-                draft.enabled = v;
-                onChanged();
-              },
-            ),
-            MenuSelectorItem(
-              label: 'memory_mode'.tr(),
-              currentValue: _modeLabel(draft.memoryMode),
-              description: _modeDescription(draft.memoryMode),
-              onTap: () => _pickMode(context),
-            ),
-          ],
-        ),
-        MenuGroup(
-          header: 'memory_books_section_automation'.tr(),
-          items: [
-            MenuSwitchItem(
-              label: 'memory_books_auto_create'.tr(),
-              description: 'memory_books_auto_create_desc'.tr(),
-              value: draft.autoCreate,
-              onChanged: (v) {
-                draft.autoCreate = v;
-                onChanged();
-              },
-            ),
-            MenuSwitchItem(
-              label: 'memory_books_auto_generate'.tr(),
-              description: 'memory_books_auto_generate_desc'.tr(),
-              value: draft.autoGenerate,
-              onChanged: (v) {
-                draft.autoGenerate = v;
-                onChanged();
-              },
-            ),
-            // "Delay until generation ends" used to sit here. It was saved,
-            // synced and summarised, and read by nothing: drafts are created
-            // from the post-generation coordinator, which is to say always
-            // after the reply, so the switch's ON position described what
-            // already happens and its OFF position promised a behaviour that
-            // does not exist (and would compete with the reply for the
-            // model). The field stays on the settings models so an existing
-            // value is not dropped on save or on sync.
-            if (draft.autoCreate) ...[
-              MenuRangeItem(
-                label: 'memory_books_auto_create_interval'.tr(),
-                value: draft.autoCreateInterval.toDouble(),
-                min: 1,
-                max: 200,
-                divisions: 199,
-                decimalPlaces: 0,
-                editableValue: true,
-                onChanged: (v) {
-                  draft.autoCreateInterval = v.round();
-                  onChanged();
-                },
-              ),
-              MenuRangeItem(
-                label: 'memory_books_auto_create_lag'.tr(),
-                // The help text used to hide behind a "?" that opened an
-                // AlertDialog; as a description it is simply readable.
-                description: 'memory_books_auto_create_lag_help'.tr(),
-                value: draft.autoCreateLagMessages.toDouble(),
-                min: 0,
-                max: 50,
-                divisions: 50,
-                decimalPlaces: 0,
-                editableValue: true,
-                onChanged: (v) {
-                  draft.autoCreateLagMessages = v.round();
-                  onChanged();
-                },
-              ),
-            ],
+      MenuGroup(
+        items: [
+          MenuSwitchItem(
+            label: 'label_enabled'.tr(),
+            value: draft.enabled,
+            onChanged: (v) {
+              draft.enabled = v;
+              onChanged();
+            },
+          ),
+          MenuSelectorItem(
+            label: 'memory_mode'.tr(),
+            currentValue: _modeLabel(draft.memoryMode),
+            description: _modeDescription(draft.memoryMode),
+            onTap: () => _pickMode(context),
+          ),
+        ],
+      ),
+      MenuGroup(
+        header: 'memory_books_section_automation'.tr(),
+        items: [
+          MenuSwitchItem(
+            label: 'memory_books_auto_create'.tr(),
+            description: 'memory_books_auto_create_desc'.tr(),
+            value: draft.autoCreate,
+            onChanged: (v) {
+              draft.autoCreate = v;
+              onChanged();
+            },
+          ),
+          MenuSwitchItem(
+            label: 'memory_books_auto_generate'.tr(),
+            description: 'memory_books_auto_generate_desc'.tr(),
+            value: draft.autoGenerate,
+            onChanged: (v) {
+              draft.autoGenerate = v;
+              onChanged();
+            },
+          ),
+          // "Delay until generation ends" used to sit here. It was saved,
+          // synced and summarised, and read by nothing: drafts are created
+          // from the post-generation coordinator, which is to say always
+          // after the reply, so the switch's ON position described what
+          // already happens and its OFF position promised a behaviour that
+          // does not exist (and would compete with the reply for the
+          // model). The field stays on the settings models so an existing
+          // value is not dropped on save or on sync.
+          if (draft.autoCreate) ...[
             MenuRangeItem(
-              label: 'memory_books_batch_size'.tr(),
-              value: draft.batchSize.toDouble(),
+              label: 'memory_books_auto_create_interval'.tr(),
+              value: draft.autoCreateInterval.toDouble(),
               min: 1,
-              max: 50,
-              divisions: 49,
+              max: 200,
+              divisions: 199,
               decimalPlaces: 0,
               editableValue: true,
               onChanged: (v) {
-                draft.batchSize = v.round();
+                draft.autoCreateInterval = v.round();
+                onChanged();
+              },
+            ),
+            MenuRangeItem(
+              label: 'memory_books_auto_create_lag'.tr(),
+              // The help text used to hide behind a "?" that opened an
+              // AlertDialog; as a description it is simply readable.
+              description: 'memory_books_auto_create_lag_help'.tr(),
+              value: draft.autoCreateLagMessages.toDouble(),
+              min: 0,
+              max: 50,
+              divisions: 50,
+              decimalPlaces: 0,
+              editableValue: true,
+              onChanged: (v) {
+                draft.autoCreateLagMessages = v.round();
                 onChanged();
               },
             ),
           ],
-        ),
-        MenuGroup(
-          header: 'memory_prompt_section'.tr(),
-          items: [
-            MenuSelectorItem(
-              label: 'memory_prompt_choose'.tr(),
-              currentValue: MemoryPromptPresets.label(
-                draft.promptPreset,
-                customPrompts,
-              ),
-              onTap: () => _pickPrompt(context),
+          MenuRangeItem(
+            label: 'memory_books_batch_size'.tr(),
+            value: draft.batchSize.toDouble(),
+            min: 1,
+            max: 50,
+            divisions: 49,
+            decimalPlaces: 0,
+            editableValue: true,
+            onChanged: (v) {
+              draft.batchSize = v.round();
+              onChanged();
+            },
+          ),
+        ],
+      ),
+      MenuGroup(
+        header: 'memory_prompt_section'.tr(),
+        items: [
+          MenuSelectorItem(
+            label: 'memory_prompt_choose'.tr(),
+            currentValue: MemoryPromptPresets.label(
+              draft.promptPreset,
+              customPrompts,
             ),
-            MenuItem(
-              key: const Key('memory_view_current_prompt'),
-              icon: Icons.visibility_outlined,
-              label: 'memory_prompt_view_current'.tr(),
-              onTap: onViewPrompt,
+            onTap: () => _pickPrompt(context),
+          ),
+          MenuItem(
+            key: const Key('memory_view_current_prompt'),
+            icon: Icons.visibility_outlined,
+            label: 'memory_prompt_view_current'.tr(),
+            onTap: onViewPrompt,
+          ),
+          MenuItem(
+            icon: Icons.tune_rounded,
+            label: 'memory_prompt_manage'.tr(),
+            trailing: Icon(
+              Icons.chevron_right,
+              size: 22,
+              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
             ),
-            MenuItem(
-              icon: Icons.tune_rounded,
-              label: 'memory_prompt_manage'.tr(),
-              trailing: Icon(
-                Icons.chevron_right,
-                size: 22,
-                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-              ),
-              onTap: onManagePrompts,
-            ),
-          ],
-        ),
+            onTap: onManagePrompts,
+          ),
+        ],
+      ),
     ];
   }
 

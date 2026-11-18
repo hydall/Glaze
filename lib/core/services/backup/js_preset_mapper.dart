@@ -7,8 +7,7 @@ import '../preset_defaults.dart';
 import 'type_converters.dart';
 
 mixin JsPresetMapper on TypeConverters {
-  void extractPresetsFromRaw(
-      dynamic raw, List<Map<String, dynamic>> presets) {
+  void extractPresetsFromRaw(dynamic raw, List<Map<String, dynamic>> presets) {
     if (raw is List) {
       for (final p in raw) {
         if (p is Map<String, dynamic>) presets.add(p);
@@ -36,7 +35,8 @@ mixin JsPresetMapper on TypeConverters {
       for (final b in rawBlocks) {
         if (b is! Map<String, dynamic>) continue;
         final normalized = Map<String, dynamic>.from(b);
-        if (!normalized.containsKey('id')) normalized['id'] = generateBackupId();
+        if (!normalized.containsKey('id'))
+          normalized['id'] = generateBackupId();
         if (!normalized.containsKey('insertionMode')) {
           normalized['insertionMode'] = b['insertion_mode'] ?? 'relative';
         }
@@ -50,26 +50,34 @@ mixin JsPresetMapper on TypeConverters {
       for (final r in rawRegexes) {
         if (r is! Map<String, dynamic>) continue;
         final normalized = Map<String, dynamic>.from(r);
-        if (!normalized.containsKey('id')) normalized['id'] = generateBackupId();
-        if (!normalized.containsKey('name')) normalized['name'] = r['scriptName'] ?? '';
-        if (!normalized.containsKey('regex')) normalized['regex'] = r['findRegex'] ?? '';
-        if (!normalized.containsKey('replacement')) normalized['replacement'] = r['replaceString'] ?? '';
-        if (!normalized.containsKey('trimOut')) normalized['trimOut'] = joinTrimStrings(r['trimStrings']);
+        if (!normalized.containsKey('id'))
+          normalized['id'] = generateBackupId();
+        if (!normalized.containsKey('name'))
+          normalized['name'] = r['scriptName'] ?? '';
+        if (!normalized.containsKey('regex'))
+          normalized['regex'] = r['findRegex'] ?? '';
+        if (!normalized.containsKey('replacement'))
+          normalized['replacement'] = r['replaceString'] ?? '';
+        if (!normalized.containsKey('trimOut'))
+          normalized['trimOut'] = joinTrimStrings(r['trimStrings']);
         if (r['isEnabled'] is bool) {
           normalized['disabled'] = !(r['isEnabled'] as bool);
         }
         // ST compatibility flags (accept both camelCase and snake_case variants)
         if (!normalized.containsKey('markdownOnly')) {
-          normalized['markdownOnly'] = r['markdownOnly'] ?? r['markdown_only'] ?? false;
+          normalized['markdownOnly'] =
+              r['markdownOnly'] ?? r['markdown_only'] ?? false;
         }
         if (!normalized.containsKey('promptOnly')) {
-          normalized['promptOnly'] = r['promptOnly'] ?? r['prompt_only'] ?? false;
+          normalized['promptOnly'] =
+              r['promptOnly'] ?? r['prompt_only'] ?? false;
         }
         if (!normalized.containsKey('runOnEdit')) {
           normalized['runOnEdit'] = r['runOnEdit'] ?? false;
         }
         if (!normalized.containsKey('substituteRegex')) {
-          normalized['substituteRegex'] = r['substituteRegex'] ?? r['substitute_regex'] ?? 0;
+          normalized['substituteRegex'] =
+              r['substituteRegex'] ?? r['substitute_regex'] ?? 0;
         }
         if (!normalized.containsKey('minDepth') && r.containsKey('minDepth')) {
           normalized['minDepth'] = r['minDepth'];
@@ -81,29 +89,31 @@ mixin JsPresetMapper on TypeConverters {
       }
     }
 
-    return finalizeImportedPreset(Preset(
-      id: json['id'] as String? ?? generateBackupId(),
-      name: json['name'] as String? ?? 'Imported',
-      author: json['author'] as String?,
-      blocks: blocks,
-      regexes: regexes,
-      reasoningEnabled: json['reasoningEnabled'] as bool? ?? false,
-      reasoningStart: json['reasoningStart'] as String?,
-      reasoningEnd: json['reasoningEnd'] as String?,
-      guidedGenerationPrompt: json['guidedGenerationPrompt'] as String?,
-      guidedImpersonationPrompt: json['guidedImpersonationPrompt'] as String?,
-      impersonationPrompt:
-          json['impersonationPrompt'] as String? ??
-          json['impersonation_prompt'] as String?,
-      summaryPrompt: json['summaryPrompt'] as String?,
-      noAssistant: json['noAssistant'] == true,
-      mergeRole: _nonEmpty(json['mergeRole']) ?? 'system',
-      stopString: _nonEmpty(json['stopString']) ?? '',
-      userPrefix: _nonEmpty(json['userPrefix']) ?? '',
-      charPrefix: _nonEmpty(json['charPrefix']) ?? '',
-      squashRole: _nonEmpty(json['squashRole']) ?? 'assistant',
-      createdAt: toInt(json['createdAt']) ?? 0,
-    ));
+    return finalizeImportedPreset(
+      Preset(
+        id: json['id'] as String? ?? generateBackupId(),
+        name: json['name'] as String? ?? 'Imported',
+        author: json['author'] as String?,
+        blocks: blocks,
+        regexes: regexes,
+        reasoningEnabled: json['reasoningEnabled'] as bool? ?? false,
+        reasoningStart: json['reasoningStart'] as String?,
+        reasoningEnd: json['reasoningEnd'] as String?,
+        guidedGenerationPrompt: json['guidedGenerationPrompt'] as String?,
+        guidedImpersonationPrompt: json['guidedImpersonationPrompt'] as String?,
+        impersonationPrompt:
+            json['impersonationPrompt'] as String? ??
+            json['impersonation_prompt'] as String?,
+        summaryPrompt: json['summaryPrompt'] as String?,
+        noAssistant: json['noAssistant'] == true,
+        mergeRole: _nonEmpty(json['mergeRole']) ?? 'system',
+        stopString: _nonEmpty(json['stopString']) ?? '',
+        userPrefix: _nonEmpty(json['userPrefix']) ?? '',
+        charPrefix: _nonEmpty(json['charPrefix']) ?? '',
+        squashRole: _nonEmpty(json['squashRole']) ?? 'assistant',
+        createdAt: toInt(json['createdAt']) ?? 0,
+      ),
+    );
   }
 
   String extractReasoningEffort(Map<String, dynamic> preset) {

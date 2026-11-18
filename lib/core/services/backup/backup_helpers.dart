@@ -13,7 +13,12 @@ export 'js_preset_mapper.dart';
 export 'type_converters.dart';
 
 abstract class BackupHelpers
-    with TypeConverters, DataUrlHelpers, JsLorebookMapper, JsPresetMapper, AuthorsNoteHelper {
+    with
+        TypeConverters,
+        DataUrlHelpers,
+        JsLorebookMapper,
+        JsPresetMapper,
+        AuthorsNoteHelper {
   AppDatabase get db;
   ImageStorageService get imageStorage;
 }

@@ -26,6 +26,7 @@ class PromptInputs {
   final Map<String, String> sessionVars;
   final Map<String, String> globalVars;
   final String? summaryContent;
+
   /// The summary cut where history runs between its blocks, for a summary
   /// sent in place of its messages. See [SummarySegment].
   final List<SummarySegment> summarySegments;

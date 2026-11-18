@@ -32,261 +32,261 @@ class MemorySelectionSections {
 
   List<Widget> budgetSections(BuildContext context) {
     return [
-        MenuGroup(
-          header: 'memory_budget'.tr(),
-          items: [
+      MenuGroup(
+        header: 'memory_budget'.tr(),
+        items: [
+          MenuRangeItem(
+            label: 'memory_books_max_entries_prompt'.tr(),
+            value: draft.maxInjected.toDouble(),
+            min: 1,
+            max: 20,
+            divisions: 19,
+            decimalPlaces: 0,
+            editableValue: true,
+            onChanged: (v) {
+              draft.maxInjected = v.round();
+              onChanged();
+            },
+          ),
+          MenuSelectorItem(
+            label: 'memory_budget'.tr(),
+            currentValue: _budgetLabel(draft.memoryBudgetPreset),
+            description: _effectiveBudgetHint(),
+            onTap: () => _pickBudget(context),
+          ),
+          if (draft.memoryBudgetPreset == 'custom')
+            MenuFieldItem(
+              key: const Key('memory_custom_token_budget_field'),
+              label: 'memory_max_tokens_label'.tr(),
+              controller: draft.budgetController,
+              placeholder: 'memory_max_tokens_hint'.tr(),
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              onChanged: (value) {
+                final parsed = int.tryParse(value);
+                draft.maxInjectedTokens = parsed != null && parsed > 0
+                    ? parsed
+                    : null;
+                onChanged();
+              },
+            ),
+        ],
+      ),
+      MenuGroup(
+        header: 'memory_packing_mode'.tr(),
+        items: [
+          MenuSwitchItem(
+            label: 'memory_excerpting_enabled'.tr(),
+            description: 'memory_excerpting_auto_desc'.tr(),
+            value: draft.memoryExcerptingEnabled,
+            onChanged: (v) {
+              draft.memoryExcerptingEnabled = v;
+              onChanged();
+            },
+          ),
+          if (draft.memoryExcerptingEnabled) ...[
+            MenuSelectorItem(
+              label: 'memory_packing_mode'.tr(),
+              currentValue: _packingLabel(draft.memoryPackingMode),
+              description: _packingDescription(draft.memoryPackingMode),
+              onTap: () => _pickPacking(context),
+            ),
             MenuRangeItem(
-              label: 'memory_books_max_entries_prompt'.tr(),
-              value: draft.maxInjected.toDouble(),
-              min: 1,
-              max: 20,
+              label: 'memory_excerpt_tokens_per_chunk'.tr(),
+              description: 'memory_excerpt_tokens_per_chunk_help'.tr(),
+              value: draft.memoryExcerptTokensPerChunk.toDouble(),
+              min: 100,
+              max: 2000,
               divisions: 19,
               decimalPlaces: 0,
               editableValue: true,
               onChanged: (v) {
-                draft.maxInjected = v.round();
+                draft.memoryExcerptTokensPerChunk = v.round();
                 onChanged();
               },
             ),
-            MenuSelectorItem(
-              label: 'memory_budget'.tr(),
-              currentValue: _budgetLabel(draft.memoryBudgetPreset),
-              description: _effectiveBudgetHint(),
-              onTap: () => _pickBudget(context),
-            ),
-            if (draft.memoryBudgetPreset == 'custom')
-              MenuFieldItem(
-                key: const Key('memory_custom_token_budget_field'),
-                label: 'memory_max_tokens_label'.tr(),
-                controller: draft.budgetController,
-                placeholder: 'memory_max_tokens_hint'.tr(),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                onChanged: (value) {
-                  final parsed = int.tryParse(value);
-                  draft.maxInjectedTokens = parsed != null && parsed > 0
-                      ? parsed
-                      : null;
-                  onChanged();
-                },
-              ),
-          ],
-        ),
-        MenuGroup(
-          header: 'memory_packing_mode'.tr(),
-          items: [
-            MenuSwitchItem(
-              label: 'memory_excerpting_enabled'.tr(),
-              description: 'memory_excerpting_auto_desc'.tr(),
-              value: draft.memoryExcerptingEnabled,
+            MenuRangeItem(
+              label: 'memory_excerpt_chunks_per_entry'.tr(),
+              description: 'memory_excerpt_chunks_per_entry_help'.tr(),
+              value: draft.memoryExcerptChunksPerEntry.toDouble(),
+              min: 1,
+              max: 10,
+              divisions: 9,
+              decimalPlaces: 0,
+              editableValue: true,
               onChanged: (v) {
-                draft.memoryExcerptingEnabled = v;
+                draft.memoryExcerptChunksPerEntry = v.round();
                 onChanged();
               },
             ),
-            if (draft.memoryExcerptingEnabled) ...[
-              MenuSelectorItem(
-                label: 'memory_packing_mode'.tr(),
-                currentValue: _packingLabel(draft.memoryPackingMode),
-                description: _packingDescription(draft.memoryPackingMode),
-                onTap: () => _pickPacking(context),
-              ),
+            if (draft.memoryPackingMode == 'chunk_first') ...[
               MenuRangeItem(
-                label: 'memory_excerpt_tokens_per_chunk'.tr(),
-                description: 'memory_excerpt_tokens_per_chunk_help'.tr(),
-                value: draft.memoryExcerptTokensPerChunk.toDouble(),
-                min: 100,
-                max: 2000,
-                divisions: 19,
+                label: 'memory_chunk_first_top_entries'.tr(),
+                description: 'memory_chunk_first_top_entries_help'.tr(),
+                value: draft.chunkFirstTopEntries.toDouble(),
+                min: 0,
+                max: 20,
+                divisions: 20,
                 decimalPlaces: 0,
                 editableValue: true,
                 onChanged: (v) {
-                  draft.memoryExcerptTokensPerChunk = v.round();
+                  draft.chunkFirstTopEntries = v.round();
                   onChanged();
                 },
               ),
-              MenuRangeItem(
-                label: 'memory_excerpt_chunks_per_entry'.tr(),
-                description: 'memory_excerpt_chunks_per_entry_help'.tr(),
-                value: draft.memoryExcerptChunksPerEntry.toDouble(),
-                min: 1,
-                max: 10,
-                divisions: 9,
-                decimalPlaces: 0,
-                editableValue: true,
-                onChanged: (v) {
-                  draft.memoryExcerptChunksPerEntry = v.round();
-                  onChanged();
-                },
-              ),
-              if (draft.memoryPackingMode == 'chunk_first') ...[
+              if (draft.chunkFirstTopEntries > 0)
                 MenuRangeItem(
-                  label: 'memory_chunk_first_top_entries'.tr(),
-                  description: 'memory_chunk_first_top_entries_help'.tr(),
-                  value: draft.chunkFirstTopEntries.toDouble(),
-                  min: 0,
-                  max: 20,
-                  divisions: 20,
+                  label: 'memory_chunk_first_top_chunks'.tr(),
+                  description: 'memory_chunk_first_top_chunks_help'.tr(),
+                  value: draft.chunkFirstTopChunks.toDouble(),
+                  min: 1,
+                  max: 10,
+                  divisions: 9,
                   decimalPlaces: 0,
                   editableValue: true,
                   onChanged: (v) {
-                    draft.chunkFirstTopEntries = v.round();
+                    draft.chunkFirstTopChunks = v.round();
                     onChanged();
                   },
                 ),
-                if (draft.chunkFirstTopEntries > 0)
-                  MenuRangeItem(
-                    label: 'memory_chunk_first_top_chunks'.tr(),
-                    description: 'memory_chunk_first_top_chunks_help'.tr(),
-                    value: draft.chunkFirstTopChunks.toDouble(),
-                    min: 1,
-                    max: 10,
-                    divisions: 9,
-                    decimalPlaces: 0,
-                    editableValue: true,
-                    onChanged: (v) {
-                      draft.chunkFirstTopChunks = v.round();
-                      onChanged();
-                    },
-                  ),
-              ],
             ],
           ],
-        ),
+        ],
+      ),
     ];
   }
 
   List<Widget> selectorSections(BuildContext context) {
     return [
-        MenuGroup(
-          items: [
-            MenuSwitchItem(
-              label: 'memory_selector_diversity'.tr(),
-              description: 'memory_selector_diversity_desc'.tr(),
-              value: draft.diversityAware,
-              onChanged: (v) {
-                draft.diversityAware = v;
-                onChanged();
-              },
-            ),
-            if (draft.diversityAware)
-              MenuRangeItem(
-                label: 'memory_selector_diversity_penalty'.tr(),
-                value: draft.diversityPenalty,
-                min: 0,
-                max: 1,
-                divisions: 20,
-                onChanged: (v) {
-                  draft.diversityPenalty = v;
-                  onChanged();
-                },
-              ),
-            MenuSwitchItem(
-              label: 'memory_selector_recency'.tr(),
-              description: 'memory_selector_recency_desc'.tr(),
-              value: draft.recencyBoost,
-              onChanged: (v) {
-                draft.recencyBoost = v;
-                onChanged();
-              },
-            ),
-            if (draft.recencyBoost)
-              MenuRangeItem(
-                label: 'memory_selector_recency_half_life'.tr(),
-                description: 'memory_selector_recency_half_life_help'.tr(),
-                value: draft.recencyHalfLifeDays,
-                min: 10,
-                max: 1000,
-                divisions: 99,
-                decimalPlaces: 1,
-                onChanged: (v) {
-                  draft.recencyHalfLifeDays = v;
-                  onChanged();
-                },
-              ),
-            MenuSwitchItem(
-              label: 'memory_selector_importance'.tr(),
-              description: 'memory_selector_importance_desc'.tr(),
-              value: draft.importanceBoost,
-              onChanged: (v) {
-                draft.importanceBoost = v;
-                onChanged();
-              },
-            ),
-            if (draft.importanceBoost)
-              MenuRangeItem(
-                label: 'memory_selector_importance_weight'.tr(),
-                value: draft.importanceWeight,
-                min: 0,
-                max: 2,
-                divisions: 40,
-                onChanged: (v) {
-                  draft.importanceWeight = v;
-                  onChanged();
-                },
-              ),
-            MenuSwitchItem(
-              label: 'memory_selector_exclude_visible'.tr(),
-              description: 'memory_selector_exclude_visible_desc'.tr(),
-              value: draft.sourceWindowExclusion,
-              onChanged: (v) {
-                draft.sourceWindowExclusion = v;
-                onChanged();
-              },
-            ),
-            MenuSwitchItem(
-              label: 'memory_selector_continuity_guard'.tr(),
-              description: 'memory_selector_continuity_guard_desc'.tr(),
-              value: draft.factualContinuityGuardEnabled,
-              onChanged: (v) {
-                draft.factualContinuityGuardEnabled = v;
-                onChanged();
-              },
-            ),
-          ],
-        ),
-        MenuGroup(
-          header: 'memory_selector_query_section'.tr(),
-          items: [
-            MenuSwitchItem(
-              label: 'memory_selector_query_assistant'.tr(),
-              description: 'memory_selector_query_assistant_desc'.tr(),
-              value: draft.queryIncludeAssistant,
-              onChanged: (v) {
-                draft.queryIncludeAssistant = v;
-                onChanged();
-              },
-            ),
+      MenuGroup(
+        items: [
+          MenuSwitchItem(
+            label: 'memory_selector_diversity'.tr(),
+            description: 'memory_selector_diversity_desc'.tr(),
+            value: draft.diversityAware,
+            onChanged: (v) {
+              draft.diversityAware = v;
+              onChanged();
+            },
+          ),
+          if (draft.diversityAware)
             MenuRangeItem(
-              label: 'memory_selector_query_recent_turns'.tr(),
-              description: 'memory_selector_query_recent_turns_help'.tr(),
-              value: draft.queryRecentTurns.toDouble(),
-              min: 1,
-              max: 20,
-              divisions: 19,
-              decimalPlaces: 0,
-              editableValue: true,
+              label: 'memory_selector_diversity_penalty'.tr(),
+              value: draft.diversityPenalty,
+              min: 0,
+              max: 1,
+              divisions: 20,
               onChanged: (v) {
-                draft.queryRecentTurns = v.round();
+                draft.diversityPenalty = v;
                 onChanged();
               },
             ),
+          MenuSwitchItem(
+            label: 'memory_selector_recency'.tr(),
+            description: 'memory_selector_recency_desc'.tr(),
+            value: draft.recencyBoost,
+            onChanged: (v) {
+              draft.recencyBoost = v;
+              onChanged();
+            },
+          ),
+          if (draft.recencyBoost)
             MenuRangeItem(
-              label: 'memory_selector_query_max_chars'.tr(),
-              description: 'memory_selector_query_max_chars_help'.tr(),
-              value: draft.queryMaxChars.toDouble(),
-              min: 500,
-              max: 5000,
-              divisions: 18,
-              decimalPlaces: 0,
-              editableValue: true,
+              label: 'memory_selector_recency_half_life'.tr(),
+              description: 'memory_selector_recency_half_life_help'.tr(),
+              value: draft.recencyHalfLifeDays,
+              min: 10,
+              max: 1000,
+              divisions: 99,
+              decimalPlaces: 1,
               onChanged: (v) {
-                draft.queryMaxChars = v.round();
+                draft.recencyHalfLifeDays = v;
                 onChanged();
               },
             ),
-          ],
-        ),
+          MenuSwitchItem(
+            label: 'memory_selector_importance'.tr(),
+            description: 'memory_selector_importance_desc'.tr(),
+            value: draft.importanceBoost,
+            onChanged: (v) {
+              draft.importanceBoost = v;
+              onChanged();
+            },
+          ),
+          if (draft.importanceBoost)
+            MenuRangeItem(
+              label: 'memory_selector_importance_weight'.tr(),
+              value: draft.importanceWeight,
+              min: 0,
+              max: 2,
+              divisions: 40,
+              onChanged: (v) {
+                draft.importanceWeight = v;
+                onChanged();
+              },
+            ),
+          MenuSwitchItem(
+            label: 'memory_selector_exclude_visible'.tr(),
+            description: 'memory_selector_exclude_visible_desc'.tr(),
+            value: draft.sourceWindowExclusion,
+            onChanged: (v) {
+              draft.sourceWindowExclusion = v;
+              onChanged();
+            },
+          ),
+          MenuSwitchItem(
+            label: 'memory_selector_continuity_guard'.tr(),
+            description: 'memory_selector_continuity_guard_desc'.tr(),
+            value: draft.factualContinuityGuardEnabled,
+            onChanged: (v) {
+              draft.factualContinuityGuardEnabled = v;
+              onChanged();
+            },
+          ),
+        ],
+      ),
+      MenuGroup(
+        header: 'memory_selector_query_section'.tr(),
+        items: [
+          MenuSwitchItem(
+            label: 'memory_selector_query_assistant'.tr(),
+            description: 'memory_selector_query_assistant_desc'.tr(),
+            value: draft.queryIncludeAssistant,
+            onChanged: (v) {
+              draft.queryIncludeAssistant = v;
+              onChanged();
+            },
+          ),
+          MenuRangeItem(
+            label: 'memory_selector_query_recent_turns'.tr(),
+            description: 'memory_selector_query_recent_turns_help'.tr(),
+            value: draft.queryRecentTurns.toDouble(),
+            min: 1,
+            max: 20,
+            divisions: 19,
+            decimalPlaces: 0,
+            editableValue: true,
+            onChanged: (v) {
+              draft.queryRecentTurns = v.round();
+              onChanged();
+            },
+          ),
+          MenuRangeItem(
+            label: 'memory_selector_query_max_chars'.tr(),
+            description: 'memory_selector_query_max_chars_help'.tr(),
+            value: draft.queryMaxChars.toDouble(),
+            min: 500,
+            max: 5000,
+            divisions: 18,
+            decimalPlaces: 0,
+            editableValue: true,
+            onChanged: (v) {
+              draft.queryMaxChars = v.round();
+              onChanged();
+            },
+          ),
+        ],
+      ),
     ];
   }
 
@@ -305,7 +305,13 @@ class MemorySelectionSections {
       context,
       title: 'memory_budget'.tr(),
       items: [
-        for (final preset in const ['auto', 'small', 'medium', 'large', 'custom'])
+        for (final preset in const [
+          'auto',
+          'small',
+          'medium',
+          'large',
+          'custom',
+        ])
           GlazePickerItem(
             label: _budgetLabel(preset),
             isActive: draft.memoryBudgetPreset == preset,

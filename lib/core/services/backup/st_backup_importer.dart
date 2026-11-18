@@ -144,11 +144,13 @@ class StBackupImporter {
     StImportResult result,
   ) async {
     final paths = zip.files
-        .where((f) =>
-            f.isFile &&
-            f.name.startsWith('characters/') &&
-            f.name.toLowerCase().endsWith('.png') &&
-            !f.name.substring('characters/'.length).contains('/'))
+        .where(
+          (f) =>
+              f.isFile &&
+              f.name.startsWith('characters/') &&
+              f.name.toLowerCase().endsWith('.png') &&
+              !f.name.substring('characters/'.length).contains('/'),
+        )
         .toList();
 
     final pendingChars = <Character>[];
@@ -175,11 +177,18 @@ class StBackupImporter {
         pendingChars.add(imported.character);
 
         if (imported.characterBookData != null) {
-          pendingBooks.add(convertCharacterBook(
-              imported.characterBookData!, imported.character.id));
+          pendingBooks.add(
+            convertCharacterBook(
+              imported.characterBookData!,
+              imported.character.id,
+            ),
+          );
         }
 
-        final baseName = fileName.replaceAll(RegExp(r'\.png$', caseSensitive: false), '');
+        final baseName = fileName.replaceAll(
+          RegExp(r'\.png$', caseSensitive: false),
+          '',
+        );
         charNameToId[baseName] = imported.character.id;
         result.characters++;
         if (pendingChars.length >= _writeChunkSize) await flush();
@@ -202,10 +211,12 @@ class StBackupImporter {
   }
 
   Future<void> _importLorebooks(Archive zip, StImportResult result) async {
-    final paths = zip.files.where((f) =>
-        f.isFile &&
-        f.name.startsWith('worlds/') &&
-        f.name.toLowerCase().endsWith('.json'));
+    final paths = zip.files.where(
+      (f) =>
+          f.isFile &&
+          f.name.startsWith('worlds/') &&
+          f.name.toLowerCase().endsWith('.json'),
+    );
 
     final pending = <Lorebook>[];
 
@@ -238,10 +249,12 @@ class StBackupImporter {
   }
 
   Future<void> _importPresets(Archive zip, StImportResult result) async {
-    final paths = zip.files.where((f) =>
-        f.isFile &&
-        f.name.startsWith('OpenAI Settings/') &&
-        f.name.toLowerCase().endsWith('.json'));
+    final paths = zip.files.where(
+      (f) =>
+          f.isFile &&
+          f.name.startsWith('OpenAI Settings/') &&
+          f.name.toLowerCase().endsWith('.json'),
+    );
 
     for (final f in paths) {
       _cancel.check();
@@ -284,8 +297,9 @@ class StBackupImporter {
         final charFolder = parts[1];
         final glazeCharId = charNameToId[charFolder];
         if (glazeCharId == null) {
-          result.errors
-              .add('Chat ${f.name}: no character matched folder "$charFolder"');
+          result.errors.add(
+            'Chat ${f.name}: no character matched folder "$charFolder"',
+          );
           continue;
         }
 
@@ -294,20 +308,23 @@ class StBackupImporter {
           parsed = await _parseJsonlChat(f);
         } else {
           parsed = importChatFromJsonlString(
-              utf8.decode(f.content as List<int>, allowMalformed: true));
+            utf8.decode(f.content as List<int>, allowMalformed: true),
+          );
         }
         if (parsed.messages.isEmpty) continue;
 
         final idx = (nextIdxByChar[glazeCharId] ?? 0) + 1;
         nextIdxByChar[glazeCharId] = idx;
 
-        await _chatRepo.put(ChatSession(
-          id: '${glazeCharId}_$idx',
-          characterId: glazeCharId,
-          sessionIndex: idx,
-          messages: parsed.messages,
-          updatedAt: currentTimestampSeconds(),
-        ));
+        await _chatRepo.put(
+          ChatSession(
+            id: '${glazeCharId}_$idx',
+            characterId: glazeCharId,
+            sessionIndex: idx,
+            messages: parsed.messages,
+            updatedAt: currentTimestampSeconds(),
+          ),
+        );
         result.chats++;
       } catch (e) {
         result.errors.add('Chat ${f.name}: $e');
@@ -322,8 +339,9 @@ class StBackupImporter {
       _cancel.check();
       final character = await _charRepo.getById(entry.key);
       if (character != null) {
-        await _charRepo
-            .put(character.copyWith(currentSessionIndex: entry.value));
+        await _charRepo.put(
+          character.copyWith(currentSessionIndex: entry.value),
+        );
       }
     }
   }
@@ -368,8 +386,10 @@ class StBackupImporter {
 
     Map<String, dynamic> settings;
     try {
-      final text =
-          utf8.decode(settingsFile.content as List<int>, allowMalformed: true);
+      final text = utf8.decode(
+        settingsFile.content as List<int>,
+        allowMalformed: true,
+      );
       settings = jsonDecode(text) as Map<String, dynamic>;
     } catch (e) {
       result.errors.add('Personas (settings.json): $e');
@@ -383,12 +403,12 @@ class StBackupImporter {
         : settings;
     final personasMap =
         (pu['personas'] as Map<String, dynamic>?) ??
-            (settings['personas'] as Map<String, dynamic>?) ??
-            {};
+        (settings['personas'] as Map<String, dynamic>?) ??
+        {};
     final descMap =
         (pu['persona_descriptions'] as Map<String, dynamic>?) ??
-            (settings['persona_descriptions'] as Map<String, dynamic>?) ??
-            {};
+        (settings['persona_descriptions'] as Map<String, dynamic>?) ??
+        {};
 
     // SillyTavern identifies a persona by its avatar filename; Glaze mints a
     // new id, so remember the mapping to translate the selections below.
@@ -423,13 +443,15 @@ class StBackupImporter {
           }
         }
 
-        await _personaRepo.put(Persona(
-          id: id,
-          name: personaName,
-          prompt: description,
-          avatarPath: avatarPath,
-          createdAt: currentTimestampSeconds(),
-        ));
+        await _personaRepo.put(
+          Persona(
+            id: id,
+            name: personaName,
+            prompt: description,
+            avatarPath: avatarPath,
+            createdAt: currentTimestampSeconds(),
+          ),
+        );
         avatarToPersonaId[avatarFilename] = id;
         result.personas++;
 
@@ -460,8 +482,12 @@ class StBackupImporter {
       }
     }
 
-    await _restoreActiveSelections(settings, pu, avatarToPersonaId,
-        characterConnections);
+    await _restoreActiveSelections(
+      settings,
+      pu,
+      avatarToPersonaId,
+      characterConnections,
+    );
   }
 
   /// Applies the active persona saved by SillyTavern: the globally selected
@@ -475,13 +501,10 @@ class StBackupImporter {
   ) async {
     final prefs = await SharedPreferences.getInstance();
 
-    final activeAvatar = _firstMappedAvatar(
-      [
-        settings['user_avatar'],
-        powerUser['default_persona'],
-      ],
-      avatarToPersonaId,
-    );
+    final activeAvatar = _firstMappedAvatar([
+      settings['user_avatar'],
+      powerUser['default_persona'],
+    ], avatarToPersonaId);
     if (activeAvatar != null) {
       await prefs.setString('activePersonaId', activeAvatar);
     }

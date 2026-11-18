@@ -30,12 +30,13 @@ mixin AuthorsNoteHelper on TypeConverters {
       return jsonEncode({
         'content': content,
         'role': raw['role'] is String ? raw['role'] as String : 'system',
-        'insertionMode': (raw['insertion_mode'] is String
-                    ? raw['insertion_mode'] as String
-                    : null) ??
+        'insertionMode':
+            (raw['insertion_mode'] is String
+                ? raw['insertion_mode'] as String
+                : null) ??
             (raw['insertionMode'] is String
-                    ? raw['insertionMode'] as String
-                    : null) ??
+                ? raw['insertionMode'] as String
+                : null) ??
             'relative',
         'depth': toInt(raw['depth']) ?? 0,
         'enabled': raw['enabled'] is bool ? raw['enabled'] as bool : true,

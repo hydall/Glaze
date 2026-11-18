@@ -97,101 +97,106 @@ class _MagicCardState extends State<MagicCard> {
     }
 
     final badge = _editBadge(size: 24);
-    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-      onTap: widget.onTap,
-      onLongPress: widget.onLongPress,
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) => setState(() => _pressed = false),
-      onTapCancel: () => setState(() => _pressed = false),
-      child: AnimatedScale(
-        scale: _pressed ? 0.96 : (hovered ? 1.02 : 1.0),
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-        child: Container(
-          decoration: hovered
-              ? BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: [
-                    BoxShadow(
-                      color: context.cs.primary.withValues(alpha: 0.35),
-                      blurRadius: 14,
-                    ),
-                  ],
-                )
-              : null,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(
-                  alpha: _pressed || hovered ? 0.08 : 0.04,
-                ),
-                border: Border.all(
-                  color: editing
-                      ? context.cs.primary.withValues(alpha: 0.55)
-                      : Colors.white.withValues(alpha: 0.06),
-                ),
-              ),
-              child: Stack(
-                clipBehavior: Clip.none,
-                alignment: Alignment.centerLeft,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      ActionGlyph(
-                        icon: item.def.icon,
-                        glyph: item.def.glyph,
-                        file: item.def.iconFile,
-                        size: 20,
-                        color: Colors.white.withValues(alpha: 0.85),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        onLongPress: widget.onLongPress,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.96 : (hovered ? 1.02 : 1.0),
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: Container(
+            decoration: hovered
+                ? BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: context.cs.primary.withValues(alpha: 0.35),
+                        blurRadius: 14,
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              item.def.label,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: context.cs.onSurface,
-                                height: 1,
-                              ),
-                            ),
-                            if (item.status != null) ...[
-                              const SizedBox(height: 1),
-                              MagicStatusLine(
-                                text: item.status!,
-                                icon: item.statusIcon,
+                    ],
+                  )
+                : null,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(
+                    alpha: _pressed || hovered ? 0.08 : 0.04,
+                  ),
+                  border: Border.all(
+                    color: editing
+                        ? context.cs.primary.withValues(alpha: 0.55)
+                        : Colors.white.withValues(alpha: 0.06),
+                  ),
+                ),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.centerLeft,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        ActionGlyph(
+                          icon: item.def.icon,
+                          glyph: item.def.glyph,
+                          file: item.def.iconFile,
+                          size: 20,
+                          color: Colors.white.withValues(alpha: 0.85),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                item.def.label,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
-                                  fontSize: 9,
-                                  color: context.cs.onSurfaceVariant.withValues(
-                                    alpha: 0.95,
-                                  ),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: context.cs.onSurface,
                                   height: 1,
                                 ),
                               ),
+                              if (item.status != null) ...[
+                                const SizedBox(height: 1),
+                                MagicStatusLine(
+                                  text: item.status!,
+                                  icon: item.statusIcon,
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    color: context.cs.onSurfaceVariant
+                                        .withValues(alpha: 0.95),
+                                    height: 1,
+                                  ),
+                                ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  if (badge != null)
-                    Positioned(top: -8, right: -8, child: badge),
-                ],
+                      ],
+                    ),
+                    if (badge != null)
+                      Positioned(top: -8, right: -8, child: badge),
+                  ],
+                ),
               ),
             ),
           ),
         ),
-      )),
+      ),
     );
   }
 }
@@ -229,25 +234,28 @@ class MagicCardBadge extends StatelessWidget {
       child: Semantics(
         button: true,
         label: tooltip,
-        child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-          onTap: onTap,
-          child: Container(
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: onTap,
+            child: Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Icon(icon, size: size * 0.58, color: Colors.white),
             ),
-            child: Icon(icon, size: size * 0.58, color: Colors.white),
           ),
-        )),
+        ),
       ),
     );
   }
@@ -408,40 +416,43 @@ class AddMagicCard extends StatelessWidget {
         muted: true,
       );
     }
-    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-      onTap: onTap,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.04),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.add,
-                size: 20,
-                color: context.cs.onSurface.withValues(alpha: 0.6),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'action_add'.tr(),
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.onSurface,
-                    height: 1,
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.04),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.add,
+                  size: 20,
+                  color: context.cs.onSurface.withValues(alpha: 0.6),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'action_add'.tr(),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: context.cs.onSurface,
+                      height: 1,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      )),
+      ),
     );
   }
 }

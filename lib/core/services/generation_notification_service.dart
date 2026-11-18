@@ -187,7 +187,6 @@ class GenerationNotificationService {
           allowWifiLock: true,
         ),
       );
-
     } catch (e, st) {
       debugPrint('NOTIF: foreground task init failed: $e\n$st');
     }
@@ -412,7 +411,8 @@ class GenerationNotificationService {
   /// Whether this platform asks the user before it will post notifications —
   /// i.e. whether onboarding has anything to offer on the subject.
   bool get notificationsNeedPermission =>
-      _presenter.isSupported && MessageNotificationPresenter.promptsForPermission;
+      _presenter.isSupported &&
+      MessageNotificationPresenter.promptsForPermission;
 
   /// Shows the OS permission dialog. Called from the onboarding slide that
   /// explains what notifications are for, and from the skip handler when the

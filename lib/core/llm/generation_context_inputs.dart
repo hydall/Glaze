@@ -32,6 +32,7 @@ class GenerationContextInputs {
   final Map<String, String> globalVars;
   final String? summaryContent;
   final String? summaryPrefix;
+
   /// The summary cut where history runs between its blocks, for a summary
   /// sent in place of its messages. See [SummarySegment].
   final List<SummarySegment> summarySegments;

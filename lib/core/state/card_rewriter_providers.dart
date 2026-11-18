@@ -10,13 +10,46 @@ import '../models/api_config.dart';
 import '../models/card_rewriter_settings.dart';
 import '../services/card_rewriter/automated_card_evolution_service.dart';
 import 'db_provider.dart';
+import 'agent_providers.dart';
+import '../llm/agents/builtin_agents.dart';
+import '../models/agent_definition.dart';
 
 /// The Card Rewriter settings the lane runs on.
 ///
 /// Every reader — the services below, the Agent Ops management tab, the
-/// post-generation status card — goes through this one place.
+/// post-generation status card — goes through this one place. Whether the
+/// lane runs in a turn is decided by the built-in Card Rewriter agent (the
+/// Tracker stage checks the turn's plan), so the lane itself is always
+/// enabled here; its connection and model come from that agent.
 final cardRewriterSettingsProvider = Provider<CardRewriterSettings>((ref) {
-  return ref.watch(pipelineSettingsProvider).cardRewriter;
+  final pipeline = ref.watch(pipelineSettingsProvider);
+  final agent = ref
+      .watch(agentLibraryProvider)
+      .value
+      ?.where((a) => a.id == BuiltinAgentIds.cardRewriter)
+      .firstOrNull;
+  var settings = pipeline.cardRewriter.copyWith(enabled: true);
+  if (agent == null) return settings;
+  final activeId = ref.watch(activeApiConfigProvider)?.id ?? '';
+  final connection = agent.connection;
+  final apiConfigId = switch (connection.mode) {
+    AgentConnectionMode.config => connection.apiConfigId,
+    AgentConnectionMode.helper =>
+      pipeline.agents.helperApiConfigId.isNotEmpty
+          ? pipeline.agents.helperApiConfigId
+          : activeId,
+    _ => activeId,
+  };
+  final model = connection.model.isNotEmpty
+      ? connection.model
+      : (connection.mode == AgentConnectionMode.helper
+            ? pipeline.agents.helperModel
+            : '');
+  settings = settings.copyWith(apiConfigId: apiConfigId, modelOverride: model);
+  if (agent.params.timeoutMs != null) {
+    settings = settings.copyWith(timeoutMs: agent.params.timeoutMs!);
+  }
+  return settings;
 });
 
 final automatedCardEvolutionServiceProvider =

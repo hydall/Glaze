@@ -97,7 +97,8 @@ GeminiConversionResult convertGoogleMessages(
 
     // 4. Squash with previous if same role.
     if (contents.isNotEmpty && contents.last['role'] == role) {
-      final lastParts = (contents.last['parts'] as List).cast<Map<String, dynamic>>();
+      final lastParts = (contents.last['parts'] as List)
+          .cast<Map<String, dynamic>>();
       for (final p in parts) {
         if (p.containsKey('text')) {
           final idx = lastParts.indexWhere((q) => q.containsKey('text'));
@@ -146,10 +147,7 @@ Map<String, dynamic>? _parseDataUrl(
   if (url == null || !url.startsWith('data:')) return null;
   final match = RegExp(r'^data:([^;]+);base64,(.+)$').firstMatch(url);
   if (match == null) return null;
-  return {
-    'mimeType': match.group(1) ?? defaultMime,
-    'data': match.group(2),
-  };
+  return {'mimeType': match.group(1) ?? defaultMime, 'data': match.group(2)};
 }
 
 String _stringifyContent(dynamic content) {

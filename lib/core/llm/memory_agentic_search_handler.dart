@@ -14,9 +14,9 @@ class MemorySearchResult {
   bool get isEmpty => hits.isEmpty && (error == null || error!.isEmpty);
 
   Map<String, dynamic> toJson() => {
-        'hits': hits.map((h) => h.toJson()).toList(),
-        if (error != null) 'error': error,
-      };
+    'hits': hits.map((h) => h.toJson()).toList(),
+    if (error != null) 'error': error,
+  };
 }
 
 class MemorySearchHit {
@@ -35,12 +35,12 @@ class MemorySearchHit {
   });
 
   Map<String, dynamic> toJson() => {
-        'entryId': entryId,
-        'title': title,
-        'score': score.toStringAsFixed(2),
-        if (matchedKeys.isNotEmpty) 'matchedKeys': matchedKeys,
-        if (tokenCost > 0) 'tokenCost': tokenCost,
-      };
+    'entryId': entryId,
+    'title': title,
+    'score': score.toStringAsFixed(2),
+    if (matchedKeys.isNotEmpty) 'matchedKeys': matchedKeys,
+    if (tokenCost > 0) 'tokenCost': tokenCost,
+  };
 }
 
 /// Handler for `searchMemory` tool calls. Bounded retrieval from Memory Book.
@@ -73,8 +73,7 @@ class MemoryAgenticToolHandler {
 
     final capped = maxResults.clamp(1, 10);
     final active = entries
-        .where((e) =>
-            e.status == 'active' && e.content.trim().isNotEmpty)
+        .where((e) => e.status == 'active' && e.content.trim().isNotEmpty)
         .toList();
     if (active.isEmpty) return const MemorySearchResult();
 
@@ -116,13 +115,15 @@ class MemoryAgenticToolHandler {
     final hits = selection.allScores
         .where((s) => !s.excludedBySourceWindow && s.score > 0)
         .take(capped)
-        .map((s) => MemorySearchHit(
-              entryId: s.entry.id,
-              title: s.entry.title,
-              score: s.score,
-              matchedKeys: s.matchedKeys,
-              tokenCost: MemorySelector.tokenCost(s.entry),
-            ))
+        .map(
+          (s) => MemorySearchHit(
+            entryId: s.entry.id,
+            title: s.entry.title,
+            score: s.score,
+            matchedKeys: s.matchedKeys,
+            tokenCost: MemorySelector.tokenCost(s.entry),
+          ),
+        )
         .toList();
 
     return MemorySearchResult(hits: hits);

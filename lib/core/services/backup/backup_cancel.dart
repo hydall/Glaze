@@ -10,8 +10,7 @@ class ImportCancellationToken {
   factory ImportCancellationToken.wrap({
     required bool Function() isCancelled,
     required void Function() check,
-  }) =>
-      ImportCancellationToken._(isCancelled, check);
+  }) => ImportCancellationToken._(isCancelled, check);
 
   bool get isCancelled => _isCancelled();
 

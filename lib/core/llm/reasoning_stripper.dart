@@ -45,10 +45,7 @@ class ReasoningStripper {
         r'\s*Think internally[^.]*<think>[\s\S]*?(?:after\s*</think>|</think>)[^.]*\. ?',
         caseSensitive: false,
       ),
-      RegExp(
-        r'\s*Use\s\s*(?:for|to)[^.]*\. ?',
-        caseSensitive: false,
-      ),
+      RegExp(r'\s*Use\s\s*(?:for|to)[^.]*\. ?', caseSensitive: false),
     ];
     for (final pattern in patterns) {
       result = result.replaceAll(pattern, ' ');

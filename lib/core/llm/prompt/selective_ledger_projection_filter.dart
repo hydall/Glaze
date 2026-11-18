@@ -634,9 +634,7 @@ bool isSelectableLedgerFact(CharacterKnowledgeFact fact) {
 /// prompt from duplicating the clock and avoids re-injecting a stale value.
 bool _isGameClockTrackerKey(String key) {
   final value = key.toLowerCase();
-  return value == 'world:time' ||
-      value == 'world:date' ||
-      value == 'world:day';
+  return value == 'world:time' || value == 'world:date' || value == 'world:day';
 }
 
 bool _isCriticalTrackerKey(String key) {

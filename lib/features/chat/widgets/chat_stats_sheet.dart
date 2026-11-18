@@ -132,7 +132,8 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
       // Skip sessions whose character no longer exists — seeding the picker with
       // an orphaned id would leave the Character tab without a name or avatar.
       final knownIds = _allCharacters.map((c) => c.id).toSet();
-      _selectedCharId = _allSessions
+      _selectedCharId =
+          _allSessions
               .where((s) => knownIds.contains(s.characterId))
               .firstOrNull
               ?.characterId ??
@@ -647,59 +648,62 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-          onTap: () => setState(() => _showChatDropdown = !_showChatDropdown),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: parsedColor,
-                    shape: BoxShape.circle,
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: selectedAvatar != null
-                      ? Image.file(
-                          File(resolveGlazeFilePath(selectedAvatar)!),
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              _buildInitials(selectedName),
-                        )
-                      : const Icon(
-                          Icons.chat_bubble,
-                          color: Colors.white,
-                          size: 18,
-                        ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: context.cs.onSurface,
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () => setState(() => _showChatDropdown = !_showChatDropdown),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: parsedColor,
+                      shape: BoxShape.circle,
                     ),
-                    overflow: TextOverflow.ellipsis,
+                    clipBehavior: Clip.antiAlias,
+                    child: selectedAvatar != null
+                        ? Image.file(
+                            File(resolveGlazeFilePath(selectedAvatar)!),
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) =>
+                                _buildInitials(selectedName),
+                          )
+                        : const Icon(
+                            Icons.chat_bubble,
+                            color: Colors.white,
+                            size: 18,
+                          ),
                   ),
-                ),
-                Icon(
-                  _showChatDropdown
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: context.cs.onSurface,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Icon(
+                    _showChatDropdown
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: context.cs.onSurfaceVariant,
+                  ),
+                ],
+              ),
             ),
-          )),
+          ),
         ),
         AnimatedCrossFade(
           firstChild: const SizedBox(height: 0, width: double.infinity),
@@ -836,57 +840,60 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-          onTap: () => setState(() => _showCharDropdown = !_showCharDropdown),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: parsedColor,
-                    shape: BoxShape.circle,
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: selectedChar?.avatarPath != null
-                      ? Image.file(
-                          File(
-                            resolveGlazeFilePath(selectedChar!.avatarPath!)!,
-                          ),
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              _buildInitials(charName),
-                        )
-                      : _buildInitials(charName),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    charName,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: context.cs.onSurface,
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () => setState(() => _showCharDropdown = !_showCharDropdown),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.05),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: parsedColor,
+                      shape: BoxShape.circle,
                     ),
-                    overflow: TextOverflow.ellipsis,
+                    clipBehavior: Clip.antiAlias,
+                    child: selectedChar?.avatarPath != null
+                        ? Image.file(
+                            File(
+                              resolveGlazeFilePath(selectedChar!.avatarPath!)!,
+                            ),
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) =>
+                                _buildInitials(charName),
+                          )
+                        : _buildInitials(charName),
                   ),
-                ),
-                Icon(
-                  _showCharDropdown
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      charName,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: context.cs.onSurface,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Icon(
+                    _showCharDropdown
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: context.cs.onSurfaceVariant,
+                  ),
+                ],
+              ),
             ),
-          )),
+          ),
         ),
         AnimatedCrossFade(
           firstChild: const SizedBox(height: 0, width: double.infinity),

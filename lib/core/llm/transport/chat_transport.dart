@@ -5,17 +5,15 @@ import 'chat_transport_request.dart';
 /// Streaming text delta. `reasoningDelta` is non-null only for models that
 /// emit a separate thinking stream (Claude extended thinking, Gemini thought
 /// parts, OpenAI/OpenRouter reasoning models).
-typedef ChatTransportOnUpdate = void Function(String delta, String? reasoningDelta);
+typedef ChatTransportOnUpdate =
+    void Function(String delta, String? reasoningDelta);
 
 /// Final assistant message after streaming finishes (or after a one-shot
 /// non-streaming call). `rawResponseJson` is the raw provider payload
 /// (or an aggregated synthetic one for streamed responses) — used by the
 /// UI raw-view tab.
-typedef ChatTransportOnComplete = void Function(
-  String text,
-  String? reasoning, {
-  String? rawResponseJson,
-});
+typedef ChatTransportOnComplete =
+    void Function(String text, String? reasoning, {String? rawResponseJson});
 
 typedef ChatTransportOnError = void Function(Object error);
 

@@ -34,8 +34,11 @@ List<String> extractRetrievalHintsFrom({
   final normalized = hints
       .map((h) => h.toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '').trim())
       .toSet();
-  return hints.where((h) {
-    final n = h.toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '').trim();
-    return n.isNotEmpty && normalized.contains(n);
-  }).take(32).toList();
+  return hints
+      .where((h) {
+        final n = h.toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '').trim();
+        return n.isNotEmpty && normalized.contains(n);
+      })
+      .take(32)
+      .toList();
 }

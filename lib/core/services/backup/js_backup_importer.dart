@@ -27,8 +27,12 @@ class JsBackupImporter extends BackupHelpers {
   }) async {
     await _clearAllTables();
 
-    final kv = Map<String, dynamic>.from(data['keyvalue'] as Map<dynamic, dynamic>? ?? {});
-    final ls = Map<String, dynamic>.from(data['localStorage'] as Map<dynamic, dynamic>? ?? {});
+    final kv = Map<String, dynamic>.from(
+      data['keyvalue'] as Map<dynamic, dynamic>? ?? {},
+    );
+    final ls = Map<String, dynamic>.from(
+      data['localStorage'] as Map<dynamic, dynamic>? ?? {},
+    );
 
     final characterImporter = JsCharacterImporter(db, imageStorage);
     final lorebookImporter = JsLorebookImporter(db, imageStorage);
@@ -36,7 +40,11 @@ class JsBackupImporter extends BackupHelpers {
     final chatImporter = JsChatImporter(db, imageStorage);
     final presetImporter = JsPresetImporter(db, imageStorage);
 
-    Future<void> step(String name, String label, Future<void> Function() fn) async {
+    Future<void> step(
+      String name,
+      String label,
+      Future<void> Function() fn,
+    ) async {
       onProgress?.call(label);
       try {
         await fn();
@@ -45,18 +53,66 @@ class JsBackupImporter extends BackupHelpers {
       }
     }
 
-    await step('importCharacters', 'Importing characters...', () => characterImporter.importCharacters(data['characters']));
-    await step('importPersonas', 'Importing personas...', () => characterImporter.importPersonas(data['personas']));
-    await step('importLorebooks', 'Importing lorebooks...', () => lorebookImporter.importLorebooks(kv));
-    await step('importCharacterBooks', 'Importing character books...', () => lorebookImporter.importCharacterBooks(data['characters']));
-    await step('importApiConfigs', 'Importing API configs...', () => apiConfigImporter.importApiConfigs(kv, ls, data));
-    await step('importLorebookSettings', 'Importing lorebook settings...', () => lorebookImporter.importLorebookSettings(kv, ls));
-    await step('importChats', 'Importing chats...', () => chatImporter.importChats(kv));
-    await step('importPresets', 'Importing presets...', () => presetImporter.importPresets(kv, ls));
-    await step('importJsActiveSelections', 'Importing settings...', () => _importJsActiveSelections(kv, ls));
-    await step('importGalleryFromCharacters', 'Importing gallery...', () => characterImporter.importGalleryFromCharacters(data['characters']));
-    await step('importDeletedEntries', 'Importing deleted entries...', () => presetImporter.importDeletedEntries(ls, kv));
-    await step('importTheme', 'Importing theme...', () => presetImporter.importTheme(ls, kv));
+    await step(
+      'importCharacters',
+      'Importing characters...',
+      () => characterImporter.importCharacters(data['characters']),
+    );
+    await step(
+      'importPersonas',
+      'Importing personas...',
+      () => characterImporter.importPersonas(data['personas']),
+    );
+    await step(
+      'importLorebooks',
+      'Importing lorebooks...',
+      () => lorebookImporter.importLorebooks(kv),
+    );
+    await step(
+      'importCharacterBooks',
+      'Importing character books...',
+      () => lorebookImporter.importCharacterBooks(data['characters']),
+    );
+    await step(
+      'importApiConfigs',
+      'Importing API configs...',
+      () => apiConfigImporter.importApiConfigs(kv, ls, data),
+    );
+    await step(
+      'importLorebookSettings',
+      'Importing lorebook settings...',
+      () => lorebookImporter.importLorebookSettings(kv, ls),
+    );
+    await step(
+      'importChats',
+      'Importing chats...',
+      () => chatImporter.importChats(kv),
+    );
+    await step(
+      'importPresets',
+      'Importing presets...',
+      () => presetImporter.importPresets(kv, ls),
+    );
+    await step(
+      'importJsActiveSelections',
+      'Importing settings...',
+      () => _importJsActiveSelections(kv, ls),
+    );
+    await step(
+      'importGalleryFromCharacters',
+      'Importing gallery...',
+      () => characterImporter.importGalleryFromCharacters(data['characters']),
+    );
+    await step(
+      'importDeletedEntries',
+      'Importing deleted entries...',
+      () => presetImporter.importDeletedEntries(ls, kv),
+    );
+    await step(
+      'importTheme',
+      'Importing theme...',
+      () => presetImporter.importTheme(ls, kv),
+    );
     await _resetSeededFlags();
     onProgress?.call('Finalizing...');
   }
@@ -87,7 +143,9 @@ class JsBackupImporter extends BackupHelpers {
   }
 
   Future<void> _importJsActiveSelections(
-      Map<String, dynamic> kv, Map<String, dynamic> ls) async {
+    Map<String, dynamic> kv,
+    Map<String, dynamic> ls,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
 
     final activePresetId =
@@ -115,8 +173,7 @@ class JsBackupImporter extends BackupHelpers {
         await prefs.setString('presetConnections', presetConnections);
       } catch (_) {}
     } else if (presetConnections is Map) {
-      await prefs.setString(
-          'presetConnections', jsonEncode(presetConnections));
+      await prefs.setString('presetConnections', jsonEncode(presetConnections));
     }
 
     final personaConnections =
@@ -127,7 +184,9 @@ class JsBackupImporter extends BackupHelpers {
       } catch (_) {}
     } else if (personaConnections is Map) {
       await prefs.setString(
-          'personaConnections', jsonEncode(personaConnections));
+        'personaConnections',
+        jsonEncode(personaConnections),
+      );
     }
 
     for (final entry in ls.entries) {
@@ -150,10 +209,15 @@ class JsBackupImporter extends BackupHelpers {
         final decoded = jsonDecode(regexScriptsRaw);
         if (decoded is List) {
           final existing = prefs.getString('gz_global_regex_scripts');
-          List<dynamic> merged = existing != null ? jsonDecode(existing) as List : [];
-          final existingIds = merged.map((e) => (e as Map<String, dynamic>)['id']?.toString()).toSet();
+          List<dynamic> merged = existing != null
+              ? jsonDecode(existing) as List
+              : [];
+          final existingIds = merged
+              .map((e) => (e as Map<String, dynamic>)['id']?.toString())
+              .toSet();
           for (final item in decoded) {
-            if (item is Map<String, dynamic> && !existingIds.contains(item['id']?.toString())) {
+            if (item is Map<String, dynamic> &&
+                !existingIds.contains(item['id']?.toString())) {
               final normalized = normalizeJsGlobalRegex(item);
               merged.add(normalized);
               existingIds.add(normalized['id']?.toString());
@@ -164,10 +228,15 @@ class JsBackupImporter extends BackupHelpers {
       } catch (_) {}
     } else if (regexScriptsRaw is List) {
       final existing = prefs.getString('gz_global_regex_scripts');
-      List<dynamic> merged = existing != null ? jsonDecode(existing) as List : [];
-      final existingIds = merged.map((e) => (e as Map<String, dynamic>)['id']?.toString()).toSet();
+      List<dynamic> merged = existing != null
+          ? jsonDecode(existing) as List
+          : [];
+      final existingIds = merged
+          .map((e) => (e as Map<String, dynamic>)['id']?.toString())
+          .toSet();
       for (final item in regexScriptsRaw) {
-        if (item is Map<String, dynamic> && !existingIds.contains(item['id']?.toString())) {
+        if (item is Map<String, dynamic> &&
+            !existingIds.contains(item['id']?.toString())) {
           final normalized = normalizeJsGlobalRegex(item);
           merged.add(normalized);
           existingIds.add(normalized['id']?.toString());
@@ -176,8 +245,7 @@ class JsBackupImporter extends BackupHelpers {
       await prefs.setString('gz_global_regex_scripts', jsonEncode(merged));
     }
 
-    final memSettingsRaw =
-        ls['gz_memory_settings'] ?? kv['gz_memory_settings'];
+    final memSettingsRaw = ls['gz_memory_settings'] ?? kv['gz_memory_settings'];
     if (memSettingsRaw is String) {
       try {
         await prefs.setString('memorySettings', memSettingsRaw);

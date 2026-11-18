@@ -12,11 +12,11 @@ class GlossaryTerm {
   });
 
   factory GlossaryTerm.fromJson(Map<String, dynamic> json) => GlossaryTerm(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        alt: json['alt'] as String?,
-        desc: (json['desc'] as String?) ?? '',
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    alt: json['alt'] as String?,
+    desc: (json['desc'] as String?) ?? '',
+  );
 }
 
 class GlossaryCategory {

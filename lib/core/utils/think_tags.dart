@@ -1,7 +1,19 @@
-final _thinkTagRegex = RegExp(r'<think\b[^>]*>[\s\S]*?<\/think\b[^>]*>', caseSensitive: false);
-final _thinkTagAltRegex = RegExp(r'<think\b([^>]*?)(?:>|\n)([\s\S]*?)<\/think\b', caseSensitive: false);
-final _thinkingTagRegex = RegExp(r'<thinking\b[^>]*>[\s\S]*?<\/thinking\b[^>]*>', caseSensitive: false);
-final _thinkingTagAltRegex = RegExp(r'<thinking\b([^>]*?)(?:>|\n)([\s\S]*?)<\/thinking\b', caseSensitive: false);
+final _thinkTagRegex = RegExp(
+  r'<think\b[^>]*>[\s\S]*?<\/think\b[^>]*>',
+  caseSensitive: false,
+);
+final _thinkTagAltRegex = RegExp(
+  r'<think\b([^>]*?)(?:>|\n)([\s\S]*?)<\/think\b',
+  caseSensitive: false,
+);
+final _thinkingTagRegex = RegExp(
+  r'<thinking\b[^>]*>[\s\S]*?<\/thinking\b[^>]*>',
+  caseSensitive: false,
+);
+final _thinkingTagAltRegex = RegExp(
+  r'<thinking\b([^>]*?)(?:>|\n)([\s\S]*?)<\/thinking\b',
+  caseSensitive: false,
+);
 
 final _stripThinkCache = <String, String>{};
 

@@ -38,7 +38,9 @@ final turnCoverageProvider = FutureProvider.autoDispose
       try {
         final decoded = jsonDecode(row.manifestJson);
         if (decoded is! Map) return null;
-        return ExactLorebookManifest.fromJson(Map<String, dynamic>.from(decoded));
+        return ExactLorebookManifest.fromJson(
+          Map<String, dynamic>.from(decoded),
+        );
       } catch (error, stack) {
         debugPrint('TURN COVERAGE: manifest decode failed: $error\n$stack');
         return null;

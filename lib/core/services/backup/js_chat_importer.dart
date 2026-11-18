@@ -40,7 +40,10 @@ class JsChatImporter extends BackupHelpers {
   }
 
   Future<void> importChatsFromMap(
-      Map<String, dynamic> kv, String prefix, Set<String> validCharIds) async {
+    Map<String, dynamic> kv,
+    String prefix,
+    Set<String> validCharIds,
+  ) async {
     final chatKeys = kv.keys.where((k) => k.startsWith(prefix));
 
     for (final key in chatKeys) {
@@ -53,7 +56,9 @@ class JsChatImporter extends BackupHelpers {
   }
 
   Future<void> importChatData(
-      String charId, Map<String, dynamic> chatData) async {
+    String charId,
+    Map<String, dynamic> chatData,
+  ) async {
     if (charId == 'undefined' || charId.isEmpty) return;
     final sessions = chatData['sessions'] as Map<String, dynamic>?;
     if (sessions == null) return;
@@ -67,7 +72,9 @@ class JsChatImporter extends BackupHelpers {
       final rawMessages = sessionEntry.value;
       if (rawMessages is! List) continue;
 
-      final typedMessages = rawMessages.whereType<Map<String, dynamic>>().toList();
+      final typedMessages = rawMessages
+          .whereType<Map<String, dynamic>>()
+          .toList();
       final messages = typedMessages.asMap().entries.map((e) {
         return normalizeJsMessage(e.value, charId, sessionIdx, e.key);
       }).toList();
@@ -76,19 +83,21 @@ class JsChatImporter extends BackupHelpers {
       final chatUpdatedAt = toInt(chatData['updatedAt']);
       final anRaw = authorsNotesRaw?[sessionEntry.key];
       final authorsNoteJson = encodeAuthorsNote(anRaw);
-      final draft =
-          chatData['draft'] is String ? chatData['draft'] as String : null;
+      final draft = chatData['draft'] is String
+          ? chatData['draft'] as String
+          : null;
       final scrollAnchor = chatData['lastScrollAnchor'] is Map
           ? jsonEncode(chatData['lastScrollAnchor'])
           : null;
-      await db.into(db.chatSessions).insertOnConflictUpdate(
+      await db
+          .into(db.chatSessions)
+          .insertOnConflictUpdate(
             ChatSessionsCompanion.insert(
               sessionId: sessionId,
               characterId: charId,
               sessionIndex: sessionIdx,
               messagesJson: jsonEncode(messages),
-              updatedAt:
-                  Value(chatUpdatedAt ?? currentTimestampSeconds()),
+              updatedAt: Value(chatUpdatedAt ?? currentTimestampSeconds()),
               authorsNoteJson: Value(authorsNoteJson),
               draft: Value(draft),
               lastScrollAnchorJson: Value(scrollAnchor),
@@ -98,11 +107,8 @@ class JsChatImporter extends BackupHelpers {
 
     final currentId = toInt(chatData['currentId']);
     if (currentId != null) {
-      await (db.update(db.characters)
-            ..where((t) => t.charId.equals(charId)))
-          .write(CharactersCompanion(
-        currentSessionIndex: Value(currentId),
-      ));
+      await (db.update(db.characters)..where((t) => t.charId.equals(charId)))
+          .write(CharactersCompanion(currentSessionIndex: Value(currentId)));
     }
 
     final memoryImporter = JsMemoryImporter(db);

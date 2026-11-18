@@ -4,8 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/summary_service.dart'
-    show summaryShortenSlackPercent;
+import '../../../core/llm/summary_service.dart' show summaryShortenSlackPercent;
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/summary_block.dart';

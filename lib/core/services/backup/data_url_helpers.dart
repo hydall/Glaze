@@ -9,7 +9,8 @@ mixin DataUrlHelpers {
     final base64Str = dataUrl.substring(commaIndex + 1);
     try {
       return Uint8List.fromList(
-          Uri.parse('data:;base64,$base64Str').data!.contentAsBytes());
+        Uri.parse('data:;base64,$base64Str').data!.contentAsBytes(),
+      );
     } catch (_) {
       return null;
     }

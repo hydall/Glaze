@@ -34,6 +34,7 @@ class ChatSessionOps extends AsyncNotifier<List<ChatSession>> {
   }
 }
 
-final chatSessionOpsProvider = AsyncNotifierProvider<ChatSessionOps, List<ChatSession>>(
-  ChatSessionOps.new,
-);
+final chatSessionOpsProvider =
+    AsyncNotifierProvider<ChatSessionOps, List<ChatSession>>(
+      ChatSessionOps.new,
+    );

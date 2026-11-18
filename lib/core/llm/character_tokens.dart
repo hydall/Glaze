@@ -9,13 +9,13 @@ import 'tokenizer.dart' as tok;
 /// underlying [tok.estimateTokens] is itself memoized, so the rare live
 /// fallback (un-migrated rows) is still cheap.
 int estimateCharacterTokens(Character char) => estimateCharacterTokensFromParts(
-      name: char.name,
-      description: char.description,
-      personality: char.personality,
-      scenario: char.scenario,
-      firstMes: char.firstMes,
-      mesExample: char.mesExample,
-    );
+  name: char.name,
+  description: char.description,
+  personality: char.personality,
+  scenario: char.scenario,
+  firstMes: char.firstMes,
+  mesExample: char.mesExample,
+);
 
 int estimateCharacterTokensFromParts({
   required String name,

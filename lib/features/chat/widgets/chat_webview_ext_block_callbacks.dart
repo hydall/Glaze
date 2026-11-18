@@ -39,8 +39,7 @@ class ChatWebViewExtBlockCallbacks {
   final String? sessionId;
   final BuildContext context;
   final bool Function() isMounted;
-  final Future<void> Function(String sessionId, String messageId)
-      refreshPanel;
+  final Future<void> Function(String sessionId, String messageId) refreshPanel;
 
   /// Build the `onExtBlocksRunAll` callback: re-runs every enabled
   /// block for the given [messageId] (resolves sessionId/character
@@ -56,7 +55,9 @@ class ChatWebViewExtBlockCallbacks {
       if (character == null) return;
       final persona = _effectivePersona();
       final binding = _messageBinding(sessionId, messageId, chatState.messages);
-      await ref.read(extensionPostGenServiceProvider).runBlocksForMessage(
+      await ref
+          .read(extensionPostGenServiceProvider)
+          .runBlocksForMessage(
             charId: charId,
             sessionId: sessionId,
             messageId: messageId,
@@ -90,8 +91,15 @@ class ChatWebViewExtBlockCallbacks {
       final character = ref.read(characterByIdProvider(charId));
       if (character == null) return;
       final persona = _effectivePersona();
-      final binding = _bindingFor(sessionId, messageId, blockId, chatState.messages);
-      await ref.read(extensionPostGenServiceProvider).rerunBlock(
+      final binding = _bindingFor(
+        sessionId,
+        messageId,
+        blockId,
+        chatState.messages,
+      );
+      await ref
+          .read(extensionPostGenServiceProvider)
+          .rerunBlock(
             blockId: blockId,
             messageId: messageId,
             swipeId: binding.swipeId,
@@ -119,8 +127,15 @@ class ChatWebViewExtBlockCallbacks {
       final character = ref.read(characterByIdProvider(charId));
       if (character == null) return;
       final persona = _effectivePersona();
-      final binding = _bindingFor(sessionId, messageId, blockId, chatState.messages);
-      await ref.read(extensionPostGenServiceProvider).rerunImageOnly(
+      final binding = _bindingFor(
+        sessionId,
+        messageId,
+        blockId,
+        chatState.messages,
+      );
+      await ref
+          .read(extensionPostGenServiceProvider)
+          .rerunImageOnly(
             blockId: blockId,
             messageId: messageId,
             swipeId: binding.swipeId,
@@ -178,9 +193,7 @@ class ChatWebViewExtBlockCallbacks {
       );
       if (!isMounted()) return;
       if (!confirmed) return;
-      await ref
-          .read(infoBlocksProvider(sessionId).notifier)
-          .delete(block.id);
+      await ref.read(infoBlocksProvider(sessionId).notifier).delete(block.id);
       if (!isMounted()) return;
       await refreshPanel(sessionId, messageId);
     };
@@ -220,11 +233,7 @@ class ChatWebViewExtBlockCallbacks {
     );
   }
 
-  InfoBlock? _blockForChat(
-    String sessionId,
-    String messageId,
-    String blockId,
-  ) {
+  InfoBlock? _blockForChat(String sessionId, String messageId, String blockId) {
     final chatState = ref.read(chatProvider(charId)).value;
     if (chatState == null) return null;
     for (final message in chatState.messages) {

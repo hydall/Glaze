@@ -77,7 +77,9 @@ class AgentLibraryNotifier extends AsyncNotifier<List<AgentDefinition>> {
 
   /// Built-in agents can be edited but not deleted.
   Future<void> delete(String id) async {
-    final agent = (state.value ?? const []).where((a) => a.id == id).firstOrNull;
+    final agent = (state.value ?? const [])
+        .where((a) => a.id == id)
+        .firstOrNull;
     if (agent == null || agent.id.startsWith('builtin_')) return;
     await _repo.delete(id);
     ref.invalidateSelf();
@@ -118,10 +120,9 @@ class AgentLibraryNotifier extends AsyncNotifier<List<AgentDefinition>> {
   }
 
   static String exportJson(AgentDefinition agent) =>
-      const JsonEncoder.withIndent('  ').convert({
-        'glazeAgent': 1,
-        'agent': agent.toJson(),
-      });
+      const JsonEncoder.withIndent(
+        '  ',
+      ).convert({'glazeAgent': 1, 'agent': agent.toJson()});
 
   static int _nextOrder(List<AgentDefinition> agents) => agents.isEmpty
       ? 0
@@ -145,3 +146,54 @@ const agentsOffSessionVar = 'glaze_agents_off';
 
 bool agentsOffInSession(Map<String, String> sessionVars) =>
     sessionVars[agentsOffSessionVar] == '1';
+
+typedef ChatAgentsKey = ({String charId, String sessionId});
+
+/// One agent as a chat sees it: the agent and its effective state there.
+typedef ChatAgentEntry = ({AgentDefinition agent, AgentChatState state});
+
+/// Every agent of the library with its state in one chat, live.
+final chatAgentsProvider =
+    Provider.family<AsyncValue<List<ChatAgentEntry>>, ChatAgentsKey>((
+      ref,
+      key,
+    ) {
+      final library = ref.watch(agentLibraryProvider);
+      final bindings = ref.watch(agentBindingsProvider);
+      if (library.hasError) return AsyncError(library.error!, StackTrace.empty);
+      if (!library.hasValue || !bindings.hasValue) return const AsyncLoading();
+      return AsyncData([
+        for (final agent in library.requireValue)
+          (
+            agent: agent,
+            state: resolveAgentState(
+              agent,
+              bindings.requireValue,
+              charId: key.charId,
+              sessionId: key.sessionId,
+            ),
+          ),
+      ]);
+    });
+
+/// Whether the agent of [builtinKind] is switched on in a chat (ignoring the
+/// chat's own off switch, which the caller checks against the session).
+final chatBuiltinAgentOnProvider =
+    Provider.family<bool, ({String charId, String sessionId, String kind})>((
+      ref,
+      key,
+    ) {
+      final entries =
+          ref
+              .watch(
+                chatAgentsProvider((
+                  charId: key.charId,
+                  sessionId: key.sessionId,
+                )),
+              )
+              .value ??
+          const <ChatAgentEntry>[];
+      return entries.any(
+        (entry) => entry.agent.builtinKind == key.kind && entry.state.enabled,
+      );
+    });

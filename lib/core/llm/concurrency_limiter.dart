@@ -21,10 +21,7 @@ class ConcurrencyLimiter {
     }
     final results = <R>[];
     for (var i = 0; i < items.length; i += limit) {
-      final chunk = items.sublist(
-        i,
-        (i + limit).clamp(0, items.length),
-      );
+      final chunk = items.sublist(i, (i + limit).clamp(0, items.length));
       results.addAll(await Future.wait(chunk.map(run)));
     }
     return results;

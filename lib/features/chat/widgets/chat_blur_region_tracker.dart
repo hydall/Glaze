@@ -118,11 +118,7 @@ class _BlurRegionTrackerState extends State<BlurRegionTracker> {
       _registry?.unregister(widget.id, context);
       _registry = registry;
     }
-    _registry?.register(
-      widget.id,
-      context,
-      context.glazeRadius(widget.radius),
-    );
+    _registry?.register(widget.id, context, context.glazeRadius(widget.radius));
   }
 
   @override
@@ -131,11 +127,7 @@ class _BlurRegionTrackerState extends State<BlurRegionTracker> {
     if (oldWidget.id != widget.id) {
       _registry?.unregister(oldWidget.id, context);
     }
-    _registry?.register(
-      widget.id,
-      context,
-      context.glazeRadius(widget.radius),
-    );
+    _registry?.register(widget.id, context, context.glazeRadius(widget.radius));
   }
 
   @override

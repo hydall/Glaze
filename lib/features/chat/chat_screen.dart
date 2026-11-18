@@ -84,6 +84,11 @@ import 'widgets/triggered_items_sheet.dart';
 import 'widgets/webview_callbacks.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/agent_providers.dart';
+import '../../core/models/agent_binding.dart';
+import '../../core/models/agent_definition.dart';
+import '../../core/llm/game_time.dart';
+import 'widgets/game_time_seed_dialog.dart';
 import 'widgets/session_lifecycle_tracker.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 import '../extensions/services/page/ext_blocks_page.dart';
@@ -1336,9 +1341,85 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     );
   }
 
-  /// Runs before a send or a regeneration. The Tracker agent asks for the
-  /// opening game date and time here; until agents exist nothing blocks.
-  Future<bool> _maybeSeedGameTime() async => true;
+  bool _rewriteAgentOn() {
+    final session = widget.state.session;
+    if (session == null || agentsOffInSession(session.sessionVars)) {
+      return false;
+    }
+    final entries =
+        ref
+            .watch(
+              chatAgentsProvider((
+                charId: widget.charId,
+                sessionId: session.id,
+              )),
+            )
+            .value ??
+        const <ChatAgentEntry>[];
+    return entries.any(
+      (entry) =>
+          entry.state.enabled &&
+          entry.agent.resultType == AgentResultType.textRewrite,
+    );
+  }
+
+  /// Before the first message of a chat where the Tracker agent runs, require
+  /// a complete world:date/day/time tuple. Other chats never enter this path.
+  Future<bool> _maybeSeedGameTime() async {
+    try {
+      final session = widget.state.session;
+      if (session == null) return false;
+      bool isCurrentSession() =>
+          mounted &&
+          ref.read(chatProvider(widget.charId)).value?.session?.id ==
+              session.id;
+      if (widget.state.messages.any((m) => m.role == 'user')) return true;
+      if (agentsOffInSession(session.sessionVars)) return true;
+      final library = await ref.read(agentLibraryProvider.future);
+      final bindings = await ref.read(agentBindingRepoProvider).getAll();
+      if (!isCurrentSession()) return false;
+      final trackerOn = agentsEnabledFor(
+        library,
+        bindings,
+        charId: widget.charId,
+        sessionId: session.id,
+      ).any((agent) => agent.builtinKind == AgentBuiltin.tracker);
+      if (!trackerOn) return true;
+      final trackerRepo = ref.read(trackerRepoProvider);
+      final existing = await Future.wait([
+        trackerRepo.get(session.id, GameTimeState.timeKey),
+        trackerRepo.get(session.id, GameTimeState.dateKey),
+        trackerRepo.get(session.id, GameTimeState.dayKey),
+      ]);
+      if (!isCurrentSession()) return false;
+      if (GameTimeState.fromTrackers(existing.nonNulls).format() != null) {
+        return true;
+      }
+      if (!mounted) return false;
+      final result = await GlazeBottomSheet.show<GameTimeSeedResult>(
+        context,
+        title: 'game_time_seed_title'.tr(),
+        isDismissible: false,
+        locked: true,
+        child: const GameTimeSeedDialog(),
+      );
+      if (result == null) return false;
+      if (!isCurrentSession()) return false;
+      final seeded = await trackerRepo.seedInitialGameTime(
+        sessionId: session.id,
+        time: result.time,
+        date: result.date,
+        expectedValues: {
+          GameTimeState.timeKey: existing[0]?.value,
+          GameTimeState.dateKey: existing[1]?.value,
+          GameTimeState.dayKey: existing[2]?.value,
+        },
+      );
+      return seeded && isCurrentSession();
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// Guards message sending behind an explicitly selected persona. When no
   /// persona is selected in the persona list, shows a notice sheet with a
@@ -1935,6 +2016,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             appSettings?.disableSwipeRegeneration ?? false,
                         disableStreamAutoScroll:
                             appSettings?.disableStreamAutoScroll ?? false,
+                        // Shows the rerun-Post-Clean button: a rewrite
+                        // agent is on in this chat.
+                        studioEnabled: _rewriteAgentOn(),
                         translationEnabled: ref.watch(
                           pipelineSettingsProvider.select(
                             (p) => p.translation.enabled,
@@ -2014,6 +2098,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             await ref
                                 .read(chatProvider(widget.charId).notifier)
                                 .regenerateLastAssistant();
+                          },
+                          onRerunCleaner: (id) {
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .rerunCleaner(id);
                           },
                           onTranslateMessage: _onTranslateMessage,
                           onToggleHidden: (id) {

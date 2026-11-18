@@ -27,11 +27,11 @@ class MemoryProvenanceKeyBuilder {
     required MemoryBook? book,
     required List<ChatMessage> history,
   }) {
-    final anchorMessageId = regenTargetId ??
-        (history.isNotEmpty ? history.last.id : sessionId);
+    final anchorMessageId =
+        regenTargetId ?? (history.isNotEmpty ? history.last.id : sessionId);
 
-    final anchorSwipeId = previousSwipeId ??
-        (history.isNotEmpty ? history.last.swipeId : 0);
+    final anchorSwipeId =
+        previousSwipeId ?? (history.isNotEmpty ? history.last.swipeId : 0);
 
     final settingsRevision = _hashSettings(settings);
 

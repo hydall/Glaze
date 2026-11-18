@@ -158,7 +158,8 @@ class LorebooksNotifier extends AsyncNotifier<List<Lorebook>> {
   Future<void> _syncActivationsToPrefs(Iterable<Lorebook> lorebooks) async {
     final current = ref.read(lorebookActivationsProvider);
     final charMap = <String, List<String>>{
-      for (final e in current.character.entries) e.key: List<String>.from(e.value),
+      for (final e in current.character.entries)
+        e.key: List<String>.from(e.value),
     };
     final chatMap = <String, List<String>>{
       for (final e in current.chat.entries) e.key: List<String>.from(e.value),

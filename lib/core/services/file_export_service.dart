@@ -171,7 +171,10 @@ class FileExportService {
   }
 
   static Future<String> _saveToDownloads(
-      String data, String filename, String subfolder) async {
+    String data,
+    String filename,
+    String subfolder,
+  ) async {
     final dir = await _androidGlazeDir(subfolder);
     if (dir != null) {
       try {
@@ -185,7 +188,10 @@ class FileExportService {
   }
 
   static Future<String> _saveBytesToDownloads(
-      List<int> bytes, String filename, String subfolder) async {
+    List<int> bytes,
+    String filename,
+    String subfolder,
+  ) async {
     final dir = await _androidGlazeDir(subfolder);
     if (dir != null) {
       try {
@@ -199,9 +205,14 @@ class FileExportService {
   }
 
   static Future<String> _saveToMacDownloads(
-      String data, String filename, String subfolder) async {
+    String data,
+    String filename,
+    String subfolder,
+  ) async {
     final downloads = await getDownloadsDirectory();
-    final dir = Directory('${downloads?.path ?? '~/Downloads'}/Glaze/$subfolder');
+    final dir = Directory(
+      '${downloads?.path ?? '~/Downloads'}/Glaze/$subfolder',
+    );
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
@@ -211,9 +222,14 @@ class FileExportService {
   }
 
   static Future<String> _saveBytesToMacDownloads(
-      List<int> bytes, String filename, String subfolder) async {
+    List<int> bytes,
+    String filename,
+    String subfolder,
+  ) async {
     final downloads = await getDownloadsDirectory();
-    final dir = Directory('${downloads?.path ?? '~/Downloads'}/Glaze/$subfolder');
+    final dir = Directory(
+      '${downloads?.path ?? '~/Downloads'}/Glaze/$subfolder',
+    );
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
@@ -232,8 +248,7 @@ class FileExportService {
     return file.path;
   }
 
-  static Future<String> _shareBytes(
-      List<int> bytes, String filename) async {
+  static Future<String> _shareBytes(List<int> bytes, String filename) async {
     final tempDir = await getTemporaryDirectory();
     final file = File('${tempDir.path}/$filename');
     await file.writeAsBytes(bytes);
@@ -259,7 +274,10 @@ class FileExportService {
   }
 
   static Future<String> _copyToDownloads(
-      String sourcePath, String filename, String subfolder) async {
+    String sourcePath,
+    String filename,
+    String subfolder,
+  ) async {
     final dir = await _androidGlazeDir(subfolder);
     if (dir != null) {
       try {
@@ -273,9 +291,14 @@ class FileExportService {
   }
 
   static Future<String> _copyToMacDownloads(
-      String sourcePath, String filename, String subfolder) async {
+    String sourcePath,
+    String filename,
+    String subfolder,
+  ) async {
     final downloads = await getDownloadsDirectory();
-    final dir = Directory('${downloads?.path ?? '~/Downloads'}/Glaze/$subfolder');
+    final dir = Directory(
+      '${downloads?.path ?? '~/Downloads'}/Glaze/$subfolder',
+    );
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
@@ -286,7 +309,10 @@ class FileExportService {
 
   static Future<String> _shareFile(String sourcePath, String filename) async {
     await SharePlus.instance.share(
-      ShareParams(files: [XFile(sourcePath)], sharePositionOrigin: _shareOrigin),
+      ShareParams(
+        files: [XFile(sourcePath)],
+        sharePositionOrigin: _shareOrigin,
+      ),
     );
     return sourcePath;
   }

@@ -367,10 +367,7 @@ class _ParamTile extends StatelessWidget {
   /// Upper-casing a camelCase key on its own produced `PROTOCOLENDPOINT`, so
   /// the word boundaries are turned into underscores first.
   static String formatLabel(String label) => label
-      .replaceAllMapped(
-        RegExp(r'([a-z0-9])([A-Z])'),
-        (m) => '${m[1]}_${m[2]}',
-      )
+      .replaceAllMapped(RegExp(r'([a-z0-9])([A-Z])'), (m) => '${m[1]}_${m[2]}')
       .replaceAllMapped(
         RegExp(r'([A-Z]+)([A-Z][a-z])'),
         (m) => '${m[1]}_${m[2]}',

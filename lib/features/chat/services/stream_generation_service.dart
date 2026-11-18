@@ -42,6 +42,9 @@ import '../state/cached_token_breakdown.dart';
 import '../state/generation_phase_provider.dart';
 import '../state/memory_activity_provider.dart';
 import 'memory_agent_recorder.dart';
+import 'agents/agent_turn_service.dart';
+import '../../../core/llm/agents/agent_turn_plan.dart';
+import '../../../core/llm/prompt/runtime_prompt_block.dart';
 import 'saved_message_writer.dart';
 import '../../../core/plugins/plugin_hooks.dart';
 import '../../model_tools/character_tool_sheet.dart';
@@ -181,10 +184,52 @@ class StreamGenerationService {
       }
       final apiConfig = inputs.apiConfig;
 
+      // Agents: one plan per turn. A continuation extends the reply it
+      // continues and runs no agents.
+      final agentService = _ref.read(agentTurnServiceProvider);
+      final agentPlan = continueTargetId != null
+          ? AgentTurnPlan.empty
+          : await agentService.planFor(
+              charId: _charId,
+              session: session,
+              history: inputs.history,
+            );
+      _ref.read(agentTurnRegistryProvider).put(_charId, _genId, agentPlan);
+      final agentAnchorId = inputs.history.lastOrNull?.id ?? '';
+      var agentBlocks = const <RuntimePromptBlock>[];
+      if (agentPlan.preGenerationWaves.isNotEmpty ||
+          agentPlan.parallel.isNotEmpty) {
+        if (agentPlan.preGenerationWaves.isNotEmpty) {
+          _phase(GenerationPhase.agents);
+        }
+        agentBlocks = await agentService.runBeforeReply(
+          plan: agentPlan,
+          inputs: inputs,
+          sessionId: session.id,
+          anchorMessageId: agentAnchorId,
+          cancelToken: cancelToken,
+          isAborted: _isAborted,
+        );
+        if (_isAborted()) {
+          return ChatState(
+            session: saveSession ?? session,
+            isGenerating: false,
+            visibleStartIndex: vsi,
+          );
+        }
+      }
       _phase(GenerationPhase.prompt);
-      final payload = await builder.buildOrdinaryFromGenerationContext(
+      final payload = (await builder.buildOrdinaryFromGenerationContext(
         inputs,
         shouldAbort: _isAborted,
+      )).withExtraRuntimePromptBlocks(agentBlocks);
+      // Parallel agents start beside the reply; Stop cancels them with it.
+      agentService.startParallel(
+        plan: agentPlan,
+        inputs: inputs,
+        sessionId: session.id,
+        anchorMessageId: agentAnchorId,
+        cancelToken: cancelToken,
       );
       final promptResult = await buildPromptInIsolate(payload);
       await builder.ensureMemoryEntriesCurrent(

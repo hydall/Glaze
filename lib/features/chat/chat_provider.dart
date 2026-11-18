@@ -19,6 +19,9 @@ import '../translation/translation_service.dart';
 import 'abort_handler.dart';
 import 'chat_session_service.dart';
 import 'chat_state.dart';
+import '../../core/state/agent_providers.dart';
+import '../../core/models/agent_binding.dart';
+import '../../core/models/agent_definition.dart';
 import 'editing_message_provider.dart';
 import 'generating_sessions_provider.dart';
 import 'image_recovery_service.dart';
@@ -1303,6 +1306,48 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       previousSwipesMeta: previousSwipesMeta,
       regenTargetId: regenTargetId,
       continueTargetId: continueTargetId,
+    );
+  }
+
+  /// Re-run Post Clean on an existing assistant message. Appends a new
+  /// 'cleaned' blue sub-swipe built from the final (agentSwipes[0]) text. See
+  /// [GenerationPipeline.rerunCleaner].
+  Future<void> rerunCleaner(String messageId) async {
+    if (!ref.mounted) return;
+    final current = state.value;
+    final session = current?.session;
+    if (current == null ||
+        session == null ||
+        current.isGenerating ||
+        current.isPostGenRunning ||
+        agentsOffInSession(session.sessionVars)) {
+      return;
+    }
+    final library = await ref.read(agentLibraryProvider.future);
+    final bindings = await ref.read(agentBindingRepoProvider).getAll();
+    if (!ref.mounted) return;
+    final postAgents = [
+      for (final agent in agentsEnabledFor(
+        library,
+        bindings,
+        charId: arg,
+        sessionId: session.id,
+      ))
+        if (agent.phase == AgentPhase.postProcessing) agent,
+    ];
+    final pipeline = GenerationPipeline(
+      ref: ref,
+      charId: arg,
+      abortHandler: _abortHandler,
+      setState: (s) {
+        state = s;
+      },
+      getState: () => state,
+    );
+    await pipeline.rerunCleaner(
+      sessionId: session.id,
+      messageId: messageId,
+      postAgents: postAgents,
     );
   }
 }
