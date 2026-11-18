@@ -57,6 +57,12 @@ List<MagicDrawerItemDef> buildMagicDrawerItems() => [
     category: MagicDrawerCategory.config,
   ),
   MagicDrawerItemDef(
+    id: 'agents',
+    label: 'agents_title'.tr(),
+    icon: Icons.smart_toy_outlined,
+    category: MagicDrawerCategory.config,
+  ),
+  MagicDrawerItemDef(
     id: 'embeddings',
     label: 'tab_embeddings'.tr(),
     icon: Icons.hub_outlined,

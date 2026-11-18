@@ -1350,4 +1350,33 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       postAgents: postAgents,
     );
   }
+
+  /// Switches every agent off (or back on) in the open chat, without touching
+  /// their bindings. Stored as a session variable.
+  Future<void> setAgentsOff(bool off) async {
+    final session = state.value?.session;
+    if (session == null) return;
+    final updated = await ref.read(chatRepoProvider).updateSessionVarsJson(
+      session.id,
+      (vars) {
+        final next = Map<String, dynamic>.from(vars);
+        if (off) {
+          next[agentsOffSessionVar] = '1';
+        } else {
+          next.remove(agentsOffSessionVar);
+        }
+        return next;
+      },
+    );
+    if (!ref.mounted) return;
+    final current = state.value;
+    if (current?.session?.id != session.id) return;
+    final latest = current!.session!.copyWith(
+      sessionVars: {
+        for (final entry in updated.entries) entry.key: '${entry.value}',
+      },
+    );
+    ChatSessionService.updateCache(latest);
+    state = AsyncData(current.copyWith(session: latest));
+  }
 }

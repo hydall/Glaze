@@ -37,10 +37,7 @@ class AgentTurnService {
   final Ref _ref;
   final AgentCallRunner _runner;
 
-  AgentTurnService(
-    this._ref, {
-    AgentCallRunner runner = const AgentCallRunner(),
-  }) : _runner = runner;
+  AgentTurnService(this._ref, {this._runner = const AgentCallRunner()});
 
   /// The plan for the reply after [history] in [session].
   Future<AgentTurnPlan> planFor({

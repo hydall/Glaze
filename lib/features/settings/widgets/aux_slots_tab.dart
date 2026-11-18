@@ -97,6 +97,27 @@ class _AuxSlotsTabState extends ConsumerState<AuxSlotsTab> {
             ),
           ],
         ),
+        // The shared connection agents set to "helper connection" run on.
+        ApiSlotGroup(
+          key: const ValueKey('agents-helper-slot'),
+          header: 'agents_helper_title'.tr(),
+          description: 'agents_helper_desc'.tr(),
+          apiConfigId: pipeline.agents.helperApiConfigId,
+          onApiConfigChanged: (id) => _savePipeline(
+            (p) => p.copyWith(
+              agents: p.agents.copyWith(helperApiConfigId: id, helperModel: ''),
+            ),
+          ),
+          modelRows: [
+            ApiSlotModelRow(
+              value: pipeline.agents.helperModel,
+              onChanged: (value) => _savePipeline(
+                (p) =>
+                    p.copyWith(agents: p.agents.copyWith(helperModel: value)),
+              ),
+            ),
+          ],
+        ),
         _TranslationSlotPanel(
           settings: pipeline.translation,
           onChanged: _saveTranslation,

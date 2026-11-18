@@ -312,6 +312,7 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
       case 'presets':
       case 'api':
       case 'embeddings':
+      case 'agents':
       case 'lorebooks':
       case 'regex':
         _openTool(context, ref, id);

@@ -125,6 +125,13 @@ List<ToolsTileDef> buildToolsTileCatalog() => [
     defaultSize: ToolsTileSize.small,
   ),
   ToolsTileDef(
+    id: 'agents',
+    titleKey: 'agents_title',
+    subtitleKey: 'tools_agents_subtitle',
+    icon: Icons.smart_toy_outlined,
+    defaultSize: ToolsTileSize.small,
+  ),
+  ToolsTileDef(
     id: 'lorebooks',
     titleKey: 'menu_lorebooks',
     subtitleKey: 'tools_lorebooks_subtitle',

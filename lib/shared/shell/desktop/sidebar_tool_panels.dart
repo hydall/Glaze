@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../features/embeddings/embeddings_screen.dart';
+import '../../../features/agents/agents_screen.dart';
 import '../../../features/lorebooks/lorebook_list_screen.dart';
 import '../../../features/personas/persona_list_screen.dart';
 import '../../../features/presets/preset_list_screen.dart';
@@ -54,6 +55,12 @@ final List<SidebarTool> sidebarTools = [
     label: () => 'tab_embeddings'.tr(),
     icon: Icons.hub_outlined,
     builder: (_) => const EmbeddingsScreen(startExpanded: true),
+  ),
+  SidebarTool(
+    id: 'agents',
+    label: () => 'agents_title'.tr(),
+    icon: Icons.smart_toy_outlined,
+    builder: (_) => const AgentsScreen(startExpanded: true),
   ),
   SidebarTool(
     id: 'lorebooks',

@@ -15,6 +15,7 @@ import '../../features/chat/chat_screen.dart';
 import '../../features/chat_history/chat_history_screen.dart';
 import '../../features/lorebooks/lorebook_list_screen.dart';
 import '../../features/embeddings/embeddings_screen.dart';
+import '../../features/agents/agents_screen.dart';
 import '../../features/diagnostics/log_viewer_screen.dart';
 import '../../features/diagnostics/logs_screen.dart';
 import '../../features/menu/about_screen.dart';
@@ -217,6 +218,13 @@ GoRouter buildRouter(
                       pageBuilder: (_, state) => _fadePage(
                         state: state,
                         child: const LorebookListScreen(startExpanded: true),
+                      ),
+                    ),
+                    GoRoute(
+                      path: 'agents',
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        child: const AgentsScreen(startExpanded: true),
                       ),
                     ),
                     GoRoute(

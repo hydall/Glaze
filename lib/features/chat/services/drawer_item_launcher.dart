@@ -14,6 +14,7 @@ import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../character_list/character_detail_screen.dart';
 import '../../embeddings/embeddings_screen.dart';
+import '../../agents/chat_agents_sheet.dart';
 import '../../extensions/widgets/ext_blocks_settings_sheet.dart';
 import '../../glossary/glossary_sheet.dart';
 import '../../image_gen/widgets/image_gen_sheet.dart';
@@ -115,6 +116,8 @@ class DrawerItemLauncher {
         );
       case 'embeddings':
         await showEmbeddingsSheet(context);
+      case 'agents':
+        await showChatAgentsSheet(context, charId);
       case 'presets':
         await showGlazeSheet<void>(
           context: context,
