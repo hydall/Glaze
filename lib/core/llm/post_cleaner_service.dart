@@ -19,9 +19,9 @@ import 'cleaner/cleaner_prompt_builder.dart';
 import 'cleaner/cleaner_text_guard.dart';
 import 'macro_engine.dart';
 import 'shared/message_range_formatter.dart';
-import 'studio/studio_aux_prompt_assembler.dart';
+import 'aux_prompt_assembler.dart';
 import 'transport/llm_capture_context.dart';
-import '../models/studio_config.dart';
+import '../models/preset.dart';
 import '../models/studio_regex.dart';
 import 'studio_regex_applicator.dart';
 
@@ -86,7 +86,7 @@ class PostCleanerService {
     void Function(String accumulatedText)? onCleanedChunk,
     String beautyBrief = '',
     String? beautyState,
-    List<StudioPresetBlock> cleanerBlocks = const [],
+    List<PresetBlock> cleanerBlocks = const [],
     MacroContext? macroCtx,
   }) async {
     // Post-cleaner is always-on (Studio-only). Continuity checks and
@@ -304,7 +304,7 @@ class PostCleanerService {
     void Function(String accumulatedText)? onCleanedChunk,
     String beautyBrief = '',
     String? beautyState,
-    List<StudioPresetBlock> cleanerBlocks = const [],
+    List<PresetBlock> cleanerBlocks = const [],
     MacroContext? macroCtx,
   }) async {
     final rawPrompt = buildStudioCleanerPrompt(
@@ -435,7 +435,7 @@ class PostCleanerService {
     String styleInstructions = '',
     String beautyBrief = '',
     String? beautyState,
-    List<StudioPresetBlock> cleanerBlocks = const [],
+    List<PresetBlock> cleanerBlocks = const [],
     MacroContext? macroCtx,
   }) {
     if (cleanerBlocks.isEmpty || macroCtx == null) {
@@ -576,9 +576,8 @@ class PostCleanerService {
       ..writeln('Assistant response to clean:')
       ..write(assistantText);
 
-    return const StudioAuxPromptAssembler().assemble(
+    return const AuxPromptAssembler().assemble(
       blocks: cleanerBlocks,
-      injectionPoint: 'cleaner',
       macroCtx: macroCtx,
       customReplacements: customReplacements,
       runtimeSuffix: suffix.toString(),
@@ -681,7 +680,7 @@ class PostCleanerService {
     required PipelineSettings settings,
     required AuxApiConfig config,
     CancelToken? cancelToken,
-    List<StudioPresetBlock> cleanerBlocks = const [],
+    List<PresetBlock> cleanerBlocks = const [],
     String? beautyState,
   }) async {
     if (assistantText.trim().isEmpty) {

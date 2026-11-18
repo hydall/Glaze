@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/app_runtime.dart';
 import '../../../../core/models/chat_message.dart';
-import '../../../../core/state/studio_feature_provider.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/widgets/glaze_filter_chip_bar.dart';
 import '../../../../shared/widgets/glaze_spinner.dart';
@@ -13,7 +12,6 @@ import '../../services/prompt_capture_view_service.dart';
 import '../../state/request_timeline.dart';
 import '../../state/session_requests_provider.dart';
 import '../prompt_preview_screen.dart';
-import '../studio_prompt_preview_tab.dart';
 import 'inspector_insets.dart';
 import 'inspector_surface.dart';
 import 'request_detail_view.dart';
@@ -143,23 +141,16 @@ class RequestTimelineViewState extends ConsumerState<RequestTimelineView> {
       );
     }
     if (_openPreview) {
-      // No header of our own: both preview screens title themselves, and a
-      // second title stacked on top is the duplication this rework removed.
-      // They get the back button instead.
-      final agentic = ref.watch(studioFeatureEnabledProvider);
-      // The preview screens read the inset themselves, so they are not wrapped.
-      return agentic
-          ? StudioPromptPreviewTab(
-              charId: widget.charId,
-              onBack: _close,
-              coverageExpanded: widget.initialCoverage,
-            )
-          : PromptPreviewScreen(
-              charId: widget.charId,
-              embedded: true,
-              onBack: _close,
-              coverageExpanded: widget.initialCoverage,
-            );
+      // No header of our own: the preview screen titles itself, and a second
+      // title stacked on top is the duplication this rework removed. It gets
+      // the back button instead, and reads the inset itself, so it is not
+      // wrapped.
+      return PromptPreviewScreen(
+        charId: widget.charId,
+        embedded: true,
+        onBack: _close,
+        coverageExpanded: widget.initialCoverage,
+      );
     }
 
     final timeline = ref.watch(requestTimelineProvider(sessionId));

@@ -20,7 +20,7 @@ import 'package:glaze_flutter/features/catalog/widgets/janitor_lorebook_capture_
 import 'package:glaze_flutter/features/catalog/widgets/janitor_lorebooks_tab.dart';
 import 'package:glaze_flutter/features/catalog/widgets/third_party_providers_screen.dart';
 import 'package:glaze_flutter/features/character_list/character_detail_screen.dart';
-import 'package:glaze_flutter/features/studio/widgets/studio_slots_tab.dart';
+import 'package:glaze_flutter/features/settings/widgets/aux_slots_tab.dart';
 import 'package:glaze_flutter/shared/theme/app_colors.dart';
 import 'package:glaze_flutter/shared/theme/app_theme.dart';
 import 'package:glaze_flutter/shared/theme/theme_preset.dart';
@@ -257,7 +257,7 @@ void main() {
   testWidgets('4 — agents tab', (tester) async {
     await pump(
       tester,
-      StudioSlotsTab(controller: ScrollController()),
+      AuxSlotsTab(controller: ScrollController()),
       size: const Size(430, 2200),
       sheet: false,
     );

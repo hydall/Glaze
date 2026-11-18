@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/misc.dart' show ProviderListenable;
 
 import '../../../core/platform/haptics.dart';
 import '../../../core/state/active_selection_provider.dart';
-import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../core/state/summary_providers.dart';
@@ -310,8 +309,6 @@ class _ChatDrawerHostState extends ConsumerState<ChatDrawerHost> {
     on(cachedTokenBreakdownProvider(widget.charId), (p, n) => !identical(p, n));
     on(activePresetIdProvider, (p, n) => p != n);
     on(presetConnectionsProvider, (p, n) => p != n);
-    on(activeStudioPresetProvider, (p, n) => p?.value != n.value);
-    on(studioFeatureEnabledProvider, (p, n) => p != n);
     on(summaryRevisionProvider, (p, n) => p != n);
     on(activePersonaIdProvider, (p, n) => p != n);
     on(personaConnectionsProvider, (p, n) => p != n);

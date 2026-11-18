@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_settings_provider.dart';
-import '../../../core/state/studio_feature_provider.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../settings/app_settings_provider.dart';
 
@@ -12,8 +11,8 @@ import '../../settings/app_settings_provider.dart';
 ///
 /// A delete also rolls back state derived from the deleted message and every
 /// message after it. Which features are named in the warning depends on what
-/// the chat actually uses: the agent sentence appears only under an agentic
-/// preset, and the MemoryBook sentence only when a MemoryBook is enabled for
+/// the chat actually uses: the tracker sentence appears only when the session
+/// holds tracker data, and the MemoryBook sentence only when a MemoryBook is enabled for
 /// the session. Returns true when the caller may proceed and false when the
 /// user backed out. When the `confirmMessageDelete` setting is off the old
 /// immediate delete is kept and this returns true without showing the sheet.
@@ -26,7 +25,7 @@ Future<bool> confirmMessageDeletion(
   if (settings?.confirmMessageDelete == false) return true;
 
   final warning = <String>['delete_messages_warning_base'.tr()];
-  if (await _agentsInUse(ref)) {
+  if (await _trackerInUse(ref, sessionId)) {
     warning.add('delete_messages_warning_agents'.tr());
   }
   if (await _memoryBookInUse(ref, sessionId)) {
@@ -59,11 +58,21 @@ Future<bool> confirmMessageDeletion(
   return result ?? false;
 }
 
-/// An agentic preset is active, so its agents hold tracker state that the
-/// delete rolls back.
-Future<bool> _agentsInUse(WidgetRef ref) async {
+/// Whether the session holds tracker state, which a delete rolls back. Read
+/// with `refresh`, so every confirmation asks the database again.
+final sessionHasTrackerDataProvider = FutureProvider.family<bool, String>((
+  ref,
+  sessionId,
+) async {
+  final rows = await ref.read(trackerRepoProvider).getBySessionId(sessionId);
+  return rows.isNotEmpty;
+});
+
+/// The session holds tracker state, which the delete rolls back.
+Future<bool> _trackerInUse(WidgetRef ref, String? sessionId) async {
+  if (sessionId == null || sessionId.isEmpty) return false;
   try {
-    return await ref.read(studioFeatureSettledProvider.future);
+    return await ref.refresh(sessionHasTrackerDataProvider(sessionId).future);
   } catch (_) {
     return false;
   }

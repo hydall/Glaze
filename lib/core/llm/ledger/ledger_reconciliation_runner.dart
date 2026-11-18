@@ -7,7 +7,7 @@ import '../../db/repositories/ledger_debug_run_repo.dart';
 import '../../db/repositories/ledger_reconciliation_lease_repo.dart';
 import '../../db/repositories/tracker_snapshot_repo.dart';
 import '../../models/pipeline_settings.dart';
-import '../../models/studio_config.dart';
+import '../../models/preset.dart';
 import '../../models/studio_ledger_export.dart';
 import '../../models/studio_regex.dart';
 import '../../utils/id_generator.dart';
@@ -42,7 +42,7 @@ final class LedgerReconciliationRequest {
   final PipelineSettings settings;
   final AuxApiConfig config;
   final LedgerReconciliationPlan plan;
-  final List<StudioPresetBlock> ledgerBlocks;
+  final List<PresetBlock> ledgerBlocks;
   final MacroContext? macroCtx;
   final FutureOr<bool> Function()? isStillCurrent;
   final CancelToken? cancelToken;
@@ -65,7 +65,7 @@ final class LedgerReconciliationReplacementRequest {
   final String expectedRunId;
   final PipelineSettings settings;
   final AuxApiConfig config;
-  final List<StudioPresetBlock> ledgerBlocks;
+  final List<PresetBlock> ledgerBlocks;
   final MacroContext? macroCtx;
   final FutureOr<bool> Function()? isStillCurrent;
   final CancelToken? cancelToken;
@@ -285,7 +285,6 @@ final class LedgerReconciliationRunner {
             (block) =>
                 block.id == ledgerReconciliationPromptBlockId &&
                 block.enabled &&
-                block.injectionPoint == 'ledger' &&
                 block.content.trim().isNotEmpty,
           )
           .firstOrNull;

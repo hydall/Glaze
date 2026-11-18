@@ -6,7 +6,6 @@ import '../../../core/models/lorebook.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
 import '../../../core/state/lorebook_provider.dart';
-import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/summary_providers.dart';
@@ -48,17 +47,6 @@ class MagicDrawerStatsService {
     }
   }
 
-  Future<String?> _resolveStudioPresetName() async {
-    _ensureActive();
-    final studioPresetRepo = _ref.read(studioPresetRepoProvider);
-    final activeStudioPresetId = await _ref.read(
-      activeStudioPresetProvider.future,
-    );
-    _ensureActive();
-    final studioPreset = await studioPresetRepo.getById(activeStudioPresetId);
-    return studioPreset?.name;
-  }
-
   Future<MagicDrawerStats> computeStats(String charId) async {
     _ensureActive();
     final chatState = _ref.read(chatProvider(charId)).value;
@@ -95,9 +83,6 @@ class MagicDrawerStatsService {
       _ref.read(activeRegexesProvider.future),
       'activeRegexesProvider',
     );
-    final studioNameFuture = _ref.read(studioFeatureEnabledProvider)
-        ? _guarded(_resolveStudioPresetName(), 'active Studio preset')
-        : null;
     final summaryFuture = sessionId == null
         ? null
         : _guarded(summaryService.getSummary(sessionId), 'summary');
@@ -131,9 +116,7 @@ class MagicDrawerStatsService {
       _ref.read(activePresetIdProvider),
       _ref.read(presetConnectionsProvider),
     );
-    final studioName = studioNameFuture == null ? null : await studioNameFuture;
-    _ensureActive();
-    final activePresetDisplayName = studioName ?? activePreset?.name;
+    final activePresetDisplayName = activePreset?.name;
 
     // The persona this chat speaks as: its own or its character's binding
     // wins over the global selection, as when the prompt is built.

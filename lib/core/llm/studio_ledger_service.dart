@@ -14,7 +14,7 @@ import '../db/repositories/reconciliation_replacement_repo.dart';
 import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
 import '../models/pipeline_settings.dart';
-import '../models/studio_config.dart';
+import '../models/preset.dart';
 import '../models/studio_regex.dart';
 import '../services/card_rewriter/effective_canon_context_loader.dart';
 import 'aux_llm_client.dart';
@@ -33,6 +33,7 @@ import 'ledger/ledger_turn_runner.dart';
 import 'macro_engine.dart';
 import 'studio_ledger_export_parser.dart';
 import 'studio_ledger_reconciliation.dart';
+import 'ledger/ledger_engine.dart';
 
 export 'ledger/ledger_op_applier.dart';
 export 'ledger/ledger_run_result.dart';
@@ -205,7 +206,7 @@ class StudioLedgerService {
     required PipelineSettings settings,
     required AuxApiConfig config,
     required LedgerReconciliationPlan plan,
-    List<StudioPresetBlock> ledgerBlocks = const [],
+    List<PresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
     FutureOr<bool> Function()? isStillCurrent,
     CancelToken? cancelToken,
@@ -254,7 +255,7 @@ class StudioLedgerService {
     required String expectedRunId,
     required PipelineSettings settings,
     required AuxApiConfig config,
-    List<StudioPresetBlock> ledgerBlocks = const [],
+    List<PresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
     FutureOr<bool> Function()? isStillCurrent,
     CancelToken? cancelToken,
@@ -306,10 +307,10 @@ class StudioLedgerService {
     bool forceEnabled = false,
     FutureOr<bool> Function()? isStillCurrent,
     CancelToken? cancelToken,
-    List<StudioPresetBlock> ledgerBlocks = const [],
+    List<PresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
     bool commitSnapshot = false,
-    StudioLedgerEngine engine = StudioLedgerEngine.currentReconciled,
+    LedgerEngine engine = LedgerEngine.currentReconciled,
     String? operationIdentity,
     LedgerAttemptCallback? onAttemptStart,
   }) {

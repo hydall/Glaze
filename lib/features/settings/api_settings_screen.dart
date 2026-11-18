@@ -36,7 +36,7 @@ import '../../shared/widgets/sheet_view.dart';
 import 'api_config_draft.dart';
 import 'context_budget_check.dart';
 import '../model_tools/model_tool.dart';
-import '../studio/widgets/studio_slots_tab.dart';
+import 'widgets/aux_slots_tab.dart';
 import 'api_list_provider.dart';
 import 'api_preset_selection_provider.dart';
 import 'api_preset_sort.dart';
@@ -103,7 +103,7 @@ class ApiSettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
-  late int _tab; // 0 = LLM, 1 = Studio agents
+  late int _tab; // 0 = LLM, 1 = auxiliary connections
 
   bool _showApiKey = false;
   bool _isLoadingModels = false;
@@ -640,7 +640,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                         index: _tab,
                         child: switch (_tab) {
                           0 => _buildLlmTab(list, activeName),
-                          _ => StudioSlotsTab(
+                          _ => AuxSlotsTab(
                             controller: _agentsScrollController,
                             memoryBookSlotKey: _memoryBookSlotKey,
                           ),

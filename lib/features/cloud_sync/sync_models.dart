@@ -231,6 +231,8 @@ String cloudPath(String type, String id) {
       return '$cloudBase/tracker_snapshots/$id.json';
     case 'tracker_value':
       return '$cloudBase/tracker_values/$id.json';
+    // Studio is removed, but other devices may still have uploaded these;
+    // the paths stay so the engine can clean them out of the cloud.
     case 'studio_config':
       return '$cloudBase/studio_configs/$id.json';
     case 'studio_preset':

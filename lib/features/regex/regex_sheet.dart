@@ -22,11 +22,10 @@ import '../../core/services/file_export_service.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/folder_provider.dart';
 import '../../core/state/global_regex_provider.dart';
-import '../../core/state/studio_feature_provider.dart';
 import '../../core/state/studio_regex_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../presets/preset_list_provider.dart';
-import '../studio/studio_injection_points.dart';
+import 'agent_regex_stage_label.dart';
 import 'regex_list_controls.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/folder_section.dart';
@@ -401,14 +400,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     );
   }
 
-  /// Whether this sheet shows the agent list in place of the chat preset's.
-  ///
-  /// The Studio master switch decides it — except when the sheet was opened to
-  /// edit one named preset (the preset editor's own "Regex" row), where the
-  /// caller has already said which preset's scripts it means.
-  bool get _agentMode =>
-      widget.presetId == null && ref.read(studioFeatureEnabledProvider);
-
   void _showAddMenu(BuildContext context) {
     // Inside a level, what is added lands there.
     final area = _area;
@@ -416,24 +407,16 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       _showDestinationMenu(context, scope: area);
       return;
     }
-    // With Studio on there is no active chat preset, so the first destination
-    // is the agent list instead of the preset's own scripts.
-    final studioEnabled = _agentMode;
     GlazeBottomSheet.show<void>(
       context,
       title: 'menu_regex'.tr(),
       items: [
         BottomSheetItem(
-          icon: studioEnabled ? Icons.smart_toy_outlined : Icons.label_outline,
-          label: studioEnabled
-              ? 'regex_add_to_agents'.tr()
-              : 'regex_add_to_preset'.tr(),
+          icon: Icons.label_outline,
+          label: 'regex_add_to_preset'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _showDestinationMenu(
-              context,
-              scope: studioEnabled ? _RegexScope.agent : _RegexScope.preset,
-            );
+            _showDestinationMenu(context, scope: _RegexScope.preset);
           },
         ),
         BottomSheetItem(
@@ -739,14 +722,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   Widget build(BuildContext context) {
     final presetsAsync = ref.watch(presetListProvider);
     final globalAsync = ref.watch(globalRegexProvider);
-    final studioAsync = ref.watch(studioRegexProvider);
     final activePresetId = ref.watch(activePresetIdProvider);
-    // The Studio master switch decides which kind of preset is in effect, and
-    // the two are mutually exclusive — so the agent scripts do not sit beside
-    // the chat preset's, they take their place. Watched here (rather than read
-    // through [_agentMode]) so flipping the switch rebuilds the list.
-    final studioEnabled =
-        widget.presetId == null && ref.watch(studioFeatureEnabledProvider);
 
     final presets = presetsAsync.value ?? [];
     final effectivePresetId = widget.presetId ?? activePresetId;
@@ -754,7 +730,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         ? presets.where((p) => p.id == effectivePresetId).firstOrNull
         : presets.firstOrNull;
     final globalRegexes = globalAsync.value ?? <PresetRegex>[];
-    final studioRegexes = studioAsync.value ?? <StudioRegex>[];
 
     final isEdit = _view == 'edit';
     // On desktop the add action belongs in the sheet's header — drawn in the
@@ -823,10 +798,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
               )
             : _buildListView(
                 context,
-                studioEnabled: studioEnabled,
                 activePreset: activePreset,
                 globalRegexes: globalRegexes,
-                studioRegexes: studioRegexes,
               ),
       ),
       floatingActionButton: isEdit || desktop || selecting
@@ -942,10 +915,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
 
   Widget _buildListView(
     BuildContext context, {
-    required bool studioEnabled,
     required Preset? activePreset,
     required List<PresetRegex> globalRegexes,
-    required List<StudioRegex> studioRegexes,
   }) {
     final memberships =
         ref.watch(folderMembershipsProvider(FolderDomain.regex)).value ??
@@ -966,17 +937,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
 
     switch (area) {
       case null:
-        if (studioEnabled) {
-          folders.add(
-            _folderRow(
-              key: 'area:agent',
-              icon: Icons.smart_toy_outlined,
-              name: 'regex_studio_scripts'.tr(),
-              count: studioRegexes.length,
-              onTap: () => _openLevel(_RegexScope.agent),
-            ),
-          );
-        } else if (activePreset != null) {
+        if (activePreset != null) {
           folders.add(
             _folderRow(
               key: 'area:preset',
@@ -1016,6 +977,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         ];
         runOrder = [for (final r in globalRegexes) r.id];
       case _RegexScope.agent:
+        final studioRegexes =
+            ref.watch(studioRegexProvider).value ?? const <StudioRegex>[];
         scope = _RegexScope.agent;
         description = 'regex_studio_description'.tr();
         scripts = [for (final e in studioRegexes) e.script];
@@ -2050,7 +2013,7 @@ class _RegexEditViewState extends State<_RegexEditView> {
             items: studioRegexStages.map((stage) {
               return _CheckboxOption(
                 key: ValueKey('studio-regex-stage-$stage'),
-                label: studioInjectionPointLabel(stage),
+                label: agentRegexStageLabel(stage),
                 value: widget.studioStages!.contains(stage),
                 onChanged: (enabled) {
                   final stages = Set<String>.from(widget.studioStages!);

@@ -145,7 +145,6 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 | Characters | Drift `Characters` table | Repository |
 | Chat sessions | Drift `ChatSessions` table | Repository |
 | Regular presets | Drift `presets` table | `PresetRepo` |
-| Studio presets | Drift `studio_preset_rows` table | `StudioPresetRepo` |
 | API config | Drift `ApiConfigs` table | Repository |
 | Personas | Drift `Personas` table | Repository |
 | Images | File system (`dart:io` Platform) | Image storage service |
@@ -171,18 +170,14 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 
 ### Preset storage and code
 
-Regular roleplay presets and Studio presets are separate domains even though
-both are stored in the same `glaze.db` database. Their IDs may overlap; never
-read or write one through the other domain's table or repository.
+Roleplay presets live in the `presets` table, behind
+`lib/core/db/repositories/preset_repo.dart`; the model is
+`lib/core/models/preset.dart` and the screens are in `lib/features/presets/`.
+The table declarations live in `lib/core/db/tables/studio_and_presets.dart`.
 
-| Domain | Drift table | Repository | Main code directories |
-|--------|-------------|------------|-----------------------|
-| Regular presets | `presets` | `lib/core/db/repositories/preset_repo.dart` | `lib/features/presets/`, `lib/core/models/preset.dart` |
-| Studio presets | `studio_preset_rows` | `lib/core/db/repositories/studio_preset_repo.dart` | `lib/features/studio/`, Studio-specific files under `lib/features/presets/`, and `lib/core/models/studio_*` |
-
-The table declarations for both domains live in
-`lib/core/db/tables/studio_and_presets.dart`. Studio seed data lives separately
-in `lib/core/db/studio_preset_seed.dart`.
+Studio (agentic presets) is removed; the agents that replace it are planned in
+`docs/plans/AGENTS.md`. The default prompts of the engines it left behind
+(Post Clean, Tracker) live in `lib/core/llm/default_aux_prompt_blocks.dart`.
 
 ## Architecture Layers
 

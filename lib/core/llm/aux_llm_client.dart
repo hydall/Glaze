@@ -57,7 +57,7 @@ class AuxApiConfig {
 ///
 /// Provides transport (`callOnce`, `callOnceWithLog`, `callStreamWithLog`) and
 /// timeout resolution. API config resolution is handled by callers:
-/// - Studio services (cleaner, fact-checker, Ledger) use [StudioSlotResolver]
+/// - Studio services (cleaner, fact-checker, Ledger) use [AuxApiConfigResolver]
 ///   to resolve the Studio cleaner slot.
 /// - MemoryBook services (drafts, dedup) resolve `MemoryBookApiSettings`
 ///   inline.
@@ -65,7 +65,7 @@ class AuxApiConfig {
 /// Usage:
 /// ```dart
 /// const client = AuxLlmClient();
-/// final resolver = StudioSlotResolver();
+/// final resolver = AuxApiConfigResolver();
 /// final config = await resolver.resolve(
 ///   apiConfigId: studioPreset.cleanerApiConfigId,
 ///   modelOverride: pipeline.cleaner.postCleanerModel,

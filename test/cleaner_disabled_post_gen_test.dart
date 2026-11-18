@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/llm/prompt/main_model_context_snapshot.dart';
 import 'package:glaze_flutter/core/llm/studio_ledger_reconciliation.dart';
-import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
+import 'package:glaze_flutter/core/llm/post_gen_engine_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
@@ -55,7 +55,7 @@ class _RecordingLedgerStage extends LedgerStage {
     required ChatMessage targetMessage,
     bool isManualRerun = false,
     CancelToken? cancelToken,
-    StudioTurnConfigSnapshot? studioTurnConfig,
+    required PostGenEngineConfig engineConfig,
   }) async {
     calls++;
     this.finalAssistantText = finalAssistantText;
@@ -162,6 +162,12 @@ void main() {
         messages: populatedSession.messages,
         genId: genId,
         character: Character(id: 'c1', name: 'Alice'),
+        engineConfig: PostGenEngineConfig(
+          pipelineSettings: container.read(pipelineSettingsProvider),
+          apiConfigs: const [],
+          activeApiConfig: null,
+          ledgerEnabled: true,
+        ),
       );
 
       expect(extBlocks.calls, 1);

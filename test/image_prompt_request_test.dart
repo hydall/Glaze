@@ -3,11 +3,9 @@ import 'package:glaze_flutter/core/llm/history_assembler.dart';
 import 'package:glaze_flutter/core/llm/macro_engine.dart';
 import 'package:glaze_flutter/core/llm/prompt_builder.dart';
 import 'package:glaze_flutter/core/llm/prompt_regex_applicator.dart';
-import 'package:glaze_flutter/core/llm/studio/studio_history_limiter.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
-import 'package:glaze_flutter/core/models/studio_config.dart';
 
 void main() {
   const image = 'data:image/png;base64,aW1hZ2U=';
@@ -196,24 +194,6 @@ void main() {
     expect(history.single.imagePaths, [image, second]);
     expect(history.single.sourceMessageId, 'm1');
     expect(history.single.content, 'Describe\n\nBe concise');
-  });
-
-  test('Studio history limiting preserves the attachments', () {
-    const original = PromptMessage(
-      role: 'user',
-      content: 'Describe',
-      imagePaths: [image, second],
-    );
-
-    final finalHistory = StudioHistoryLimiter.limitFinalHistory(const [
-      original,
-    ], const StudioPreset(id: 's1'));
-    final trackerHistory = StudioHistoryLimiter.limitTrackerHistory(const [
-      original,
-    ], 10);
-
-    expect(finalHistory.single.imagePaths, [image, second]);
-    expect(trackerHistory.single.imagePaths, [image, second]);
   });
 
   group('ChatMessage attachments', () {

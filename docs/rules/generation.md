@@ -39,7 +39,7 @@ Full formal invariants with code references: `docs/INVARIANTS.md`
 A connection with `ApiConfig.toolCalling` on (Chat Completions, OpenRouter,
 Custom Chat Completion without Responses, Anthropic) offers the chat model the
 tools in `lib/features/model_tools/` — today the character library: list, get,
-create, update. Ordinary send/regen only; Studio and Continue never offer them.
+create, update. Ordinary send/regen only; Continue never offers them.
 
 - **Calls travel in `rawResponseJson`.** Transports put them into the
   aggregated raw response (`message.tool_calls` / Anthropic `tool_use` blocks,
@@ -220,9 +220,9 @@ memory retrieval, prompt assembly and the whole wait for the first token.
 | `preparing` | `ChatNotifier._runGeneration`, `PromptPayloadBuilder.collectGenerationContext` | character, persona, API config, history, summary |
 | `retrieving` | `collectGenerationContext` (`onPhase`) | memory candidates + lorebook vector search + message recall, awaited together |
 | `prompt` | `StreamGenerationService` | payload build + `buildPromptInIsolate` |
-| `agents` | `StreamGenerationService` (Studio branch) | tracker cycle before the final writer |
+| `agents` | reserved for agents that run before the reply (not reported yet) | — |
 | `waiting` | `StreamGenerationService` | request sent, no token back yet |
-| `reasoning` / `streaming` | SSE `onUpdate` / Studio `onFinalResponseUpdate` | reasoning-only output vs. visible reply |
+| `reasoning` / `streaming` | SSE `onUpdate` | reasoning-only output vs. visible reply |
 | `finalizing` | `PostGenCoordinator._beginForegroundPostGen` | cleaner, ledger, ext blocks, image tags |
 | `idle` | `GenerationPipeline.run` (`finally`), `AbortHandler` | nothing running — the page falls back to its default label |
 
@@ -338,48 +338,14 @@ Provider notes:
 - Gemini 4 (`gemini-4-*`) takes thinking levels only — `low | medium | high`, plus `xhigh` on Hydrogen; `thinkingBudget` is deprecated and thinking cannot be turned off. `gemini4ThinkingLevel` maps the six steps for both the native `thinkingLevel` and `reasoning_effort` on Custom Chat Completion. Thought tokens count toward `maxOutputTokens`.
 - Avoid sending undocumented fields such as `reasoning: { exclude: true }` globally. Add provider-specific body fields only behind explicit protocol/provider support and tests.
 
-Studio Mode (tracker-around-generator, Phase 5+):
-- Studio trackers (intermediate agents) always force reasoning off/omitted.
-- The final Studio generator inherits the resolved `ApiConfig` reasoning
-  settings. Studio also strips prompt-level hidden-reasoning directives from
-  final-generator instructions when reasoning is disabled/omitted, but this
-  only affects prompt text, not provider-internal thinking.
-- One main LLM (the generator) writes the visible reply; trackers run as
-  sidecars and contribute notes that shape the next prompt. Trackers do NOT
-  duplicate the generator's output. Failed trackers abort the Studio turn after
-  the initial attempt plus two retries; the final generator does not run with
-  partial tracker output. See INV-ST5 in `docs/INVARIANTS.md`.
-- Trackers with the same `(provider, model)` and `!runIndividually` are
-  batched into one LLM request via `<agents><agent_task>` XML. The batch
-  system prompt is cache-friendly: shared `<role>` + `<lore>` first, per-agent
-  `<agents>` tail (INV-ST3, INV-ST7). Heavy trackers
-  (`expression`/`illustrator`/`lorebook` name match, or explicit
-  `StudioAgent.runIndividually`) run as individual requests.
-- Retry chain on tracker failure: re-request the same tracker/batch twice, then
-  return a hard Studio error. Missing or unparseable `<result>` blocks count as
-  tracker failure and ask the user to restart generation. There is no
-  individual fallback from a failed batch.
-- Trackers receive `StudioAgent.contextSize` (default 5, hard-cap 200) last
-  messages via `_limitTrackerHistory` + `truncateAgentText` (head 40% + tail
-  60%) + `stripHtmlTags`. The generator uses a stable history window with
-  `maxFinalHistoryMessages` (default 50) and a 70K-token high-water mark. After
-  a completed assistant turn crosses either threshold, the boundary advances
-  by roughly half the current window on a complete chunk boundary. Only
-  `chat_history` rotates. See INV-ST1, INV-ST2.
-- Studio presets are reusable prompt/agent configurations stored in
-  `studio_preset_rows` and selected globally via `activeStudioPresetId`.
-  Per-session state is limited to an on/off toggle in `studio_config_rows`.
-  Agent, cleaner, and Ledger runtime settings live in the preset's
-  `StudioRuntimeSettings`, not in global `PipelineSettings`.
-- A normal turn resolves one immutable `StudioTurnConfigSnapshot` before prompt
-  construction. Trackers, final generation, POST-cleaner, and Ledger consume
-  that same snapshot; mid-turn settings/preset/API changes affect the next
-  turn. Separate manual operations may resolve a fresh snapshot (INV-ST8).
-- POST-processing is separate from the tracker pipeline: the POST-cleaner
-  runs after the full reply and writes a blue `'cleaned'` agent sub-swipe
-  via `ChatRepo.appendAgentSwipe(kind: 'cleaned')`, preserving the original
-  `'final'` as the parent. Hold mode (Marinara) is NOT implemented (Phase
-  1.3 decision). See INV-ST4.
+Post-generation engines (Post Clean, Tracker) — Studio is removed and nothing
+calls these in a normal turn until the agents system wires them
+(`docs/plans/AGENTS.md`):
+- They run on one immutable `PostGenEngineConfig` per turn; mid-turn settings
+  or API changes affect the next turn only (INV-ST8).
+- POST-cleaner runs after the full reply and writes a blue `'cleaned'` agent
+  sub-swipe, preserving the original `'final'` as the parent. Hold mode
+  (Marinara) is NOT implemented. See INV-ST4.
 - **Swipe-first streaming (UX phase):** the `'cleaned'` swipe is pre-created
   at cleaner start (empty content, parent snapshot cloned) so the blue
   switcher is visible immediately while the rewrite streams into the chat
@@ -397,18 +363,6 @@ Studio Mode (tracker-around-generator, Phase 5+):
   exists, but is not currently wired into runtime resolution. `CleanerStage`
   passes the same resolved `cleanerConfig` to both the character/world audit
   and the cleaner, so the setting currently has no runtime effect.
-- The Studio tracker-cycle is logged in the agentic operations log as a
-  `studioTracker` kind record (Phase 10). The record carries an aggregate
-  `AgentOperationAttempt` covering the whole cycle elapsed time; per-agent
-  breakdown (success / failure, agent names) goes into the `summary` text
-  since `StudioPipelineResult` does not expose per-agent LLM attempts as a
-  structured array. Records are emitted on the success path and on hard
-  failure. Aborted / disabled runs are not logged.
-- Live cycle status is surfaced to the chat UI via `studioCycleStateProvider`
-  (Phase 11) and rendered by `StudioStatusCard` (floating card at the top
-  of the chat). The cycle phases are:
-  `idle → running → writingFinal → done | error`. Aborted
-  runs reset to `idle`.
 
 ---
 
@@ -440,8 +394,8 @@ See INV-CM1, INV-CM2 before changing this path.
 ## Extension post-generation
 
 After normal/regen completion, `PostGenCoordinator` launches
-`ExtBlocksStage.launchForSwipe()` directly for ordinary generation. In Studio,
-`CleanerStage` launches it after the cleaner finalizes or is skipped. Both paths
+`ExtBlocksStage.launchForSwipe()` directly. When Post Clean runs,
+`CleanerStage` launches it instead, after the cleaner finalizes or is skipped. Both paths
 delegate to `ExtensionPostGenService.processAfterGeneration()` and then
 `runBlocksForMessage()`, binding blocks to the visible final or cleaned swipe.
 Failures are logged only (INV-EG2). Execution is gated by
@@ -456,7 +410,7 @@ reused for all three trigger types:
 
 | `BlockTrigger` | Entry point | Cancel / lifecycle |
 |---|---|---|
-| `afterAssistant` | Ordinary: `PostGenCoordinator`; Studio: `CleanerStage`; both → `ExtBlocksStage.launchForSwipe` → `processAfterGeneration` → `runBlocksForMessage` | Registers a per-run token in `_blocksCancelTokens` (INV-EG5) |
+| `afterAssistant` | `PostGenCoordinator`, or `CleanerStage` when Post Clean runs; both → `ExtBlocksStage.launchForSwipe` → `processAfterGeneration` → `runBlocksForMessage` | Registers a per-run token in `_blocksCancelTokens` (INV-EG5) |
 | `afterAssistant` manual rerun | Chat WebView ext-block callback → `runBlocksForMessage` | Registers a per-run token and can replace blocks for the selected swipe |
 | `afterUser` | `ChatNotifier.sendMessage` → `unawaited(_dispatchAfterUserBlocks)` → `runAfterUserBlocks` | Registers its own per-run token; fire-and-forget from the notifier's perspective |
 | `periodic` | `PeriodicTriggerScheduler` → `Timer.periodic(periodicIntervalSeconds)` → `runJsBlock` (no chain) | Runs only through the currently active visual chat bridge; each tick creates a fresh token and loses authorization when active chat changes; scheduler pauses in app background (INV-JS6) |

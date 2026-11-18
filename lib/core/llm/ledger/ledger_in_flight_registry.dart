@@ -2,10 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import '../../models/pipeline_settings.dart';
-import '../../models/studio_config.dart';
+import '../../models/preset.dart';
 import '../aux_llm_client.dart';
 import '../macro_engine.dart';
 import 'ledger_run_result.dart';
+import 'ledger_engine.dart';
 
 class LedgerInFlightRegistry {
   const LedgerInFlightRegistry();
@@ -21,7 +22,7 @@ class LedgerInFlightRegistry {
     required int endAgentSwipeId,
     required PipelineSettings settings,
     required AuxApiConfig config,
-    required List<StudioPresetBlock> ledgerBlocks,
+    required List<PresetBlock> ledgerBlocks,
     required MacroContext? macroCtx,
   }) => jsonEncode([
     'reconciliation',
@@ -43,7 +44,7 @@ class LedgerInFlightRegistry {
     required String expectedRunId,
     required PipelineSettings settings,
     required AuxApiConfig config,
-    required List<StudioPresetBlock> ledgerBlocks,
+    required List<PresetBlock> ledgerBlocks,
     required MacroContext? macroCtx,
   }) => jsonEncode([
     'reconciliation-replacement',
@@ -66,10 +67,10 @@ class LedgerInFlightRegistry {
     required String recentHistoryText,
     required bool forceEnabled,
     required bool commitSnapshot,
-    required StudioLedgerEngine engine,
+    required LedgerEngine engine,
     required PipelineSettings settings,
     required AuxApiConfig config,
-    required List<StudioPresetBlock> ledgerBlocks,
+    required List<PresetBlock> ledgerBlocks,
     required MacroContext? macroCtx,
   }) => jsonEncode([
     'normal',

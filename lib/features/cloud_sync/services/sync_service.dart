@@ -35,8 +35,6 @@ class SyncService {
   final SyncInfoBlockStore _infoBlockStore;
   final SyncTrackerSnapshotStore _trackerSnapshotStore;
   final SyncTrackerValueStore _trackerValueStore;
-  final SyncStudioConfigStore _studioConfigStore;
-  final SyncStudioPresetStore? _studioPresetStore;
   final SyncChatSummaryStore? _chatSummaryStore;
   final SyncCharacterFolderStore? _characterFolderStore;
   final SyncFolderStore? _folderStore;
@@ -112,8 +110,6 @@ class SyncService {
     required this._infoBlockStore,
     required this._trackerSnapshotStore,
     required this._trackerValueStore,
-    required this._studioConfigStore,
-    this._studioPresetStore,
     this._chatSummaryStore,
     this._characterFolderStore,
     this._folderStore,
@@ -154,8 +150,6 @@ class SyncService {
     infoBlockStore: _infoBlockStore,
     trackerSnapshotStore: _trackerSnapshotStore,
     trackerValueStore: _trackerValueStore,
-    studioConfigStore: _studioConfigStore,
-    studioPresetStore: _studioPresetStore,
     chatSummaryStore: _chatSummaryStore,
     characterFolderStore: _characterFolderStore,
     folderStore: _folderStore,
@@ -185,8 +179,6 @@ class SyncService {
     _infoBlockStore,
     _trackerSnapshotStore,
     _trackerValueStore,
-    _studioConfigStore,
-    _studioPresetStore,
     _chatSummaryStore,
     _characterFolderStore,
     _folderStore,

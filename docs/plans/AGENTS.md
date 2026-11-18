@@ -37,13 +37,20 @@
 | Что | Где сейчас | Роль в новой системе |
 |---|---|---|
 | Вспомогательный LLM-клиент, ретраи, idle-guard | `aux_llm_client.dart`, `aux_retry_runner.dart` | Транспорт всех агентов |
-| `AgentRunner`, `ResolvedAgentConfig` | `agent_runner.dart` | Запуск одного агента с его моделью и параметрами |
-| Батчинг одной моделью в один запрос | `controller_batcher.dart`, `controller_batch_protocol.dart` | Склейка агентов одной фазы и модели |
 | Ограничитель параллельности | `concurrency_limiter.dart` | Лимит одновременных запусков |
 | Post Clean | `post_cleaner_service.dart`, `lib/core/llm/cleaner/`, лицензия `CleanerRunLease`, `AgentSwipe(kind: cleaned)` | Тип результата `text_rewrite` |
 | Движок Трекера | `lib/core/llm/ledger/`, `studio_ledger_service.dart`, `studio_ledger_reconciliation.dart`, таблицы в `tables/ledger.dart`, снапшоты по свайпам | Тип результата `ledger_update` |
 | Card Rewriter | `lib/core/services/card_rewriter/`, экран ревью `rewrite_review_provider.dart` | Тип результата `card_update_proposal` |
 | Макрос `{{studio_state}}` | `macro_engine.dart`, `prompt_builder.dart` | Переименовать в `{{tracker_state}}` (старое имя — алиас) |
+
+Сделано в PR 1: движки получают настройки через `PostGenEngineConfig`
+(`core/llm/post_gen_engine_config.dart`), промпты — обычные `PresetBlock`,
+стандартные промпты Post Clean и Трекера — в
+`core/llm/default_aux_prompt_blocks.dart`. `AgentRunner` и `ControllerBatcher`
+(запуск и склейка агентов «до ответа») удалены вместе со Studio: они были
+целиком завязаны на 10 полос и `StudioAgent`. PR 4 строит запуск агентов
+заново под `AgentDefinition`, переносит из истории git XML-протокол склейки
+и порядок промпта под кэш.
 
 ### Удалить
 
@@ -56,7 +63,7 @@
 `lib/features/studio/`, редактор Studio-пресетов, вид `agentic` в папках
 пресетов, `studio_legacy.dart`, `studio_preset_seed.dart`, таблицы
 `studio_config_rows` и `studio_preset_rows`, `StudioRuntimeSettings`,
-`STUDIO_OVERVIEW.md`, `STUDIO_UX_ANALYSIS.md`, Studio-строки переводов.
+бывшие `STUDIO_OVERVIEW.md` и `STUDIO_UX_ANALYSIS.md`, Studio-строки переводов.
 Инварианты INV-ST1…ST10 переписываются под агентов (см. ниже).
 
 ## Модель данных

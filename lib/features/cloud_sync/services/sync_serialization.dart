@@ -18,7 +18,6 @@ import '../sync_models.dart';
 
 class SyncSerialization {
   static const pipelineSettingsKey = 'pipelineSettings';
-  static const activeStudioPresetKey = 'activeStudioPresetId';
   static const globalRegexScriptsKey = 'gz_global_regex_scripts';
   static const studioRegexScriptsKey = 'gz_studio_regex_scripts';
   static const appSettingsKey = 'appSettings';
@@ -97,13 +96,6 @@ class SyncSerialization {
   static String computeSyncHash(dynamic data) {
     final json = jsonEncode(data);
     return sha256.convert(utf8.encode(json)).toString();
-  }
-
-  static String computeStudioConfigHash(Map<String, dynamic> json) {
-    final content = Map<String, dynamic>.from(json)
-      ..remove('createdAt')
-      ..remove('updatedAt');
-    return computeSyncHash(content);
   }
 
   /// Device-local / derived fields excluded so parity does not false-conflict.
@@ -218,7 +210,6 @@ class SyncSerialization {
 
   static Map<String, dynamic> localStoragePayload({
     String? pipelineSettings,
-    String? activeStudioPresetId,
     String? globalRegexScripts,
     String? studioRegexScripts,
     Map<String, dynamic>? appSettings,
@@ -227,7 +218,6 @@ class SyncSerialization {
     return {
       '__localStorage': true,
       pipelineSettingsKey: ?pipelineSettings,
-      activeStudioPresetKey: ?activeStudioPresetId,
       globalRegexScriptsKey: ?globalRegexScripts,
       studioRegexScriptsKey: ?studioRegexScripts,
       appSettingsKey: ?appSettings,

@@ -50,8 +50,6 @@ final syncServiceProvider = FutureProvider<SyncService>((ref) async {
       ref.watch(trackerSnapshotRepoProvider),
     ),
     trackerValueStore: TrackerValueSyncStore(ref.watch(trackerRepoProvider)),
-    studioConfigStore: ref.watch(studioConfigRepoProvider),
-    studioPresetStore: ref.watch(studioPresetRepoProvider),
     chatSummaryStore: ChatSummarySyncStore(ref.watch(summaryRepoProvider)),
     characterFolderStore: CharacterFolderSyncStore(
       ref.watch(characterFolderRepoProvider),

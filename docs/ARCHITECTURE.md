@@ -28,7 +28,8 @@ owning feature's `providers/` directory.
 
 Some older `core/state -> features` imports remain as composition exceptions;
 do not extend that pattern. Architecture tests pin critical boundaries such as
-feature-free LLM implementations, provider-free Studio DTOs, and neutral sync
+feature-free LLM implementations, a provider-free post-generation engine
+config, and neutral sync
 ports. No circular imports.
 
 ### Key Rules
@@ -50,11 +51,10 @@ lib/
 │   │   └── image_gen_patterns.dart     # IMG-tag regex constants
 │   ├── db/
 │   │   ├── app_db.dart                 # AppDatabase composition root (56 tables, schema v130)
-│   │   ├── migrations/                 # Integrity, Studio legacy, and version-range upgrades
-│   │   ├── studio_preset_seed.dart     # Historical/default Studio preset seed data
+│   │   ├── migrations/                 # Integrity, memory legacy, and version-range upgrades
 │   │   ├── tables.dart                 # Barrel for seven domain table parts
 │   │   ├── tables/                     # Character/chat, memory, ledger, canon/rewrite,
-│   │   │                               # Studio/presets, lorebooks, and extensions
+│   │   │                               # presets, lorebooks, and extensions
 │   │   └── repositories/              # Persistence APIs and transactional aggregates
 │   │       ├── api_config_repo.dart
 │   │       ├── character_repo.dart
@@ -133,25 +133,17 @@ lib/
 │   │   │   ├── arc_state_builder.dart       # Arc state computation
 │   │   │   ├── ledger_tracker_loader.dart   # Effective ledger tracker loading
 │   │   │   ├── lorebook_vector_searcher.dart # Vector search within prompt building
-│   │   │   └── studio_session_state_compiler.dart # Studio session state → prompt block
+│   │   │   └── studio_session_state_compiler.dart # Tracker state → `{{studio_state}}` block
 │   │   ├── cleaner/                  # POST-cleaner specialists (extracted Phase 4)
 │   │   │   ├── cleaner_prompt_builder.dart  # Cleaner system prompt builder
 │   │   │   ├── audit_prompt_builder.dart    # Audit prompt builder + JSON parser
 │   │   │   └── cleaner_text_guard.dart      # Text rewrite protection guards
-│   │   ├── studio/                   # Studio pipeline specialists (extracted Phases 5, 7-9)
-│   │   │   ├── controller_phase_runner.dart # Pre-gen controller phase owner
-│   │   │   ├── controller_result_mapper.dart # Controller result → brief mapper
-│   │   │   ├── studio_history_limiter.dart  # History truncation for agents
-│   │   │   ├── studio_brief_macro_renderer.dart # Studio brief macro rendering
-│   │   │   ├── studio_runtime_block_expander.dart # Runtime block content expansion
-│   │   │   ├── studio_stream_interceptor.dart # Studio stream intercept (pure static)
-│   │   │   └── agent_config_resolver.dart   # Per-agent API config resolution
 │   │   ├── memory/                   # Memory injection specialists (extracted Phase 6)
 │   │   │   ├── memory_vector_searcher.dart  # Vector search for memory injection
 │   │   │   ├── memory_catalog_matcher.dart  # Catalog/keyword matching
 │   │   │   ├── memory_chunker.dart          # Text chunking + sentence splitting
 │   │   │   └── excerpt_scorer.dart          # Excerpt scoring helpers
-│   │   ├── ledger/                   # Studio Ledger execution and commit specialists
+│   │   ├── ledger/                   # Tracker (Ledger) execution and commit specialists
 │   │   │   ├── ledger_canon_authority.dart  # Canon/currentness authority
 │   │   │   ├── ledger_in_flight_registry.dart # Shared in-flight operation registry
 │   │   │   ├── ledger_output_recovery.dart  # Parse/recovery policy
@@ -480,17 +472,13 @@ Shared work starts with awaited cloud-sync and generation notifications. Raw
 message embeddings and empty MemoryBook draft planning are then launched as
 independent background tasks.
 
-**Studio OFF:** ExtBlocks run in the background. Inline `[IMG:GEN]` processing
-runs independently when image tags exist; neither task updates Studio Ledger.
+ExtBlocks then run in the background, and inline `[IMG:GEN]` processing runs
+in the foreground only when the reply carries an image tag.
 
-**Studio ON:** `CleanerStage` owns the ordered canonicalization path:
-
-1. Character & World audit (when POST-cleaner and prompt payload are available)
-2. POST-cleaner rewrite / canonical final-cleaned-partial swipe selection
-3. ExtBlocks bound to that selected `(swipeId, agentSwipeId)`
-4. Studio Ledger extraction from the same canonical text
-5. Inline image-tag processing after the cleaner/Ledger task, using the
-   reloaded canonical message
+Post Clean, the Tracker (Ledger) and Card Rewriter are not called from here at
+the moment: Studio, which used to call them, is removed, and the agents system
+that takes them over is not wired yet (`docs/plans/AGENTS.md`). Their engines
+keep the ordered path they will run on — see *Post-generation engines* below.
 
 **Continue:** `ChatNotifier.continueMessage()` runs this same pipeline with
 `continueTargetId` set. The prompt gains one system turn — *"Expand your latest
@@ -601,7 +589,7 @@ the result to recover which blocks landed where.
 `ApiConfig.requestReasoning` controls whether Glaze asks the provider for
 provider-native reasoning. `ApiConfig.omitReasoning` suppresses app-side
 reasoning request fields such as OpenAI `reasoning_effort`, Anthropic/Gemini
-thinking configs, and Studio final-agent reasoning persistence. It does **not**
+thinking configs. It does **not**
 guarantee that a provider/model disables its internal thinking.
 
 Gemini 3.x models can think by default. For example, Gemini 3.1 Pro exposes
@@ -612,133 +600,35 @@ provider-specific `reasoning: { exclude: true }` or similar body fields unless
 the target provider documents the exact field and we intentionally support that
 contract.
 
-Studio Mode follows the same policy for its final agent: trackers force
-reasoning off/omitted; the final generator inherits the resolved `ApiConfig`
-reasoning settings. Studio also strips prompt-level hidden-reasoning directives
-from final-generator instructions when reasoning is disabled/omitted, but
-cannot disable model-internal thinking if the upstream model always performs
-it.
+### Post-generation engines (Post Clean, Tracker, Card Rewriter)
 
-### Studio Mode Pipeline
+Studio is removed. What stays is the engine layer that runs after a reply; the
+agents system (`docs/plans/AGENTS.md`) will drive it as the built-in Post Clean,
+Tracker and Card Rewriter agents. Until then nothing calls these engines in a
+normal turn.
 
-Studio Mode separates analysis, prose generation, and post-generation editing.
-Pre-generation trackers create compact briefs; one FINAL agent writes the
-visible reply. Optional `StudioAgent.phase == 'post_processing'` agents then run
-sequentially after FINAL and may replace the current response. These agents are
-part of the Studio cycle and are distinct from the later POST-cleaner.
+- **Inputs.** One immutable `PostGenEngineConfig`
+  (`core/llm/post_gen_engine_config.dart`) per turn: pipeline settings, the API
+  config list, the active connection, which engines run, their prompt blocks,
+  their connections, and the Ledger prompt-injection policy.
+  `resolveCleanerConfig` / `resolveLedgerConfig` turn a connection id into an
+  `AuxApiConfig` through `AuxApiConfigResolver`; an empty id falls back to the
+  chat's connection, and the Tracker falls back to Post Clean's connection.
+- **Prompts.** Engine prompts are ordinary `PresetBlock` lists assembled by
+  `AuxPromptAssembler`. The defaults that used to live in the Studio seed are
+  in `core/llm/default_aux_prompt_blocks.dart` (`defaultCleanerBlocks()`,
+  `defaultLedgerBlocks()`).
+- **Order.** `CleanerStage` owns the canonicalization path: Character & World
+  audit, the POST-cleaner rewrite into a blue `'cleaned'` sub-swipe, ExtBlocks
+  bound to the selected `(swipeId, agentSwipeId)`, then Ledger extraction from
+  the same canonical text. MemoryBook drafts must wait for the Ledger clock.
+- **Card Rewriter** reads its settings from `PipelineSettings.cardRewriter`
+  (`cardRewriterSettingsProvider`); its collector runs on the Tracker's
+  connection.
 
-Studio has two separate persisted layers:
-
-- `studio_config_rows` stores per-session Studio activation (`enabled` flag);
-- `studio_preset_rows` stores user-owned prompt presets as JSON block lists,
-  per-controller toggles, an explicit `executionMode`, and nested
-  `StudioRuntimeSettings` (broadcast blocks, Ledger prompt-injection mode,
-  reasoning tags, and this preset's own Post Clean / Ledger / Card Rewriter
-  settings).
-
-The three post-processing lanes are configured **per preset**:
-`StudioRuntimeSettings.cleaner` / `.ledger` / `.cardRewriter` each hold that
-preset's copy of the settings object otherwise found in the global
-`PipelineSettings`. Null means the lane is unconfigured on this preset and the
-global value applies, which is what an install carries until someone edits a
-lane. `applyStudioPresetOverrides` (`core/models/studio_pipeline_overrides.dart`)
-is the single fold; `StudioTurnConfigSnapshot` applies it to the whole turn and
-`cardRewriterSettingsProvider` to the Card Rewriter lane, so no consumer reads
-either source directly. The pre-generation controller and final-writer model
-overrides, and MemoryBook generation, stay global.
-
-The active Studio preset is a global selection (`activeStudioPresetId` in
-SharedPreferences, synced via `local_storage`). Session rows carry only the
-on/off toggle — they do not bind to a specific preset.
-
-Studio prompt presets are imported, copied, edited, and exported by the user.
-The application does not expose a public default-seed reset and does not ship
-the maintainer's working Loom presets as repository assets. Updating the app
-therefore cannot silently replace a user's calibrated preset. Old seed block
-data remains private to historical DB migrations only, so upgrades from older
-schemas continue to work.
-
-At the start of a normal generation,
-`StudioTurnConfigResolver.resolve(sessionId)` captures one immutable
-`StudioTurnConfigSnapshot`: topology-gated agents, the selected Studio preset,
-pipeline settings, an immutable API-config list, and the active API fallback.
-The same snapshot is passed through prompt construction, tracker/final-agent
-execution, POST-cleaner, and Ledger. Changes made while a turn is running apply
-to later turns only. A separate manual action may resolve a fresh snapshot.
-
-#### Agent topology
-
-Studio no longer has Direct, Assisted, or Legacy execution modes. The active
-preset's agent toggles are the sole topology control. `StudioActivationGate`
-splits enabled agents into pre-generation controllers, the required Main
-Writer, and post-processing agents; declared dependencies are applied before a
-turn starts. Main Writer is locked on, while Meta-Weaver / OOC Policy is off by
-default.
-
-At generation time `MemoryStudioService` delegates the shared pre-generation
-controller phase to `ControllerPhaseRunner`, which runs:
-
-1. **Cache probe** (`_probeCache`): each due tracker is checked against
-   `_briefCache` keyed by refresh policy (`turn` / `scene` / `static`).
-   Cache hits are excluded from the LLM round-trip.
-2. **Batching** (`ControllerBatcher.groupAgents`): trackers with the same
-   `(provider, model, phase)` are packed into one LLM request
-   via `<agents><agent_task>` XML with a single system prompt that orders shared
-   context first (`<role>` + `<lore>` = static + dynamic + trimmed history) and
-   per-agent instructions last (`<agents>`) — a prompt-cache-friendly layout
-   (Phase 6.1). Heavy trackers whose names match `expression`, `illustrator`, or
-   `lorebook` are pulled out of the batch and run as their own request.
-3. **Run phase** (`ControllerBatcher.runPhase`, concurrency limit 4): batch groups
-   + individual agents fire in parallel, subject to the concurrency cap. Each
-   batch is one LLM call → `parseBatchResponse` (`<result agent="id">` with
-   missing-close-tag tolerance + `<result_ID>` legacy fallback).
-4. **Batch retry**: if any agent in the batch comes back failed or missing,
-   re-request the whole batch twice. If it still cannot be parsed, Studio
-   returns a hard error asking the user to restart generation.
-5. **Final generator** (`_runFinalGenerator`): runs after all pre-generation
-    trackers settle, using a stable history window with
-    `maxFinalHistoryMessages` (default 50) and a 70K-token high-water mark;
-    trackers receive their own `contextSize` (default 5, hard-cap 200) via
-    `StudioHistoryLimiter.limitTrackerHistory`
-   (head 40% + tail 60%) + `stripHtmlTags`.
-6. **Studio post-processing agents:** agents run in `order` every turn. Each
-   receives the current `mainResponse`; a non-empty result replaces it before
-   the cycle returns. Historical per-agent cadence and keyword gates no longer
-   live on `StudioAgent`.
-
-`ControllerPhaseRunner` owns the tracker phase and converts exhausted failures
-into a hard Studio result. `StudioBatchCoordinator` and `StudioAgentExecutor`
-own the initial attempt plus two retries for batched and individual trackers,
-respectively. Studio aborts before the final generator instead of running with
-partial tracker output. The generator's own failure aborts the turn.
-
-Per-controller model and parameter resolution comes from its immutable
-`StudioControllerSpec`, the Studio slot settings, and the chat connection
-fallback; those settings no longer live on `StudioAgent`. Concurrency cap:
-`_maxConcurrentGroups = 4` (Phase 5.7.2, conservative default for desktop).
-
-Per-slot parameter overrides (Agents tab → *Parameter overrides*) are gated on
-`<field>Override` booleans in `StudioAgentSettings` / `CleanerSettings`. A flag
-that is off makes `AgentConfigResolver` pass `null` for that parameter, so
-`copyWithSampling` / `copyWithReasoning` keep whatever the slot's `ApiConfig`
-resolved to — that is what the sheet shows as the inherited value. Temperature,
-max tokens and the idle timeout carry no flag: they already encode "not
-overridden" as a sentinel (negative / `0`) and fall back to the **per-agent
-spec**, not to the API preset, which is why the sheet labels those as the agent
-default. All flags default to `true` so an upgrade keeps applying the values it
-applied before they existed.
-
-POST-processing (Phase 1.3) stays separate from the tracker pipeline: the
-POST-cleaner runs after the full reply and writes a blue `'cleaned'` agent
-sub-swipe (`post_cleaner_service.dart`, `generation_pipeline.dart`),
-preserving the original `'final'` as the parent. Hold mode (Marinara) is not
-implemented. See INV-ST4.
-
-Beauty is cleaner-owned rather than a separate pre-generation controller.
-`CleanerStage` can derive styling guidance during its audit and passes it to the
-cleaner together with the persisted `glaze_beauty_state` session variable. The
-POST-cleaner enable switch controls automatic cleaner/audit calls, not the
-independent Studio agent topology.
+Beauty is cleaner-owned: `CleanerStage` can derive styling guidance during its
+audit and passes it to the cleaner together with the persisted
+`glaze_beauty_state` session variable.
 
 #### POST-cleaner swipe lifecycle (UX phase, "swipe-first streaming")
 
@@ -791,26 +681,6 @@ in `message_renderer.js` and incremental `_syncMessageControls` in
 condition. Otherwise the button appears only after reopening the session and
 forcing a full render.
 
-### Studio agents and block routing
-
-Studio agents are defined directly in `StudioPreset.agents`, each with an
-explicit `controllerId` (continuity / agency / narrative / dialogue / guard /
-world / meta / beauty / final). The last enabled pre-generation agent is the
-generator; all earlier agents are trackers. `StudioMessageBuilder` routes
-preset blocks to agents by `targetAgentId` and expands chat-time macros
-(`{{char}}`, `{{user}}`, `{{studio_*_brief}}`). Broadcast rules for the
-POST-cleaner live in `StudioPreset.runtime.broadcastBlocks`.
-
-Manual editing is split across two surfaces. The agentic preset editor
-(`StudioPresetEditorBody`) owns the pipeline: the blocks, the agent switches,
-and — under the Ledger whose reconciliation commits feed it — the Card Rewriter
-lane's switch and its own settings. The Agents tab of the API sheet
-(`StudioSlotsTab`) owns every stage's connection and model, plus the per-slot
-parameter dialog (temperature, topP, reasoning, timeouts). Post Clean, Ledger
-and Card Rewriter rows there read and write the active preset's
-`StudioRuntimeSettings`; the pre-generation, final and MemoryBook rows write
-global `PipelineSettings`.
-
 ### Nested swipes (agentSwipes)
 
 `ChatMessage.agentSwipes` holds blue sub-swipes (`AgentSwipe` with `kind`:
@@ -826,25 +696,6 @@ Tracker snapshots (Phase 1, INV-TS4) are anchored at the same per-agent-swipe
 granularity `(messageId, swipeId, agentSwipeId)` — so swiping between blue
 sub-swipes also restores the matching tracker state (the read path returns
 the snapshot for the current anchor).
-
-### Live Studio status card (Phase 11)
-
-While the Studio tracker-cycle runs, a floating `StudioStatusCard` appears
-at the top of the chat (below the POST-cleaner status card — they never
-overlap in time: Studio runs during generation, POST-cleaner after). Like the
-other status cards and the context coverage card, it is drawn by the chat page
-(`assets/chat_webview/chrome/cards.js`): the Dart widget keeps the logic and
-hands the page the resolved card through `ChatStatusCardShell` (a chrome
-section per card; its button comes back as the `statusAction` intent). It is
-driven by `studioCycleStateProvider` through phases:
-
-  idle → running → writingFinal → done | error
-
-`StreamGenerationService` sets `running` when Studio intercepts, transitions
-to `writingFinal` on the first `onFinalResponseUpdate` callback (trackers
-done, final generator now streaming), and the terminal phase after
-`runTrackerCycle` returns. The card auto-dismisses 2.5s after the cycle
-finishes.
 
 ### Prompt Ordering (invariant — do not reorder)
 
@@ -1163,9 +1014,8 @@ sent, and what came back (`PromptCaptureView.responseText`, read from the call
 events the request recorded). The next-request preview has no response tab — a
 request that has not been sent has no response of its own, and the one that used
 to sit there showed the last run's reply. The first two rows are about the *next* request —
-the live preview (`PromptPreviewScreen`), or the agent catalog
-(`StudioPromptPreviewTab`) on an agentic preset, which is why there is no
-separate Agents tab, and its coverage dry-run (`NextTurnCoverageView`).
+the live preview (`PromptPreviewScreen`) and its coverage dry-run
+(`NextTurnCoverageView`).
 
 Coverage of a request that already ran is not a view of its own: it is a
 collapsed block at the top of the opened request (`RequestCoverageBlock`),
@@ -1186,7 +1036,7 @@ not sit on 50 MB.
 
 **LLM request dump** (`core/llm/transport/llm_request_dump.dart`): a debug-only
 diagnostics aid for inspecting every outgoing LLM request made while answering a
-single chat turn — studio shards, the main model, the post-cleaner audit +
+single chat turn — the main model, the post-cleaner audit +
 cleaner passes, and the agentic-memory writer. `transport_factory.dart` wraps
 every transport from `pickChatTransport` in a `LoggingChatTransport` decorator
 (itself wrapped in `PostProcessingChatTransport`, so the dump records the
@@ -1215,17 +1065,18 @@ continuity layers:
 2. Raw Recall: near-verbatim source-message chunks.
 3. Character knowledge facts: scoped, provenance-backed character state and
    epistemic facts.
-4. Studio Ledger: compact current scene/world/relationship/arc canon.
+4. Tracker (Ledger): compact current scene/world/relationship/arc canon.
 
 Prompt continuity blocks are ordered MemoryBook → Raw Recall → current
-character state → current Studio session state. Studio OFF stops new Ledger
-writes but does not suppress previously committed Ledger/fact projections.
+character state → current tracker state. With no Tracker running, nothing
+writes new Ledger state, but previously committed Ledger/fact projections are
+still injected.
 
 `MemoryPostTurnService.runPostTurn()` is currently a no-op except for cadence
 bookkeeping. Heuristic graph, salience, and consolidation writes remain disabled
 because the extractor is unreliable for non-English roleplay. Their tables
-remain for forward compatibility; Studio Ledger is the sole automatic writer of
-canonical tracker state.
+remain for forward compatibility; the Tracker (Ledger) is the sole automatic
+writer of canonical tracker state.
 
 `StudioLedgerService` is the compatibility facade over the specialists in
 `core/llm/ledger/`: canon authority, in-flight registry, output recovery,
@@ -1257,17 +1108,17 @@ source of truth is the `@DriftDatabase(tables: [...])` list in
 Do not maintain a hand-copied table-by-table inventory here.
 
 `app_db.dart` is the composition root. Its implementation is split into
-`migrations/database_integrity.dart`, `migrations/studio_legacy.dart`,
-`migrations/upgrade_v2_v50.dart`, `migrations/upgrade_v51_v100.dart`,
-`migrations/upgrade_v101_v131.dart`, and `studio_preset_seed.dart`. The versioned
-files preserve historical upgrades; current schema declarations live behind the
+`migrations/database_integrity.dart`, `migrations/memory_legacy.dart`, and the
+versioned `migrations/upgrade_*.dart` files. The versioned files preserve
+historical upgrades (v147 drops the Studio tables; the steps that used to
+create and reshape them are gone); current schema declarations live behind the
 `tables.dart` barrel in eight domain parts:
 
 | Domain part | Ownership |
 |---|---|
 | `tables/characters_and_chat.dart` | Characters, folders, chats, and personas |
 | `tables/folders.dart` | Generic folders + membership for the non-legacy list domains (lorebooks, personas, image styles, regex) |
-| `tables/studio_and_presets.dart` | Studio activation/presets, prompt presets/folders, and API configs |
+| `tables/studio_and_presets.dart` | Prompt presets/folders and API configs |
 | `tables/lorebooks.dart` | Lorebooks, session evolution overlays, immutable use manifests, and acceptance evidence |
 | `tables/memory.dart` | MemoryBook/catalog/legacy graph state, embeddings, and summaries |
 | `tables/ledger.dart` | Live/snapshot Ledger state, reconciliation lifecycle, character knowledge, and LLM diagnostics |
@@ -1278,8 +1129,7 @@ Repositories under `lib/core/db/repositories/` are the behavioral source of
 truth for reads, writes, transactions, and lifecycle cleanup. Not every table
 maps one-to-one to a repository; transactional aggregates intentionally span
 related tables. Historical milestones such as v20 ExtBlocks, v35 Memory Graph,
-v45 Ledger rows, v50 snapshots, and the v101 Studio activation rebuild remain
-relevant migration context, not descriptions of the complete current schema.
+v45 Ledger rows and v50 snapshots remain relevant migration context, not descriptions of the complete current schema.
 
 ### Write Rule
 **Never** commit a mutation with `getChat -> copyWith -> put`. Use the narrowest
@@ -1316,7 +1166,7 @@ All service implementations live under `lib/features/cloud_sync/services/`.
 
 ### What Is Synced
 Characters, sessions, personas, presets, API configs, lorebooks, MemoryBooks,
-themes, extension presets/settings, InfoBlocks, Studio configs and presets,
+themes, extension presets/settings, InfoBlocks,
 summaries, character folders, tracker snapshots, live tracker values, character
 knowledge, compatible Memory Graph collections, selected global local-storage
 settings, and supported binary assets. **Not synced:** embedding vectors,
@@ -1449,7 +1299,7 @@ per block via `InfoBlocksRepository.updateStatus()`.
 
 | `BlockTrigger` | When it runs | What it can do |
 |---|---|---|
-| `afterAssistant` | `PostGenCoordinator`: background when Studio is off; `CleanerStage` after canonical swipe selection when Studio is on | all block types |
+| `afterAssistant` | `PostGenCoordinator`: in the background; `CleanerStage` after canonical swipe selection when Post Clean runs | all block types |
 | `afterUser` | `ChatNotifier.sendMessage` (fire-and-forget `unawaited(_dispatchAfterUserBlocks(...))`) | all block types |
 | `periodic` | `PeriodicTriggerScheduler` (`Timer.periodic(block.periodicIntervalSeconds)`) | `jsRunner` only — no supported bridge runtime is available without the Chat WebView |
 
@@ -1460,7 +1310,7 @@ for `afterAssistant` (`runBlocksForMessage`) and `afterUser`
 no chain, no `InfoBlock` row, just a side-effect tick.
 
 `afterUser` is fire-and-forget and races the main reply; that reply does not
-await or consume its result. Under Studio, `afterAssistant` runs after
+await or consume its result. When Post Clean runs, `afterAssistant` runs after
 final/cleaned/partial selection and before Ledger, so persisted block rows bind
 to the canonical `(swipeId, agentSwipeId)`.
 
@@ -1537,7 +1387,7 @@ Stored-output injection is opt-in (`inject=false` by default). When enabled,
 `InfoBlockInjector` appends output to the content of the last N eligible
 assistant messages; it does not create a separate system message. Selection is
 aware of top-level `swipeId` but not `agentSwipeId`, so it is less strict than
-the visible panel lookup when multiple Studio sub-swipes have stored outputs.
+the visible panel lookup when multiple blue (agent) sub-swipes have stored outputs.
 
 `glaze.injectPrompt` is separate: it creates an in-memory
 `RuntimePromptBlock` with role/depth and capability checks. Runtime injections
@@ -2039,13 +1889,11 @@ Resolved (kept for history; details in git / PR notes):
 - **`memory_injection_service.dart` arch fix** — removed `Ref` dependency; `MemoryGlobalSettings` injected via callback.
 - **`prompt_worker.dart` decomposition** — isolate-boundary JSON codec extracted to `prompt_worker_codec.dart`.
 - **Triplicated memory formatting helpers** — `_formatMemoryItems` / `_formatMemoryRange` deduplicated to `memory_formatting.dart`.
-- **Studio decomposition (Phases 1-11)** — data classes and specialists were
-  extracted from the large Studio/chat services into `prompt/`, `cleaner/`,
-  `studio/`, `memory/`, `ledger/`, and `shared/` subdirectories. `AgentRunner`,
-  `ControllerBatcher`, summary, embedding rebuild, and turn-config composition now
-  live behind state/provider boundaries. `MemoryStudioService`,
-  `PromptInputsCollector`, and `PromptPayloadBuilder` still receive `Ref` for
-  core provider access, while feature adapters are injected. `AuxLlmClient` has
-  a `const` constructor, and `StudioFinalRunResult` was merged into
-  `AgentRunResult`. UI decomposition follows `CODE_STYLE.md`: extract business
+- **Chat service decomposition (Phases 1-11)** — data classes and specialists
+  were extracted from the large chat services into `prompt/`, `cleaner/`,
+  `memory/`, `ledger/`, and `shared/` subdirectories. Summary and embedding
+  rebuild live behind state/provider boundaries. `PromptInputsCollector` and
+  `PromptPayloadBuilder` still receive `Ref` for core provider access, while
+  feature adapters are injected. `AuxLlmClient` has a `const` constructor. Studio,
+  which most of this work served, is removed. UI decomposition follows `CODE_STYLE.md`: extract business
   logic and distinct screens, not arbitrary private widgets.

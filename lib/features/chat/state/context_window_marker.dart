@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/api_config.dart';
-import '../../../core/state/studio_feature_provider.dart';
 import '../../settings/api_list_provider.dart';
 import '../../settings/tokenizer_provider.dart';
 import '../chat_provider.dart';
@@ -67,8 +66,8 @@ final contextWindowStartProvider = Provider.autoDispose
       final id = breakdown.windowStartMessageId;
       if (id == null) {
         // Cut, yet nothing kept: the whole chat is out of the prompt. A
-        // Studio-built window keeps messages without source ids instead, and
-        // has no boundary to draw.
+        // window that keeps messages without source ids has no boundary to
+        // draw.
         if (breakdown.trimmedHistory.isNotEmpty) return null;
         return ContextWindowBoundary(messages.last.id, afterMessage: true);
       }
@@ -127,9 +126,6 @@ final contextWindowRecountProvider = Provider.autoDispose.family<void, String>((
 /// stores its own.
 Future<void> recountContextWindow(Ref ref, String charId) async {
   if (!ref.mounted) return;
-  // Studio builds its own window — from its own connection — and its breakdown
-  // carries no rule; the ordinary prompt counted here would draw a false one.
-  if (ref.read(studioFeatureEnabledProvider)) return;
   final chat = ref.read(chatProvider(charId)).value;
   final session = chat?.session;
   // A running turn stores the breakdown of the prompt it is building.

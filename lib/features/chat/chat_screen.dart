@@ -12,7 +12,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/debug/perf_debug.dart';
-import '../../core/llm/game_time.dart';
 import '../../core/models/character.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/utils/image_src.dart';
@@ -26,7 +25,6 @@ import '../../core/state/character_provider.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/memory_settings_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
-import '../../core/state/studio_turn_config_resolver.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart'
     show isDesktopLayout;
@@ -38,7 +36,6 @@ import 'widgets/chat_header_search.dart';
 import 'widgets/message_actions.dart';
 import 'widgets/message_delete_confirmation.dart';
 import 'widgets/output_limit_sheet.dart';
-import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
 import '../../shared/theme/theme_provider.dart';
@@ -72,7 +69,6 @@ import 'state/chat_body_selectors.dart';
 import 'state/chat_drawer_editing_provider.dart';
 import 'state/lorebook_coverage_provider.dart';
 import 'state/memory_activity_provider.dart';
-import 'state/studio_history_rotation_provider.dart';
 import 'bridge/chat_webview_environment.dart'
     show chatWebViewResolveLocalFileUrl;
 import 'chrome/chat_chrome_channel.dart';
@@ -81,11 +77,8 @@ import 'chrome/chat_drawer_host.dart';
 import 'chrome/chrome_json.dart';
 import 'widgets/chat_header.dart';
 import 'widgets/context_coverage_card.dart';
-import 'widgets/memory_sheet.dart';
-import 'widgets/studio_history_rotation_sheet.dart';
 import 'widgets/post_cleaner_status_card.dart';
 import 'widgets/post_gen_status_card.dart';
-import 'widgets/studio_status_card.dart';
 import 'widgets/chat_webview_widget.dart';
 import 'widgets/triggered_items_sheet.dart';
 import 'widgets/webview_callbacks.dart';
@@ -889,7 +882,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   bool _showScrollToBottom = false;
   bool _showScrollToTop = false;
   bool _contextCardExpanded = false;
-  bool _showingHistoryRotation = false;
   final GlobalKey<ChatWebViewWidgetState> _webViewStateKey = GlobalKey();
 
   /// Content already auto-translated per arriving message id, so a settled
@@ -968,7 +960,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// the context the model continues from — stays original.
   ///
   /// Keyed by message id and content, not by a one-shot flag: a post-generation
-  /// stage (the Studio cleaner) can rewrite the message after the stream ends,
+  /// stage (Post Clean) can rewrite the message after the stream ends,
   /// and the newer text is translated in turn. A manual translate marks the
   /// message too, so an automatic pass never overrides a choice the reader made.
   void _maybeAutoTranslateLastMessage(ChatState state) {
@@ -1344,57 +1336,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     );
   }
 
-  /// Before the first message of a Studio chat with Ledger enabled, require a
-  /// complete world:date/day/time tuple. Ordinary chats never enter this path.
-  Future<bool> _maybeSeedGameTime() async {
-    try {
-      final session = widget.state.session;
-      if (session == null) return false;
-      bool isCurrentSession() =>
-          mounted &&
-          ref.read(chatProvider(widget.charId)).value?.session?.id ==
-              session.id;
-      if (widget.state.messages.any((m) => m.role == 'user')) return true;
-      final turnConfig = await ref
-          .read(studioTurnConfigResolverProvider)
-          .resolve(session.id);
-      if (!isCurrentSession()) return false;
-      if (!turnConfig.enabled || !turnConfig.ledgerEnabled) return true;
-      final trackerRepo = ref.read(trackerRepoProvider);
-      final existing = await Future.wait([
-        trackerRepo.get(session.id, GameTimeState.timeKey),
-        trackerRepo.get(session.id, GameTimeState.dateKey),
-        trackerRepo.get(session.id, GameTimeState.dayKey),
-      ]);
-      if (!isCurrentSession()) return false;
-      if (GameTimeState.fromTrackers(existing.nonNulls).format() != null) {
-        return true;
-      }
-      if (!mounted) return false;
-      final result = await GlazeBottomSheet.show<GameTimeSeedResult>(
-        context,
-        title: 'game_time_seed_title'.tr(),
-        isDismissible: false,
-        locked: true,
-        child: const GameTimeSeedDialog(),
-      );
-      if (result == null) return false;
-      if (!isCurrentSession()) return false;
-      final seeded = await trackerRepo.seedInitialGameTime(
-        sessionId: session.id,
-        time: result.time,
-        date: result.date,
-        expectedValues: {
-          GameTimeState.timeKey: existing[0]?.value,
-          GameTimeState.dateKey: existing[1]?.value,
-          GameTimeState.dayKey: existing[2]?.value,
-        },
-      );
-      return seeded && isCurrentSession();
-    } catch (_) {
-      return false;
-    }
-  }
+  /// Runs before a send or a regeneration. The Tracker agent asks for the
+  /// opening game date and time here; until agents exist nothing blocks.
+  Future<bool> _maybeSeedGameTime() async => true;
 
   /// Guards message sending behind an explicitly selected persona. When no
   /// persona is selected in the persona list, shows a notice sheet with a
@@ -1470,9 +1414,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// request would go out without the chat. Shows the API settings' hint
   /// instead and returns false so the caller aborts the send.
   bool _ensureContextFits() {
-    // Studio builds the final prompt without the chat preset, from its own
-    // connection's window.
-    if (ref.read(studioFeatureEnabledProvider)) return true;
     final api = ref.read(activeApiConfigProvider);
     if (api == null) return true;
     final preset = ref.read(
@@ -1592,36 +1533,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         }
       }
     });
-    ref.listen<StudioHistoryRotationNotice?>(
-      studioHistoryRotationProvider(widget.charId),
-      (previous, notice) {
-        if (notice == null ||
-            notice.sessionId != widget.state.session?.id ||
-            _showingHistoryRotation) {
-          return;
-        }
-        ref.read(studioHistoryRotationProvider(widget.charId).notifier).state =
-            null;
-        _showingHistoryRotation = true;
-        unawaited(
-          showStudioHistoryRotationSheet(
-            context,
-            droppedMessageCount: notice.droppedMessageCount,
-          ).then((action) async {
-            if (!mounted) return;
-            _showingHistoryRotation = false;
-            if (action == StudioHistoryRotationAction.memory) {
-              if (!context.mounted) return;
-              await showMemorySheet(
-                context,
-                widget.charId,
-                initialTab: MemoryTab.books,
-              );
-            }
-          }),
-        );
-      },
-    );
     ref.listen<bool>(impersonationNeedsConfigProvider(widget.charId), (
       prev,
       next,
@@ -2024,15 +1935,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             appSettings?.disableSwipeRegeneration ?? false,
                         disableStreamAutoScroll:
                             appSettings?.disableStreamAutoScroll ?? false,
-                        studioEnabled:
-                            ref
-                                .watch(
-                                  sessionStudioEnabledProvider(
-                                    widget.state.session?.id ?? '',
-                                  ),
-                                )
-                                .value ??
-                            false,
                         translationEnabled: ref.watch(
                           pipelineSettingsProvider.select(
                             (p) => p.translation.enabled,
@@ -2112,11 +2014,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             await ref
                                 .read(chatProvider(widget.charId).notifier)
                                 .regenerateLastAssistant();
-                          },
-                          onRerunCleaner: (id) {
-                            ref
-                                .read(chatProvider(widget.charId).notifier)
-                                .rerunCleaner(id);
                           },
                           onTranslateMessage: _onTranslateMessage,
                           onToggleHidden: (id) {
@@ -2431,7 +2328,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                       },
                     ),
                   PostCleanerStatusCard(channel: widget.chrome),
-                  StudioStatusCard(channel: widget.chrome),
                   PostGenStatusCard(
                     channel: widget.chrome,
                     sessionId: widget.state.session?.id,

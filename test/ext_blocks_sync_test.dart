@@ -27,7 +27,6 @@ import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_context_policy.dart';
 import 'package:glaze_flutter/features/extensions/models/extensions_settings.dart';
 import 'package:glaze_flutter/features/extensions/models/info_block.dart';
-import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/shared/theme/theme_preset.dart';
 
 // ─── In-memory fakes (reuse pattern from sync_lifecycle_test) ───────
@@ -90,7 +89,6 @@ class FakeCharacterDeletionStore implements CharacterDeletionStore {
     return CharacterDeletionResult(
       characterIds: characterIds,
       sessionIds: const {},
-      studioConfigSessionIds: const {},
       detachedLorebookIds: const {},
     );
   }
@@ -314,26 +312,6 @@ class FakeTrackerValueStore implements SyncTrackerValueStore {
   }
 }
 
-class FakeStudioConfigStore implements SyncStudioConfigStore {
-  final Map<String, StudioConfig> data = {};
-
-  @override
-  Future<List<StudioConfig>> getAll() async => data.values.toList();
-
-  @override
-  Future<StudioConfig?> getById(String id) async => data[id];
-
-  @override
-  Future<void> put(StudioConfig config) async {
-    data[config.sessionId] = config;
-  }
-
-  @override
-  Future<void> delete(String id) async {
-    data.remove(id);
-  }
-}
-
 // ─── Cloud adapter (in-memory) ───────────────────────────────────────
 
 class FakeCloudAdapter implements CloudAdapter {
@@ -410,7 +388,6 @@ class InMemoryManifestProvider implements SyncManifestProvider {
     required SyncInfoBlockStore infoBlockStore,
     required SyncTrackerSnapshotStore trackerSnapshotStore,
     required SyncTrackerValueStore trackerValueStore,
-    required SyncStudioConfigStore studioConfigStore,
   }) : _builder = SyncManifestBuilder(
          characterRepo: characterRepo,
          chatRepo: chatRepo,
@@ -425,7 +402,6 @@ class InMemoryManifestProvider implements SyncManifestProvider {
          infoBlockStore: infoBlockStore,
          trackerSnapshotStore: trackerSnapshotStore,
          trackerValueStore: trackerValueStore,
-         studioConfigStore: studioConfigStore,
        );
 
   @override
@@ -494,7 +470,6 @@ class SyncWorld {
   final FakeInfoBlockStore infoBlocks = FakeInfoBlockStore();
   final FakeTrackerSnapshotStore trackerSnapshots = FakeTrackerSnapshotStore();
   final FakeTrackerValueStore trackerValues = FakeTrackerValueStore();
-  final FakeStudioConfigStore studioConfigs = FakeStudioConfigStore();
   late final FakeSessionDeletionStore sessionDeletions;
   late final FakeCharacterDeletionStore characterDeletions;
   late final InMemoryManifestProvider manifestProvider;
@@ -516,7 +491,6 @@ class SyncWorld {
       infoBlockStore: infoBlocks,
       trackerSnapshotStore: trackerSnapshots,
       trackerValueStore: trackerValues,
-      studioConfigStore: studioConfigs,
     );
   }
 
@@ -538,8 +512,6 @@ class SyncWorld {
     infoBlocks,
     trackerSnapshots,
     trackerValues,
-    studioConfigs,
-    null,
     null,
     null,
     null,
@@ -1017,9 +989,7 @@ void main() {
       final world = SyncWorld();
 
       await world.extensionPresets.put(makeExtPreset('ep1', name: 'My Preset'));
-      await world.extensionsSettings.put(
-        makeSettings(activePresetId: 'ep1'),
-      );
+      await world.extensionsSettings.put(makeSettings(activePresetId: 'ep1'));
       await world.infoBlocks.insert(makeInfoBlock('ib1', 'session1'));
 
       final manifest = await world.manifestProvider.buildLocalManifest();

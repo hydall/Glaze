@@ -14,9 +14,7 @@ import 'package:glaze_flutter/core/models/lorebook.dart';
 import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
-import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/utils/cast_helpers.dart';
-import 'package:glaze_flutter/core/utils/sync_deletion_tracker.dart';
 import 'package:glaze_flutter/core/application/session_deletion_store.dart';
 import 'package:glaze_flutter/core/application/character_deletion_store.dart';
 import 'package:glaze_flutter/features/cloud_sync/adapters/ext_blocks_sync_stores.dart';
@@ -133,7 +131,6 @@ class FakeCharacterDeletionStore implements CharacterDeletionStore {
     return CharacterDeletionResult(
       characterIds: characterIds,
       sessionIds: const {},
-      studioConfigSessionIds: const {},
       detachedLorebookIds: const {},
     );
   }
@@ -349,40 +346,6 @@ class FakeTrackerValueStore implements SyncTrackerValueStore {
   }
 }
 
-class FakeStudioConfigStore implements SyncStudioConfigStore {
-  final Map<String, StudioConfig> data = {};
-  @override
-  Future<List<StudioConfig>> getAll() async => data.values.toList();
-  @override
-  Future<StudioConfig?> getById(String id) async => data[id];
-  @override
-  Future<void> put(StudioConfig config) async {
-    data[config.sessionId] = config;
-  }
-
-  @override
-  Future<void> delete(String id) async {
-    data.remove(id);
-  }
-}
-
-class FakeStudioPresetStore implements SyncStudioPresetStore {
-  final Map<String, StudioPreset> data = {};
-  @override
-  Future<List<StudioPreset>> getAll() async => data.values.toList();
-  @override
-  Future<StudioPreset?> getById(String id) async => data[id];
-  @override
-  Future<void> put(StudioPreset preset) async {
-    data[preset.id] = preset;
-  }
-
-  @override
-  Future<void> delete(String id) async {
-    data.remove(id);
-  }
-}
-
 class FakeImageStore implements SyncImageStore {
   final Map<String, Uint8List> saved = {};
 
@@ -589,8 +552,6 @@ class InMemoryManifestProvider implements SyncManifestProvider {
     SyncInfoBlockStore? infoBlockStore,
     SyncTrackerSnapshotStore? trackerSnapshotStore,
     SyncTrackerValueStore? trackerValueStore,
-    SyncStudioConfigStore? studioConfigStore,
-    SyncStudioPresetStore? studioPresetStore,
     SyncSessionLorebookOverlayStore? sessionLorebookOverlayStore,
     SyncReconciliationStateStore? reconciliationStateStore,
     SyncPluginStore? pluginStore,
@@ -610,8 +571,6 @@ class InMemoryManifestProvider implements SyncManifestProvider {
          trackerSnapshotStore:
              trackerSnapshotStore ?? FakeTrackerSnapshotStore(),
          trackerValueStore: trackerValueStore ?? FakeTrackerValueStore(),
-         studioConfigStore: studioConfigStore ?? FakeStudioConfigStore(),
-         studioPresetStore: studioPresetStore,
          sessionLorebookOverlayStore: sessionLorebookOverlayStore,
          reconciliationStateStore: reconciliationStateStore,
          pluginStore: pluginStore,
@@ -681,8 +640,6 @@ class SyncWorld {
   late final FakeCloudAdapter cloud;
   late final FakeThemePresetStore uiThemes;
   late final InMemoryManifestProvider manifestProvider;
-  late final FakeStudioConfigStore studioConfigs;
-  late final FakeStudioPresetStore studioPresets;
   late final FakeSessionDeletionStore sessionDeletions;
   late final FakeCharacterDeletionStore characterDeletions;
   late final FakeReconciliationStateStore? reconciliationStates;
@@ -706,8 +663,6 @@ class SyncWorld {
     images = FakeImageStore();
     cloud = FakeCloudAdapter();
     uiThemes = FakeThemePresetStore();
-    studioConfigs = FakeStudioConfigStore();
-    studioPresets = FakeStudioPresetStore();
     sessionDeletions = FakeSessionDeletionStore(chats);
     characterDeletions = FakeCharacterDeletionStore(characters);
     reconciliationStates = reconciliationStateStore;
@@ -722,8 +677,6 @@ class SyncWorld {
       memoryBookRepo: memoryBooks,
       lorebookRepo: lorebooks,
       themePresetRepo: uiThemes,
-      studioConfigStore: studioConfigs,
-      studioPresetStore: studioPresets,
       sessionLorebookOverlayStore: sessionLorebookOverlays,
       reconciliationStateStore: reconciliationStates,
       pluginStore: pluginStore,
@@ -750,8 +703,6 @@ class SyncWorld {
     FakeInfoBlockStore(),
     FakeTrackerSnapshotStore(),
     FakeTrackerValueStore(),
-    studioConfigs,
-    studioPresets,
     null,
     null,
     null,
@@ -781,8 +732,6 @@ SyncEngine _realStoreEngine({
   final memoryBooks = FakeMemoryBookStore();
   final lorebooks = FakeLorebookStore();
   final uiThemes = FakeThemePresetStore();
-  final studioConfigs = FakeStudioConfigStore();
-  final studioPresets = FakeStudioPresetStore();
   final manifestProvider = InMemoryManifestProvider(
     characterRepo: characters,
     chatRepo: chatStore,
@@ -792,8 +741,6 @@ SyncEngine _realStoreEngine({
     memoryBookRepo: memoryBooks,
     lorebookRepo: lorebooks,
     themePresetRepo: uiThemes,
-    studioConfigStore: studioConfigs,
-    studioPresetStore: studioPresets,
     reconciliationStateStore: reconciliationStore,
   );
   return SyncEngine(
@@ -814,8 +761,6 @@ SyncEngine _realStoreEngine({
     FakeInfoBlockStore(),
     FakeTrackerSnapshotStore(),
     FakeTrackerValueStore(),
-    studioConfigs,
-    studioPresets,
     null,
     null,
     null,
@@ -1772,35 +1717,6 @@ void main() {
       ..addAll(source.cloud.files);
     await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
     expect(await targetStore.loadAll(), isEmpty);
-  });
-
-  test('Cloud round-trip restores the active Studio preset', () async {
-    const activePreset = 'studio_loom_causal_direct_v1';
-    final source = SyncWorld();
-    final sourcePrefs = await SharedPreferences.getInstance();
-    await sourcePrefs.setString(
-      SyncSerialization.activeStudioPresetKey,
-      activePreset,
-    );
-    await source.engine.pushEntities(onProgress: (_) {});
-
-    final cloudPayload =
-        jsonDecode(
-              source.cloud.files[cloudPath('local_storage', 'local_storage')]!,
-            )
-            as Map<String, dynamic>;
-    expect(cloudPayload[SyncSerialization.activeStudioPresetKey], activePreset);
-
-    SharedPreferences.setMockInitialValues({});
-    final target = SyncWorld();
-    target.cloud.files.addAll(source.cloud.files);
-    await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
-
-    final targetPrefs = await SharedPreferences.getInstance();
-    expect(
-      targetPrefs.getString(SyncSerialization.activeStudioPresetKey),
-      activePreset,
-    );
   });
 
   test(
@@ -3873,88 +3789,6 @@ void main() {
         jsonDecode(raw!) as Map<String, dynamic>,
       );
       expect(manifest.apiKeysIncluded, isFalse);
-    },
-  );
-
-  test(
-    'Studio preset deletion tombstone propagates to cloud on next push',
-    () async {
-      SharedPreferences.setMockInitialValues({});
-      final world = SyncWorld();
-      const preset = StudioPreset(id: 'doomed', name: 'Doomed Preset');
-      await world.studioPresets.put(preset);
-
-      var manifest = await world.manifestProvider.buildLocalManifest();
-      await world.manifestProvider.writeLocalManifest(manifest);
-      await world.engine.pushEntities(onProgress: (_) {});
-
-      expect(
-        world.cloud.files.containsKey(cloudPath('studio_preset', 'doomed')),
-        isTrue,
-      );
-
-      await world.studioPresets.delete('doomed');
-      await SyncDeletionTracker.record('studio_preset', 'doomed');
-
-      manifest = await world.manifestProvider.buildLocalManifest();
-      await world.manifestProvider.writeLocalManifest(manifest);
-      await world.engine.pushEntities(onProgress: (_) {});
-
-      expect(
-        world.cloud.files.containsKey(cloudPath('studio_preset', 'doomed')),
-        isFalse,
-        reason: 'Cloud file should be deleted after tombstone push',
-      );
-
-      final cloudManifest = SyncManifest.fromJson(
-        jsonDecode(world.cloud.files[cloudPath('manifest', 'manifest')]!)
-            as Map<String, dynamic>,
-      );
-      expect(
-        cloudManifest.entries.containsKey(entryKey('studio_preset', 'doomed')),
-        isFalse,
-        reason: 'Cloud manifest should no longer list the deleted preset',
-      );
-    },
-  );
-
-  test(
-    'Studio config syncs by session id and does not resurrect on pull',
-    () async {
-      SharedPreferences.setMockInitialValues({});
-      final source = SyncWorld();
-      await source.studioConfigs.put(
-        const StudioConfig(sessionId: 's1', enabled: true),
-      );
-
-      var manifest = await source.manifestProvider.buildLocalManifest();
-      await source.manifestProvider.writeLocalManifest(manifest);
-      await source.engine.pushEntities(onProgress: (_) {});
-
-      expect(
-        source.cloud.files.containsKey(cloudPath('studio_config', 's1')),
-        isTrue,
-      );
-
-      SharedPreferences.setMockInitialValues({});
-      final target = SyncWorld();
-      target.cloud.files.addAll(source.cloud.files);
-      await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
-
-      final pulled = await target.studioConfigs.getById('s1');
-      expect(pulled, isNotNull);
-      expect(pulled!.sessionId, 's1');
-      expect(pulled.enabled, isTrue);
-
-      final repeatConflicts = <SyncConflict>[];
-      await target.engine.pullEntities(
-        onProgress: (_) {},
-        onConflict: repeatConflicts.add,
-      );
-      expect(
-        repeatConflicts.where((conflict) => conflict.type == 'studio_config'),
-        isEmpty,
-      );
     },
   );
 }

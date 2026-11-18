@@ -19,13 +19,13 @@ String _methodBody(String source, String signature) {
 }
 
 void main() {
-  // Both preset libraries are read once and cached — `presetListProvider` is an
-  // AsyncNotifier over `getAll()`, `studioPresetListProvider` a FutureProvider
-  // over the same — where the folder providers are Drift streams that refresh
-  // themselves. A sync pull writes presets straight through the repositories,
-  // so nothing tells either list it is stale: presets (and the cover images
-  // pulled alongside them) stayed invisible until the app was restarted.
-  test('a sync pull refreshes both preset libraries', () {
+  // The preset library is read once and cached — `presetListProvider` is an
+  // AsyncNotifier over `getAll()` — where the folder providers are Drift
+  // streams that refresh themselves. A sync pull writes presets straight
+  // through the repository, so nothing tells the list it is stale: presets
+  // (and the cover images pulled alongside them) stayed invisible until the
+  // app was restarted.
+  test('a sync pull refreshes the preset library', () {
     final body = _methodBody(
       File(
         'lib/features/cloud_sync/services/sync_controller.dart',
@@ -34,10 +34,9 @@ void main() {
     );
 
     expect(body, contains('invalidate(presetListProvider)'));
-    expect(body, contains('invalidate(studioPresetListProvider)'));
   });
 
-  test('the pull still writes both preset kinds through their repos', () {
+  test('the pull still writes presets through their repo', () {
     // The guard above only matters while this is true; if a pull ever stops
     // writing presets directly, revisit it rather than deleting it blindly.
     final engine = File(
@@ -45,6 +44,5 @@ void main() {
     ).readAsStringSync();
 
     expect(engine, contains("case 'theme_presets':"));
-    expect(engine, contains("case 'studio_preset':"));
   });
 }

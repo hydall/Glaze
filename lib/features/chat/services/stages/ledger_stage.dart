@@ -10,11 +10,9 @@ import '../../../../core/llm/ledger/ledger_turn_runner.dart';
 import '../../../../core/llm/macro_engine.dart';
 import '../../../../core/llm/studio_ledger_service.dart';
 import '../../../../core/llm/studio_ledger_reconciliation.dart';
-import '../../../../core/llm/studio_turn_config_snapshot.dart';
+import '../../../../core/llm/post_gen_engine_config.dart';
 import '../../../../core/models/agent_operation_record.dart';
 import '../../../../core/models/chat_message.dart';
-import '../../../../core/models/pipeline_settings.dart';
-import '../../../../core/models/studio_config.dart';
 import '../../../../core/navigation/rewrite_review_navigation.dart';
 import '../../../../core/services/card_rewriter/automated_card_evolution_service.dart';
 import '../../../../core/state/db_provider.dart';
@@ -22,7 +20,6 @@ import '../../../../core/state/memory_agent_providers.dart';
 import '../../../../core/state/character_provider.dart';
 import '../../../../core/state/card_rewriter_providers.dart';
 import '../../../../core/state/persona_resolution.dart';
-import '../../../../core/state/studio_turn_config_resolver.dart';
 import '../../../../core/utils/time_helpers.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
 import '../../chat_session_service.dart';
@@ -30,19 +27,20 @@ import '../../../card_rewrite/card_rewriter_recovery_view_service.dart';
 import '../../state/agent_operations_log_provider.dart';
 import '../../state/post_gen_status_provider.dart';
 import '../collector_view_service.dart';
-import '../current_ledger_injection_preview_service.dart';
 import '../pipeline_utils.dart';
 import '../game_time_message_stamp.dart';
 import '../prompt_capture_view_service.dart';
 import '../reconciler_view_service.dart';
 import 'stage_context.dart';
+import '../../../../core/llm/ledger/ledger_engine.dart';
 
-/// Stage 7: Studio Ledger trigger.
+/// Tracker (Ledger) trigger.
 ///
 /// Fire-and-forget — does not block generation or user interaction.
 /// Extracts entity/relationship/arc/world state from the final assistant
 /// response and persists it to tracker_rows via [StudioLedgerService].
-/// Only runs when Studio is enabled.
+/// Runs as the Tracker agent; its settings arrive in a
+/// [PostGenEngineConfig].
 class LedgerStage {
   final StageContext ctx;
 
@@ -69,7 +67,7 @@ class LedgerStage {
     required ChatMessage targetMessage,
     bool isManualRerun = false,
     CancelToken? cancelToken,
-    StudioTurnConfigSnapshot? studioTurnConfig,
+    required PostGenEngineConfig engineConfig,
   }) async {
     if (!ctx.ref.mounted) return;
 
@@ -125,44 +123,14 @@ class LedgerStage {
         : () => ctx.ref.mounted && ctx.abortHandler.isCurrentGen(genId);
 
     try {
-      final turnConfig =
-          studioTurnConfig ??
-          await ctx.ref
-              .read(studioTurnConfigResolverProvider)
-              .resolve(sessionId);
+      final turnConfig = engineConfig;
       final pipeline = turnConfig.pipelineSettings;
 
-      final studioConfigEnabled = turnConfig.enabled;
-      final studioPreset = turnConfig.preset;
-      if (!studioConfigEnabled) {
-        await _recordDiag(
-          sessionId: sessionId,
-          targetMessage: targetMessage,
-          reason: 'skipped, studio disabled',
-        );
-        return;
-      }
       if (!turnConfig.ledgerEnabled) {
         await _recordDiag(
           sessionId: sessionId,
           targetMessage: targetMessage,
-          reason: 'skipped, ledger disabled in active Studio preset',
-        );
-        return;
-      }
-
-      // Cadence only gates standalone Ledger outside Studio.
-      final assistantTurnCount = messages
-          .where((m) => m.role == 'assistant' && !m.isTyping)
-          .length;
-      final cadenceReason = studioConfigEnabled
-          ? null
-          : _resolveCadence(pipeline, assistantTurnCount, finalAssistantText);
-      if (cadenceReason != null) {
-        await _recordDiag(
-          sessionId: sessionId,
-          targetMessage: targetMessage,
-          reason: cadenceReason,
+          reason: 'skipped, tracker disabled',
         );
         return;
       }
@@ -278,7 +246,7 @@ class LedgerStage {
             settings: pipeline,
             config: ledgerConfig,
             plan: plan,
-            ledgerBlocks: studioPreset?.blocks ?? const [],
+            ledgerBlocks: turnConfig.ledgerBlocks,
             macroCtx: ledgerMacroCtx,
             isStillCurrent: isCurrent,
             cancelToken: cancelToken,
@@ -422,9 +390,9 @@ class LedgerStage {
         forceEnabled: true,
         isStillCurrent: isCurrent,
         cancelToken: cancelToken,
-        ledgerBlocks: studioPreset?.blocks ?? const [],
+        ledgerBlocks: turnConfig.ledgerBlocks,
         macroCtx: ledgerMacroCtx,
-        engine: StudioLedgerEngine.currentReconciled,
+        engine: LedgerEngine.currentReconciled,
         operationIdentity: 'automatic:$genId',
         onAttemptStart: (phase, attempt, maxAttempts) {
           if (!ctx.ref.mounted || !isCurrent()) return;
@@ -569,12 +537,6 @@ class LedgerStage {
   void _invalidateAgentOpsViews(String sessionId) {
     if (!ctx.ref.mounted) return;
     ctx.ref.invalidate(reconcilerViewProvider(sessionId));
-    ctx.ref.invalidate(
-      currentLedgerInjectionPreviewProvider((
-        sessionId: sessionId,
-        characterId: ctx.charId,
-      )),
-    );
     ctx.ref.invalidate(collectorViewProvider(sessionId));
     ctx.ref.invalidate(promptCaptureViewsProvider(sessionId));
     ctx.ref.invalidate(cardRewriteDebugRunsProvider(sessionId));
@@ -628,45 +590,6 @@ class LedgerStage {
       if (name != null && name.isNotEmpty) return name;
     }
     return 'User';
-  }
-
-  /// Returns a non-null skip reason when the cadence should suppress the
-  /// ledger run, or null when the run should proceed. Applies the
-  /// per-component run mode, interval, and conditional flags (plan §Model
-  /// Cadence). The Studio forces the ledger on, but the user can opt into
-  /// a lower-power cadence.
-  String? _resolveCadence(
-    PipelineSettings pipeline,
-    int assistantTurnCount,
-    String finalAssistantText,
-  ) {
-    switch (pipeline.ledger.studioLedgerRunMode) {
-      case 'disabled':
-        return 'skipped, runMode=disabled';
-      case 'manual':
-        return 'skipped, runMode=manual';
-      case 'every_n':
-        final n = pipeline.ledger.studioLedgerIntervalN < 1
-            ? 1
-            : pipeline.ledger.studioLedgerIntervalN;
-        if (n > 1 && assistantTurnCount % n != 0) {
-          return 'skipped, runMode=every_n interval=$n turn=$assistantTurnCount';
-        }
-        return null;
-      case 'conditional':
-        final reasons = <String>[];
-        if (pipeline.ledger.studioLedgerRunWhenMentionedEntitiesChanged &&
-            !finalAssistantText.trim().isNotEmpty) {
-          reasons.add('no entities changed');
-        }
-        if (reasons.isNotEmpty) {
-          return 'skipped, conditional: ${reasons.join(', ')}';
-        }
-        return null;
-      case 'every_turn':
-      default:
-        return null;
-    }
   }
 
   /// Stores the last run/skip reason for the Studio Ledger as a

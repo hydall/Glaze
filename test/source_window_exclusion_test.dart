@@ -1,14 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/llm/prompt_builder.dart';
-import 'package:glaze_flutter/core/llm/studio/studio_stream_interceptor.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
-import 'package:glaze_flutter/core/models/chat_message.dart';
-import 'package:glaze_flutter/features/chat/services/stream_generation_service.dart';
-
-ChatMessage _msg(String id, {bool isHidden = false}) =>
-    ChatMessage(id: id, role: 'user', content: 'text $id', isHidden: isHidden);
 
 PromptPayload _payloadWith({
   List<RecalledMessageChunk>? chunks,
@@ -119,109 +113,6 @@ void main() {
       );
       final result = effectiveRecalledMessagesContent(payload)!;
       expect(result, contains('visible chunk'));
-    });
-  });
-
-  group('studioFinalVisibleMessageIds', () {
-    test('tracker window uses tracker limiter semantics for zero size', () {
-      final ids = StudioStreamInterceptor.computeStudioVisibleMessageIds(const [
-        ChatMessage(id: 'one', role: 'user', content: 'one'),
-        ChatMessage(id: 'two', role: 'assistant', content: 'two'),
-      ], 0);
-
-      expect(ids, {'two'});
-    });
-
-    test('zero finalContextSize means no count cap', () {
-      final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds([
-        _msg('m1'),
-        _msg('m2'),
-      ], 0);
-      expect(ids, {'m1', 'm2'});
-    });
-
-    test('negative finalContextSize means no count cap', () {
-      final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds([
-        _msg('m1'),
-      ], -5);
-      expect(ids, {'m1'});
-    });
-
-    test('returns all non-hidden ids when contextSize >= history length', () {
-      final history = [_msg('m1'), _msg('m2'), _msg('m3')];
-      final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
-        history,
-        10,
-      );
-      expect(ids, {'m1', 'm2', 'm3'});
-    });
-
-    test('uses the persisted stable-window boundary', () {
-      final history = [
-        _msg('m1'),
-        _msg('m2'),
-        _msg('m3'),
-        _msg('m4'),
-        _msg('m5'),
-      ];
-      final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
-        history,
-        3,
-        historyWindowStartMessageId: 'm3',
-      );
-      expect(ids, {'m3', 'm4', 'm5'});
-    });
-
-    test('skips hidden messages before applying the boundary', () {
-      final history = [
-        _msg('m1'),
-        _msg('h1', isHidden: true),
-        _msg('m2'),
-        _msg('h2', isHidden: true),
-        _msg('m3'),
-      ];
-      final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
-        history,
-        2,
-        historyWindowStartMessageId: 'm2',
-      );
-      expect(ids, {'m2', 'm3'});
-    });
-
-    test('all hidden messages returns empty set', () {
-      final history = [_msg('h1', isHidden: true), _msg('h2', isHidden: true)];
-      final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
-        history,
-        5,
-      );
-      expect(ids, isEmpty);
-    });
-
-    test('single message with contextSize 1', () {
-      final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds([
-        _msg('only'),
-      ], 1);
-      expect(ids, {'only'});
-    });
-
-    test('does not rotate an uninitialized window before commit', () {
-      final huge = List.filled(250000, 'x').join();
-      final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
-        [
-          _msg('old'),
-          ChatMessage(
-            id: 'reasoning-heavy',
-            role: 'assistant',
-            content: 'short',
-            reasoning: huge,
-          ),
-          _msg('latest'),
-        ],
-        10,
-        reasoningHistoryCount: 1,
-      );
-
-      expect(ids, {'old', 'reasoning-heavy', 'latest'});
     });
   });
 }

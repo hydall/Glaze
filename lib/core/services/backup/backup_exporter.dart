@@ -37,6 +37,9 @@ class BackupExporter {
   //         preset folders, alongside the existing character folders.
   //  15 — added installed plugins: packages under plugins/ and their data
   //         under plugin_data/ (manifest flag 'plugins').
+  //  Studio's studio_config_rows and studio_preset_rows left the whitelist
+  //  without a bump: nothing else in the format changed, and an archive that
+  //  still carries them restores with those tables skipped.
   static const int schemaVersion = 15;
 
   /// Manifest flag: the archive carries the installed plugins, so a restore
@@ -70,8 +73,6 @@ class BackupExporter {
     'memory_book_rows',
     'extension_presets',
     'info_blocks',
-    'studio_config_rows',
-    'studio_preset_rows',
     'tracker_rows',
     'tracker_snapshots',
     'character_folders',

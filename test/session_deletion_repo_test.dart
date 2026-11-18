@@ -33,7 +33,6 @@ const _sessionTables = <(String, String)>[
   ('session_canon_checkpoint_rows', 'chat_session_id'),
   ('session_lorebook_revision_rows', 'chat_session_id'),
   ('session_lorebook_embedding_job_rows', 'chat_session_id'),
-  ('studio_config_rows', 'session_id'),
   ('chat_summaries', 'session_id'),
   ('info_blocks', 'session_id'),
   ('ledger_debug_runs', 'session_id'),
@@ -244,7 +243,6 @@ Future<void> _seedSession(AppDatabase db, String sessionId) async {
     "INSERT INTO session_canon_checkpoint_rows (id, chat_session_id, sequence, character_id, character_revision, character_revision_hash, created_at) VALUES ('checkpoint_$id', '$sessionId', 0, 'char_$id', 1, 'card_hash', 1)",
     "INSERT INTO session_lorebook_revision_rows (checkpoint_id, chat_session_id, lorebook_id, entry_id, base_content_hash, previous_content_hash, content, content_hash, rewrite_operation_id, created_at) VALUES ('checkpoint_$id', '$sessionId', 'source_book_$id', 'entry_$id', 'base_hash', 'base_hash', 'evolved', 'evolved_hash', 'operation_$id', 1)",
     "INSERT INTO session_lorebook_embedding_job_rows (id, chat_session_id, checkpoint_id, lorebook_id, entry_id, expected_content_hash, operation, created_at, updated_at) VALUES ('embedding_job_$id', '$sessionId', 'checkpoint_$id', 'source_book_$id', 'entry_$id', 'evolved_hash', 'reindex', 1, 1)",
-    "INSERT INTO studio_config_rows (session_id) VALUES ('$sessionId')",
     "INSERT INTO chat_summaries (session_id, content) VALUES ('$sessionId', 'summary')",
     "INSERT INTO info_blocks (id, session_id, message_id, block_id, block_name, block_type, content) VALUES ('block_$id', '$sessionId', 'message', 'block', 'Block', 'info', 'content')",
     "INSERT INTO ledger_debug_runs (id, session_id, kind, status, created_at) VALUES ('ledger_debug_$id', '$sessionId', 'normal', 'ok', 1)",
@@ -356,7 +354,6 @@ Future<void> _expectClearGroups(AppDatabase db, String sessionId) async {
   for (final (table, column) in const [
     ('chat_sessions', 'session_id'),
     ('character_session_baseline_rows', 'chat_session_id'),
-    ('studio_config_rows', 'session_id'),
     ('lorebooks', 'activation_target_id'),
     ('session_lorebook_evolution_rows', 'chat_session_id'),
     ('session_canon_checkpoint_rows', 'chat_session_id'),

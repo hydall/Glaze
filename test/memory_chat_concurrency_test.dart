@@ -7,7 +7,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
-import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/memory_book.dart';
@@ -45,7 +44,6 @@ class _ControlledChatGenerationService extends ChatGenerationService {
     String guidanceType = 'GENERATION',
     String? regenTargetId,
     String? continueTargetId,
-    StudioTurnConfigSnapshot? studioTurnConfig,
   }) {
     calls++;
     if (!started.isCompleted) started.complete(session);

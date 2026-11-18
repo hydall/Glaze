@@ -1,47 +1,5 @@
 part of '../tables.dart';
 
-@DataClassName('StudioConfigRow')
-@TableIndex(name: 'idx_studio_config_session', columns: {#sessionId})
-class StudioConfigRows extends Table {
-  @override
-  String get tableName => 'studio_config_rows';
-
-  TextColumn get sessionId => text()();
-  BoolColumn get enabled => boolean().withDefault(const Constant(false))();
-  IntColumn get createdAt => integer().withDefault(const Constant(0))();
-  IntColumn get updatedAt => integer().withDefault(const Constant(0))();
-
-  @override
-  Set<Column> get primaryKey => {sessionId};
-}
-
-@DataClassName('StudioPresetRow')
-class StudioPresetRows extends Table {
-  @override
-  String get tableName => 'studio_preset_rows';
-
-  TextColumn get presetId => text()();
-  TextColumn get name => text()();
-  TextColumn get blocksJson => text().withDefault(const Constant('[]'))();
-  TextColumn get agentsJson => text().withDefault(const Constant('[]'))();
-  TextColumn get expensiveApiConfigId =>
-      text().withDefault(const Constant(''))();
-  TextColumn get cheapApiConfigId => text().withDefault(const Constant(''))();
-  TextColumn get cleanerApiConfigId => text().withDefault(const Constant(''))();
-  TextColumn get ledgerApiConfigId => text().withDefault(const Constant(''))();
-  IntColumn get maxFinalHistoryMessages =>
-      integer().withDefault(const Constant(50))();
-  TextColumn get agentEnabledJson => text().withDefault(const Constant('{}'))();
-  TextColumn get executionMode =>
-      text().withDefault(const Constant('legacy'))();
-  TextColumn get runtimeSettingsJson =>
-      text().withDefault(const Constant('{}'))();
-  IntColumn get updatedAt => integer().withDefault(const Constant(0))();
-
-  @override
-  Set<Column> get primaryKey => {presetId};
-}
-
 @DataClassName('PresetRow')
 class Presets extends Table {
   @override

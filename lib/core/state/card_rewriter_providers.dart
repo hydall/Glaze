@@ -5,27 +5,18 @@ import '../db/app_db.dart'
 import '../../features/settings/api_list_provider.dart';
 import '../llm/card_rewrite_slot_resolver.dart';
 import '../llm/aux_llm_client.dart';
+import '../llm/post_gen_engine_config.dart';
 import '../models/api_config.dart';
 import '../models/card_rewriter_settings.dart';
-import '../models/studio_pipeline_overrides.dart';
 import '../services/card_rewriter/automated_card_evolution_service.dart';
-import 'active_studio_preset_provider.dart';
 import 'db_provider.dart';
-import 'studio_turn_config_resolver.dart';
 
-/// The Card Rewriter settings the lane actually runs on: the active Studio
-/// preset's own copy when it has one, the global settings otherwise.
+/// The Card Rewriter settings the lane runs on.
 ///
 /// Every reader — the services below, the Agent Ops management tab, the
-/// post-generation status card — goes through this, so the lane can never run
-/// on one preset's settings while the UI edits another's. While the preset is
-/// still loading the globals stand in; the services only call their closures
-/// once a turn has resolved its preset, so nothing runs on the stand-in.
+/// post-generation status card — goes through this one place.
 final cardRewriterSettingsProvider = Provider<CardRewriterSettings>((ref) {
-  return effectiveCardRewriterSettings(
-    ref.watch(pipelineSettingsProvider),
-    ref.watch(studioPresetProvider).value,
-  );
+  return ref.watch(pipelineSettingsProvider).cardRewriter;
 });
 
 final automatedCardEvolutionServiceProvider =
@@ -42,11 +33,16 @@ final automatedCardEvolutionServiceProvider =
         );
       }
 
+      // The collector reads accepted story state, so it runs on the
+      // Tracker's connection.
       Future<AuxApiConfig> resolveCollectorModel(String sessionId) async {
-        final turnConfig = await ref
-            .read(studioTurnConfigResolverProvider)
-            .resolve(sessionId);
-        return turnConfig.resolveLedgerConfig(errorLabel: 'card-collector');
+        await ref.read(apiListProvider.future);
+        final engineConfig = PostGenEngineConfig(
+          pipelineSettings: ref.read(pipelineSettingsProvider),
+          apiConfigs: ref.read(apiListProvider).value ?? const <ApiConfig>[],
+          activeApiConfig: ref.read(activeApiConfigProvider),
+        );
+        return engineConfig.resolveLedgerConfig(errorLabel: 'card-collector');
       }
 
       final service = AutomatedCardEvolutionService(
@@ -59,8 +55,9 @@ final automatedCardEvolutionServiceProvider =
         isLorebookEvolutionEnabled: () =>
             ref.read(cardRewriterSettingsProvider).lorebookEvolutionEnabled,
         timeoutMs: settings.timeoutMs,
-        observationPromotionThreshold: () =>
-            ref.read(cardRewriterSettingsProvider).observationPromotionThreshold,
+        observationPromotionThreshold: () => ref
+            .read(cardRewriterSettingsProvider)
+            .observationPromotionThreshold,
         observationMinConfidence: () =>
             ref.read(cardRewriterSettingsProvider).observationMinConfidence,
         observationExpiryRuns: () =>

@@ -10,24 +10,16 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/plugins/plugin_hooks.dart';
 import '../../../core/db/repositories/lorebook_use_manifest_repo.dart';
 import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
-import '../../../core/llm/studio/studio_history_limiter.dart';
-import '../../../core/llm/studio/studio_stream_interceptor.dart';
-import '../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/utils/time_helpers.dart';
-import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../chat_history/chat_history_provider.dart';
 import '../../extensions/services/extension_post_gen_service.dart';
 import '../abort_handler.dart';
 import '../chat_generation_service.dart';
 import '../chat_session_service.dart';
 import '../chat_state.dart';
-import '../state/studio_history_rotation_provider.dart';
-import 'stages/cleaner_stage.dart';
-import 'stages/ext_blocks_stage.dart';
-import 'stages/ledger_stage.dart';
 import 'stages/post_gen_coordinator.dart';
 import 'stages/regen_resolver.dart';
 import 'stages/stage_context.dart';
@@ -60,8 +52,7 @@ class GenerationOutcome {
 ///   3. handle restoration rollback if `abortHandler.restorationMessage` is set
 ///   4. clear `restorationMessage` and chat image `imgGenCancelToken`
 ///   5. sync + notification (immediate)
-///   6. post-cleaner (Studio ON: fact-checker + rewrite + ext blocks + ledger)
-///   7. embed + auto-create drafts (parallel fire-and-forget)
+///   6. embed + auto-create drafts (parallel fire-and-forget)
 ///
 /// This class is a thin orchestrator — no business logic, no state ownership.
 /// Constructor-injected dependencies: the [Ref] (for repo/provider reads),
@@ -71,11 +62,6 @@ class GenerationPipeline {
   final StageContext ctx;
   late final _regenResolver = RegenResolver(ctx);
   late final _postGenCoordinator = PostGenCoordinator(ctx);
-  late final _cleanerStage = CleanerStage(
-    ctx,
-    extBlocks: ExtBlocksStage(ctx),
-    ledger: LedgerStage(ctx),
-  );
 
   GenerationPipeline({
     required Ref ref,
@@ -120,12 +106,6 @@ class GenerationPipeline {
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
         return null;
       }
-      final studioTurnConfig = await ctx.ref
-          .read(studioTurnConfigResolverProvider)
-          .resolve(session.id);
-      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
-        return null;
-      }
       final charRepo = ctx.ref.read(characterRepoProvider);
       final character = await charRepo.getById(ctx.charId);
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
@@ -156,7 +136,6 @@ class GenerationPipeline {
         guidanceType: guidanceType,
         regenTargetId: regenTargetId,
         continueTargetId: continueTargetId,
-        studioTurnConfig: studioTurnConfig,
       );
 
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
@@ -213,7 +192,6 @@ class GenerationPipeline {
           character: character,
           service: service,
           notifService: notifService,
-          studioTurnConfig: studioTurnConfig,
         );
         return outcome;
       }
@@ -224,7 +202,6 @@ class GenerationPipeline {
         regenTargetId: regenTargetId,
         manifest:
             result.mainModelContextSnapshot?.promptResult.exactLorebookManifest,
-        studioTurnConfig: studioTurnConfig,
       );
       if (durableSession == null) {
         return null;
@@ -301,7 +278,6 @@ class GenerationPipeline {
             notifService: notifService,
             completedMessageId: completedMessageId,
             regenTargetId: regenTargetId,
-            studioTurnConfig: studioTurnConfig,
           );
           // Post-gen finished — clear isPostGenRunning (unless a newer
           // generation has taken over, in which case leave its state
@@ -389,7 +365,6 @@ class GenerationPipeline {
         notifService: notifService,
         completedMessageId: completedMessageId,
         regenTargetId: regenTargetId,
-        studioTurnConfig: studioTurnConfig,
       );
       // Post-gen finished — clear isPostGenRunning (unless a newer
       // generation has taken over, in which case leave its state
@@ -498,7 +473,6 @@ class GenerationPipeline {
     required Character? character,
     required ChatGenerationService service,
     required GenerationNotificationService notifService,
-    required StudioTurnConfigSnapshot studioTurnConfig,
   }) async {
     final target = session.messages
         .where((message) => message.id == continueTargetId)
@@ -529,7 +503,6 @@ class GenerationPipeline {
       regenTargetId: continueTargetId,
       manifest:
           result.mainModelContextSnapshot?.promptResult.exactLorebookManifest,
-      studioTurnConfig: studioTurnConfig,
     );
     if (durableSession == null) return null;
     if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return null;
@@ -556,7 +529,6 @@ class GenerationPipeline {
       notifService: notifService,
       completedMessageId: continueTargetId,
       regenTargetId: continueTargetId,
-      studioTurnConfig: studioTurnConfig,
     );
     if (ctx.ref.mounted && ctx.abortHandler.isCurrentGen(genId)) {
       final after = ctx.getState().value;
@@ -605,43 +577,14 @@ class GenerationPipeline {
     required ChatSession generatedSession,
     required String? regenTargetId,
     required ExactLorebookManifest? manifest,
-    required StudioTurnConfigSnapshot studioTurnConfig,
   }) async {
     final durableManifest = validateGenerationManifestForCommit(manifest);
-    var sessionToCommit = generatedSession;
-    StudioHistoryWindowPlan? rotation;
-    if (regenTargetId == null &&
-        studioTurnConfig.enabled &&
-        generatedSession.messages.lastOrNull?.isError != true) {
-      final settings = studioTurnConfig.pipelineSettings.studioAgent;
-      final finalContextSize = settings.studioFinalContextSize > 0
-          ? settings.studioFinalContextSize
-          : studioTurnConfig.preset!.maxFinalHistoryMessages;
-      rotation = StudioStreamInterceptor.planCompletedHistoryWindow(
-        generatedSession.messages,
-        finalContextSize: finalContextSize,
-        historyWindowStartMessageId:
-            baseSession.sessionVars[StudioHistoryLimiter.historyWindowStartVar],
-        reasoningHistoryCount: settings.studioFinalReasoningHistoryCount,
-        excludeReasoningFromContextBudget:
-            settings.studioFinalExcludeReasoningFromContextBudget,
-      );
-      final startId = rotation.startMessageId;
-      if (rotation.didRotate && startId != null) {
-        sessionToCommit = generatedSession.copyWith(
-          sessionVars: {
-            ...generatedSession.sessionVars,
-            StudioHistoryLimiter.historyWindowStartVar: startId,
-          },
-        );
-      }
-    }
     var wakeLoreEmbeddingWorker = false;
     final chatRepo = ctx.ref.read(chatRepoProvider);
     Future<ChatSession?> commit(ExactLorebookManifest? manifest) =>
         chatRepo.commitGenerationResult(
           baseSession: baseSession,
-          generatedSession: sessionToCommit,
+          generatedSession: generatedSession,
           regenTargetId: regenTargetId,
           manifest: manifest,
           beforeWrite: (before, after) async {
@@ -690,14 +633,6 @@ class GenerationPipeline {
     if (wakeLoreEmbeddingWorker) {
       unawaited(ctx.ref.read(sessionLorebookEmbeddingWorkerProvider).drain());
     }
-    if (committed != null && rotation?.didRotate == true && ctx.ref.mounted) {
-      ctx.ref
-          .read(studioHistoryRotationProvider(ctx.charId).notifier)
-          .state = StudioHistoryRotationNotice(
-        sessionId: committed.id,
-        droppedMessageCount: rotation!.droppedMessageCount,
-      );
-    }
     return committed;
   }
 
@@ -713,15 +648,6 @@ class GenerationPipeline {
             jsonEncode(
               current.agentSwipes.map((swipe) => swipe.toJson()).toList(),
             );
-  }
-
-  /// Re-run the POST-cleaner against an existing assistant message.
-  /// Delegates to [CleanerStage.rerun].
-  Future<void> rerunCleaner({
-    required String sessionId,
-    required String messageId,
-  }) async {
-    await _cleanerStage.rerun(sessionId: sessionId, messageId: messageId);
   }
 
   Future<void> _handlePipelineError(

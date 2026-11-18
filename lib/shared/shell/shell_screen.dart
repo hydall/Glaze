@@ -7,7 +7,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/guides/guide_service.dart';
 import '../../features/settings/app_settings_provider.dart';
-import '../../features/studio/studio_availability.dart';
 import '../widgets/glass_nav_bar.dart';
 import '../widgets/glass_surface.dart';
 import '../widgets/glaze_background.dart';
@@ -38,7 +37,6 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      retireActiveStudio(context, ref);
       maybeShowGuide(context, AppGuide.tabs);
     });
   }

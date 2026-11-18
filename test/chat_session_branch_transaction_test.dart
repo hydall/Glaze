@@ -21,7 +21,6 @@ import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/lorebook.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
-import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/models/summary_block.dart';
 import 'package:glaze_flutter/core/models/tracker.dart';
 import 'package:glaze_flutter/core/models/tracker_snapshot.dart';
@@ -157,9 +156,6 @@ void main() {
               cardUpdatePolicy: CharacterCardUpdatePolicy.pinnedBaseline,
             ),
           );
-      await container
-          .read(studioConfigRepoProvider)
-          .upsert(const StudioConfig(sessionId: 'c1_0', enabled: true));
       await container
           .read(memoryBookRepoProvider)
           .put(
@@ -358,11 +354,6 @@ void main() {
         baseline?.cardUpdatePolicy,
         CharacterCardUpdatePolicy.pinnedBaseline,
       );
-      final studio = await container
-          .read(studioConfigRepoProvider)
-          .getBySessionId(branch.id);
-      expect(studio?.enabled, isTrue);
-      expect(studio?.sessionId, branch.id);
 
       final memory = await container
           .read(memoryBookRepoProvider)

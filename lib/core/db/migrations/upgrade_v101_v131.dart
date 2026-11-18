@@ -2,19 +2,6 @@ part of '../app_db.dart';
 
 extension _AppDatabaseUpgradeV101ToV131 on AppDatabase {
   Future<void> _upgradeV101ToV131(Migrator m, int from) async {
-    if (from < 101) {
-      await _retireStudioConfigProfiles();
-    }
-    if (from < 102) {
-      final presetCols = await customSelect(
-        'PRAGMA table_info("studio_preset_rows")',
-      ).get();
-      if (!presetCols.any(
-        (row) => row.read<String>('name') == 'ledger_api_config_id',
-      )) {
-        await m.addColumn(studioPresetRows, studioPresetRows.ledgerApiConfigId);
-      }
-    }
     if (from < 103) {
       final tableNames = (await customSelect(
         "SELECT name FROM sqlite_master WHERE type = 'table'",
@@ -25,12 +12,6 @@ extension _AppDatabaseUpgradeV101ToV131 on AppDatabase {
       if (!tableNames.contains('preset_folder_members')) {
         await m.createTable(presetFolderMembers);
       }
-    }
-    if (from < 105) {
-      await _removeRetiredWriteLoopBlocks();
-    }
-    if (from < 106) {
-      await _repairPresetBlockRouting();
     }
     if (from < 107) {
       final columns = await customSelect(
@@ -279,12 +260,6 @@ extension _AppDatabaseUpgradeV101ToV131 on AppDatabase {
       if (!names.contains('embedding_requests_per_minute')) {
         await m.addColumn(apiConfigs, apiConfigs.embeddingRequestsPerMinute);
       }
-    }
-    if (from < 123) {
-      await customStatement(
-        'UPDATE studio_preset_rows SET max_final_history_messages = 50 '
-        'WHERE max_final_history_messages = 30',
-      );
     }
     if (from < 124) {
       await m.createTable(llmRequestCaptureRows);

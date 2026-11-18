@@ -253,9 +253,6 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
   }
 
   Future<void> deleteSession(String sessionId) async {
-    final studioConfig = await ref
-        .read(studioConfigRepoProvider)
-        .getBySessionId(sessionId);
     final charId = _characterIdOf(sessionId);
     await ref.read(sessionDeletionRepoProvider).deleteSession(sessionId);
     ChatSessionService.clearCache();
@@ -278,9 +275,6 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     await SyncDeletionTracker.record('tracker_snapshot', sessionId);
     await SyncDeletionTracker.record('session_lorebook_overlays', sessionId);
     await SyncDeletionTracker.record('reconciliation_state', sessionId);
-    if (studioConfig != null) {
-      await SyncDeletionTracker.record('studio_config', sessionId);
-    }
   }
 
   /// Character a session belongs to. Read from the loaded list when possible;

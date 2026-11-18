@@ -332,136 +332,6 @@ extension _AppDatabaseUpgradeV2ToV50 on AppDatabase {
         await m.createTable(memoryConsolidationRows);
       }
     }
-    if (from < 36) {
-      final tables = await customSelect(
-        "SELECT name FROM sqlite_master WHERE type = 'table'",
-      ).get();
-      final tableNames = tables.map((r) => r.read<String>('name')).toSet();
-      if (!tableNames.contains('studio_config_rows')) {
-        await m.createTable(studioConfigRows);
-      }
-    }
-    if (from < 37) {
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('build_api_config_id')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN build_api_config_id TEXT NOT NULL DEFAULT ""',
-        );
-      }
-      if (!colNames.contains('run_api_config_id')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN run_api_config_id TEXT NOT NULL DEFAULT ""',
-        );
-      }
-    }
-    if (from < 38) {
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('selected_block_ids_json')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN selected_block_ids_json TEXT NOT NULL DEFAULT "[]"',
-        );
-      }
-      if (!colNames.contains('selected_block_ids_initialized')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN selected_block_ids_initialized INTEGER NOT NULL DEFAULT 0',
-        );
-      }
-    }
-    if (from < 39) {
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('final_preset_id')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN final_preset_id TEXT NOT NULL DEFAULT ""',
-        );
-      }
-    }
-    if (from < 40) {
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('agent_studio_preset_id')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN agent_studio_preset_id TEXT NOT NULL DEFAULT ""',
-        );
-      }
-      if (!colNames.contains('final_studio_preset_id')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN final_studio_preset_id TEXT NOT NULL DEFAULT ""',
-        );
-      }
-    }
-    if (from < 41) {
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('studio_preset_overrides_json')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN studio_preset_overrides_json TEXT NOT NULL DEFAULT "[]"',
-        );
-      }
-    }
-    if (from < 42) {
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('profile_id')) {
-        await customStatement(
-          "ALTER TABLE studio_config_rows ADD COLUMN profile_id "
-          "TEXT NOT NULL DEFAULT ''",
-        );
-      }
-      if (!colNames.contains('profile_name')) {
-        await customStatement(
-          "ALTER TABLE studio_config_rows ADD COLUMN profile_name "
-          "TEXT NOT NULL DEFAULT ''",
-        );
-      }
-      await customStatement(
-        "UPDATE studio_config_rows SET profile_id = session_id "
-        "WHERE profile_id IS NULL OR profile_id = ''",
-      );
-      await customStatement(
-        "UPDATE studio_config_rows SET profile_name = "
-        "CASE WHEN profile_id IS NULL OR profile_id = '' "
-        "THEN 'Studio Profile' ELSE 'Studio: ' || profile_id END "
-        "WHERE profile_name IS NULL OR profile_name = ''",
-      );
-    }
-    if (from < 43) {
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('builder_prompt_template')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN builder_prompt_template TEXT NOT NULL DEFAULT ""',
-        );
-      }
-    }
-    if (from < 44) {
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('max_final_history_messages')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN '
-          'max_final_history_messages INTEGER NOT NULL DEFAULT 30',
-        );
-      }
-    }
     if (from < 45) {
       // Agentic memory trackers: lightweight key-value state written by the
       // memory agent (e.g. 'Lucy: chip in pocket', 'relationship: +1').
@@ -473,35 +343,6 @@ extension _AppDatabaseUpgradeV2ToV50 on AppDatabase {
       final tableNames = tables.map((r) => r.read<String>('name')).toSet();
       if (!tableNames.contains('tracker_rows')) {
         await m.createTable(trackerRows);
-      }
-    }
-    if (from < 46) {
-      // Stage 3: routing mode for preset orchestrator — 'verbatim' (default,
-      // blocks go to agents дословно) vs 'compiled' (legacy LLM digest).
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('routing_mode')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN routing_mode TEXT NOT NULL DEFAULT "verbatim"',
-        );
-      }
-    }
-    if (from < 47) {
-      // Broadcast blocks: verbatim content of cross-cutting rules (output
-      // language + prose-quality guards) captured at Studio build time so the
-      // POST-cleaner can apply the user's own rules instead of a hardcoded
-      // English-only cliché list. Guarded to survive partial upgrades.
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('broadcast_blocks_json')) {
-        await customStatement(
-          "ALTER TABLE studio_config_rows ADD COLUMN broadcast_blocks_json "
-          "TEXT NOT NULL DEFAULT '[]'",
-        );
       }
     }
     if (from < 48) {
@@ -612,26 +453,6 @@ extension _AppDatabaseUpgradeV2ToV50 on AppDatabase {
           '(session_id, settings_json, updated_at) '
           "VALUES (?, ?, CAST(strftime('%s','now') AS INTEGER))",
           [sessionId, jsonEncode(pipelineJson)],
-        );
-      }
-    }
-    if (from < 49) {
-      // Studio Build/Run model overrides: allow the user to pick a specific
-      // model from the API config's fetched model list, independent of the
-      // config's default `model` field. Additive — defaults to '' (use
-      // config.model).
-      final cols = await customSelect(
-        'PRAGMA table_info("studio_config_rows")',
-      ).get();
-      final colNames = cols.map((r) => r.read<String>('name')).toSet();
-      if (!colNames.contains('build_model_override')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN build_model_override TEXT NOT NULL DEFAULT ""',
-        );
-      }
-      if (!colNames.contains('run_model_override')) {
-        await customStatement(
-          'ALTER TABLE studio_config_rows ADD COLUMN run_model_override TEXT NOT NULL DEFAULT ""',
         );
       }
     }

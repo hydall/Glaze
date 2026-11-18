@@ -6,7 +6,7 @@ import 'package:glaze_flutter/core/models/agent_operation_record.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
-import 'package:glaze_flutter/core/models/studio_config.dart';
+import 'package:glaze_flutter/core/models/preset.dart';
 
 void main() {
   group('PostCleanerResult', () {
@@ -106,8 +106,7 @@ void main() {
   group('Post-cleaner trigger suppression', () {
     // The cleaner is always-on. The trigger in GenerationPipeline is guarded
     // by: regenTargetId == null (no studio-final term).
-    bool cleanerTriggers(String? regenTargetId) =>
-        regenTargetId == null;
+    bool cleanerTriggers(String? regenTargetId) => regenTargetId == null;
 
     test('normal send → triggers', () {
       expect(cleanerTriggers(null), isTrue);
@@ -168,8 +167,7 @@ void main() {
   group('Post-cleaner trigger suppression', () {
     // The cleaner is always-on. The trigger in GenerationPipeline is guarded
     // by: regenTargetId == null (no studio-final term).
-    bool cleanerTriggers(String? regenTargetId) =>
-        regenTargetId == null;
+    bool cleanerTriggers(String? regenTargetId) => regenTargetId == null;
 
     test('normal send → triggers', () {
       expect(cleanerTriggers(null), isTrue);
@@ -258,9 +256,10 @@ void main() {
       final prompt = PostCleanerService.buildStudioCleanerPrompt(
         assistantText: '«Привет», — сказала Люси.',
         cleanerBlocks: const [
-          StudioPresetBlock(
+          PresetBlock(
             id: 'cleaner_beauty',
-            injectionPoint: 'cleaner',
+            name: 'Beauty',
+            role: 'system',
             content: 'BEAUTY SELF-CONTAINED {{beautyBrief}}',
           ),
         ],
@@ -341,11 +340,7 @@ void main() {
     test('includes recent chat history when provided', () {
       final messages = [
         ChatMessage(id: 'm1', role: 'user', content: 'Что ты помнишь?'),
-        ChatMessage(
-          id: 'm2',
-          role: 'assistant',
-          content: 'Я помню дождь.',
-        ),
+        ChatMessage(id: 'm2', role: 'assistant', content: 'Я помню дождь.'),
       ];
       final prompt = PostCleanerService.buildCleanerPrompt(
         assistantText: 'Снова дождь.',
@@ -476,16 +471,19 @@ void main() {
       expect(rulesIdx, lessThan(textIdx));
     });
 
-    test('audit notes do not trigger continuity rules section (separate concern)', () {
-      // Continuity rules are for local scene state (history), not for
-      // audit notes. Audit notes have their own fix-instructions.
-      final prompt = PostCleanerService.buildCleanerPrompt(
-        assistantText: 'Text.',
-        auditIssues: const ['Some issue.'],
-      );
-      expect(prompt, contains('CHARACTER CONSISTENCY NOTES'));
-      expect(prompt, isNot(contains('Continuity rules:')));
-    });
+    test(
+      'audit notes do not trigger continuity rules section (separate concern)',
+      () {
+        // Continuity rules are for local scene state (history), not for
+        // audit notes. Audit notes have their own fix-instructions.
+        final prompt = PostCleanerService.buildCleanerPrompt(
+          assistantText: 'Text.',
+          auditIssues: const ['Some issue.'],
+        );
+        expect(prompt, contains('CHARACTER CONSISTENCY NOTES'));
+        expect(prompt, isNot(contains('Continuity rules:')));
+      },
+    );
   });
 
   group('PostCleanerService.buildAuditPrompt', () {
@@ -544,27 +542,30 @@ void main() {
       expect(prompt, isNot(contains('USER PERSONA:')));
     });
 
-    test('includes lorebooks/memory/summary/arc/entity sections when present', () {
-      final prompt = PostCleanerService.buildAuditPrompt(
-        assistantText: 'Text.',
-        character: const Character(id: 'c1', name: 'X'),
-        lorebooksContent: 'Wall of names behind the bar.',
-        memoryContent: 'Lucy never speaks aloud.',
-        summaryContent: 'Five turns have passed.',
-        arcContent: 'Investigation arc active.',
-        entitiesContent: '- Lucy (npc): silent bartender',
-      );
-      expect(prompt, contains('INJECTED WORLD/LORE CONTEXT:'));
-      expect(prompt, contains('Wall of names'));
-      expect(prompt, contains('INJECTED MEMORY CONTEXT:'));
-      expect(prompt, contains('Lucy never speaks'));
-      expect(prompt, contains('SUMMARY:'));
-      expect(prompt, contains('Five turns'));
-      expect(prompt, contains('ARCS:'));
-      expect(prompt, contains('Investigation arc'));
-      expect(prompt, contains('ENTITIES:'));
-      expect(prompt, contains('Lucy (npc)'));
-    });
+    test(
+      'includes lorebooks/memory/summary/arc/entity sections when present',
+      () {
+        final prompt = PostCleanerService.buildAuditPrompt(
+          assistantText: 'Text.',
+          character: const Character(id: 'c1', name: 'X'),
+          lorebooksContent: 'Wall of names behind the bar.',
+          memoryContent: 'Lucy never speaks aloud.',
+          summaryContent: 'Five turns have passed.',
+          arcContent: 'Investigation arc active.',
+          entitiesContent: '- Lucy (npc): silent bartender',
+        );
+        expect(prompt, contains('INJECTED WORLD/LORE CONTEXT:'));
+        expect(prompt, contains('Wall of names'));
+        expect(prompt, contains('INJECTED MEMORY CONTEXT:'));
+        expect(prompt, contains('Lucy never speaks'));
+        expect(prompt, contains('SUMMARY:'));
+        expect(prompt, contains('Five turns'));
+        expect(prompt, contains('ARCS:'));
+        expect(prompt, contains('Investigation arc'));
+        expect(prompt, contains('ENTITIES:'));
+        expect(prompt, contains('Lucy (npc)'));
+      },
+    );
 
     test('omits empty context sections cleanly', () {
       final prompt = PostCleanerService.buildAuditPrompt(
@@ -610,9 +611,7 @@ void main() {
         assistantText: 'The response.',
         character: const Character(id: 'c1', name: 'X', description: 'D'),
         memoryContent: 'Memory fact.',
-        recentMessages: [
-          ChatMessage(id: 'm1', role: 'user', content: 'Q?'),
-        ],
+        recentMessages: [ChatMessage(id: 'm1', role: 'user', content: 'Q?')],
       );
       final profileIdx = prompt.indexOf('CHARACTER PROFILE:');
       final memIdx = prompt.indexOf('INJECTED MEMORY CONTEXT:');
@@ -652,7 +651,9 @@ void main() {
     test('returns null when ok=false but issues is missing or not a list', () {
       expect(PostCleanerService.parseAuditJson('{"ok": false}'), isNull);
       expect(
-        PostCleanerService.parseAuditJson('{"ok": false, "issues": "not a list"}'),
+        PostCleanerService.parseAuditJson(
+          '{"ok": false, "issues": "not a list"}',
+        ),
         isNull,
       );
     });
@@ -710,23 +711,29 @@ void main() {
       );
     });
 
-    test('returns true when original had HTML tags but edited dropped them', () {
-      const original = '<font color="red">She smiled.</font> More prose.';
-      const edited = 'She smiled. More prose.';
-      expect(
-        PostCleanerService.textRewriteDropsProtectedMarkup(original, edited),
-        isTrue,
-      );
-    });
+    test(
+      'returns true when original had HTML tags but edited dropped them',
+      () {
+        const original = '<font color="red">She smiled.</font> More prose.';
+        const edited = 'She smiled. More prose.';
+        expect(
+          PostCleanerService.textRewriteDropsProtectedMarkup(original, edited),
+          isTrue,
+        );
+      },
+    );
 
-    test('returns true when original had fenced code but edited dropped it', () {
-      const original = 'Here is code:\n```dart\nvoid main() {}\n```\nDone.';
-      const edited = 'Here is code: void main() {} Done.';
-      expect(
-        PostCleanerService.textRewriteDropsProtectedMarkup(original, edited),
-        isTrue,
-      );
-    });
+    test(
+      'returns true when original had fenced code but edited dropped it',
+      () {
+        const original = 'Here is code:\n```dart\nvoid main() {}\n```\nDone.';
+        const edited = 'Here is code: void main() {} Done.';
+        expect(
+          PostCleanerService.textRewriteDropsProtectedMarkup(original, edited),
+          isTrue,
+        );
+      },
+    );
 
     test('returns false when original and edited both have code fences', () {
       const original = '```dart\nvoid main() {}\n```';
@@ -757,30 +764,37 @@ void main() {
 
     test('returns false when edited preserves tags but adds prose', () {
       const original = '<i>She smiled.</i>';
-      const edited = '<i>She smiled warmly, the corners of her eyes crinkling.</i>';
+      const edited =
+          '<i>She smiled warmly, the corners of her eyes crinkling.</i>';
       expect(
         PostCleanerService.textRewriteDropsProtectedMarkup(original, edited),
         isFalse,
       );
     });
 
-    test('returns true when original had both tags and fences, edited lost both', () {
-      const original = '<b>Bold</b> and ```fenced```.';
-      const edited = 'Bold and fenced.';
-      expect(
-        PostCleanerService.textRewriteDropsProtectedMarkup(original, edited),
-        isTrue,
-      );
-    });
+    test(
+      'returns true when original had both tags and fences, edited lost both',
+      () {
+        const original = '<b>Bold</b> and ```fenced```.';
+        const edited = 'Bold and fenced.';
+        expect(
+          PostCleanerService.textRewriteDropsProtectedMarkup(original, edited),
+          isTrue,
+        );
+      },
+    );
 
-    test('returns false when original had both, edited kept tags but lost fences', () {
-      const original = '<b>Bold</b> and ```fenced```.';
-      const edited = '<b>Bold</b> and fenced.';
-      expect(
-        PostCleanerService.textRewriteDropsProtectedMarkup(original, edited),
-        isTrue,
-      );
-    });
+    test(
+      'returns false when original had both, edited kept tags but lost fences',
+      () {
+        const original = '<b>Bold</b> and ```fenced```.';
+        const edited = '<b>Bold</b> and fenced.';
+        expect(
+          PostCleanerService.textRewriteDropsProtectedMarkup(original, edited),
+          isTrue,
+        );
+      },
+    );
   });
 
   group('buildCleanerPrompt style overrides', () {
@@ -822,15 +836,18 @@ void main() {
       expect(prompt, isNot(contains('PREFER')));
     });
 
-    test('omits GLOBAL STYLE OVERRIDES section when overrides are whitespace only', () {
-      final prompt = PostCleanerService.buildCleanerPrompt(
-        assistantText: 'She smiled.',
-        bannedWords: '   ',
-        avoidInstructions: '\n\t',
-        styleInstructions: '',
-      );
-      expect(prompt, isNot(contains('GLOBAL STYLE OVERRIDES')));
-    });
+    test(
+      'omits GLOBAL STYLE OVERRIDES section when overrides are whitespace only',
+      () {
+        final prompt = PostCleanerService.buildCleanerPrompt(
+          assistantText: 'She smiled.',
+          bannedWords: '   ',
+          avoidInstructions: '\n\t',
+          styleInstructions: '',
+        );
+        expect(prompt, isNot(contains('GLOBAL STYLE OVERRIDES')));
+      },
+    );
 
     test('includes all three sections when all overrides non-empty', () {
       final prompt = PostCleanerService.buildCleanerPrompt(

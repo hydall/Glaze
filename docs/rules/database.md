@@ -111,7 +111,7 @@ integrity helpers are split into these `app_db.dart` parts:
 - `migrations/upgrade_v51_v100.dart`
 - `migrations/upgrade_v101_v131.dart`
 - `migrations/database_integrity.dart`
-- `migrations/studio_legacy.dart`
+- `migrations/memory_legacy.dart`
 
 All schema changes must update the registration/migration path in
 `app_db.dart`. Bump the schema version and add a guarded `from -> to` migration
@@ -282,6 +282,11 @@ Migration history:
 - v145: added `api_configs.tool_calling` BOOLEAN DEFAULT 0 and
   `api_configs.disabled_tool_groups_json` TEXT DEFAULT `'[]'` (per-connection
   model tool calling; see `lib/features/model_tools/`).
+- v147: Studio removed. Drops `studio_config_rows` and `studio_preset_rows`
+  and deletes `preset_folder_members` rows of kind `agentic`. The historical
+  steps above that created or reshaped the Studio tables (v36–v49, v54–v71,
+  v74, v96–v102, v105, v106, v123) no longer run; the entries are kept as
+  history.
 
 ---
 
@@ -360,7 +365,7 @@ cascade in one transaction.
 The session cascade removes MemoryBook state, Memory Catalog/Graph rows, live
 trackers and snapshots, reconciliation checkpoints/journals, character
 knowledge, summaries, InfoBlocks, chat/message-memory embeddings, session
-baseline, Studio config, chat-scoped lorebooks and their embeddings, and the
+baseline, chat-scoped lorebooks and their embeddings, and the
 chat row. Character deletion additionally removes folder memberships, character
 rows, and promotes a remaining variation representative when required.
 
@@ -384,7 +389,7 @@ tombstones.
 
 **Clear chat is not delete session.** `SessionDeletionRepo.clearSession`
 transactionally replaces messages and clears message-derived runtime state,
-while retaining session identity/settings, baseline, Studio config, chat
+while retaining session identity/settings, baseline, chat
 bindings, and the MemoryBook settings row (entries/drafts are reset). In-chat
 clear rebuilds its greeting, resets the branch stamp, and counts deleted
 messages; history-list clear supplies an empty replacement without those
@@ -516,7 +521,7 @@ fall back to `trackerRepoProvider.getBySessionId` when no snapshot exists
 |-------------|-------------|--------|
 | Delete a message | `ChatRepo.deleteMessage` → `trackerSnapshotRepo.deleteForMessage` + `trackerRepo.replaceForSession` + `memoryBookRepo.deleteForMessage` | All snapshots at that `messageId` are dropped; the preceding committed snapshot becomes the latest. The live `tracker_rows` store is restored from it, so Tracker values and Studio state reflect the prior accepted message. MemoryBook items whose `messageIds` contains the deleted `messageId` are also dropped. |
 | Delete a session | `chat_history_provider.deleteSession` → `deleteBySessionId` + `SyncDeletionTracker.record('tracker_snapshot', sessionId)` | All snapshots for the session are dropped; cloud sync deletion is tracked. |
-| Clear chat | `SessionDeletionRepo.clearSession` | Replaces messages and purges message-derived runtime rows, including snapshots, while preserving the session, baseline, Studio config, bindings, and MemoryBook settings. |
+| Clear chat | `SessionDeletionRepo.clearSession` | Replaces messages and purges message-derived runtime rows, including snapshots, while preserving the session, baseline, bindings, and MemoryBook settings. |
 | Delete by character | `CharacterDeletionRepo.deleteCharacters` → shared session cascade | All snapshots and other session-owned rows for all character sessions are dropped atomically. |
 | Swipe removal | `trackerSnapshotRepo.shiftSwipeIdsAfterRemoval` | Re-keys snapshots whose `swipeId` > removed id, preserving continuity. |
 | Branch session | `chat_session_service.branchSession` → `copyForSessionBranch` | Copies snapshots for sliced message IDs to the new session ID. |
@@ -570,8 +575,7 @@ canon checkpoint: the first rewrite in either session forks the root card by
 itself (`ManualRewriteApplyRepo._forkSessionCharacter`). Branching a chat that
 never ran the Card Rewriter must not leave a variant behind.
 
-Session baseline and
-Studio configuration are copied as settings. Provenance-backed state is copied
+The session baseline is copied as a setting. Provenance-backed state is copied
 only when its complete source range is retained: tracker snapshots, character
 knowledge facts, reconciliation checkpoints, cleanup journals (copied with the
 fact provenance operation), completed

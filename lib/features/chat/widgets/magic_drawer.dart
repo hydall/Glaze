@@ -7,8 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/platform/haptics.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
-import '../../../core/state/active_studio_preset_provider.dart';
-import '../../../core/state/studio_feature_provider.dart';
 import '../../../core/state/summary_providers.dart';
 
 import '../../../shared/shell/desktop/desktop_layout_provider.dart';
@@ -320,9 +318,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   Future<void> _showAddItemSheet() async {
-    final available = _visibleItems(context)
-        .where((item) => !_itemIds.contains(item.id))
-        .toList();
+    final available = _visibleItems(
+      context,
+    ).where((item) => !_itemIds.contains(item.id)).toList();
     if (available.isEmpty) return;
 
     await GlazeBottomSheet.show<MagicDrawerItemDef>(
@@ -387,12 +385,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       if (prev != next) _scheduleRefresh();
     });
     ref.listen(presetConnectionsProvider, (prev, next) {
-      if (prev != next) _scheduleRefresh();
-    });
-    ref.listen(activeStudioPresetProvider, (prev, next) {
-      if (prev?.value != next.value) _scheduleRefresh();
-    });
-    ref.listen(studioFeatureEnabledProvider, (prev, next) {
       if (prev != next) _scheduleRefresh();
     });
     // Summary is written straight to its repo (not through chatProvider), so
@@ -563,10 +555,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
                     listRow: list,
                     child: card,
                   ),
-                  childWhenDragging: Opacity(
-                    opacity: 0.25,
-                    child: card,
-                  ),
+                  childWhenDragging: Opacity(opacity: 0.25, child: card),
                   child: card,
                 );
               },
@@ -592,10 +581,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
         if (canAdd)
           SizedBox(
             width: itemWidth,
-            child: AddMagicCard(
-              onTap: _showAddItemSheet,
-              listRow: list,
-            ),
+            child: AddMagicCard(onTap: _showAddItemSheet, listRow: list),
           ),
       ],
     );

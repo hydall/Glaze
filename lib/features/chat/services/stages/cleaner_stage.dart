@@ -11,18 +11,17 @@ import '../../../../core/llm/macro_engine.dart';
 import '../../../../core/llm/prompt_builder.dart' show PromptPayload;
 import '../../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../../core/llm/tokenizer.dart';
-import '../../../../core/llm/studio_turn_config_snapshot.dart';
+import '../../../../core/llm/post_gen_engine_config.dart';
 import '../../../../core/llm/cleaner/audit_prompt_builder.dart'
     show AuditResult;
 import '../../../../core/models/agent_operation_record.dart';
 import '../../../../core/models/character.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/models/pipeline_settings.dart';
-import '../../../../core/models/studio_config.dart';
+import '../../../../core/models/preset.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
 import '../../../../core/state/character_provider.dart';
-import '../../../../core/state/studio_turn_config_resolver.dart';
 import '../../../chat_history/chat_history_provider.dart';
 import '../../chat_session_service.dart';
 import '../../state/agent_operations_log_provider.dart';
@@ -40,7 +39,8 @@ import 'beauty_state_handler.dart';
 /// Stage 4: POST-cleaner trigger.
 ///
 /// Fire-and-forget — silently rewrites the last assistant message to
-/// remove clichés/repetition. Studio-only. Falls back to original text on
+/// remove clichés/repetition. Runs as the Post Clean agent (its settings
+/// arrive in a [PostGenEngineConfig]). Falls back to original text on
 /// any error. The original is preserved as a swipe.
 ///
 /// Also handles manual rerun via [rerun].
@@ -127,7 +127,7 @@ class CleanerStage {
     PromptPayload? promptPayload,
     MainModelContextSnapshot? mainModelContextSnapshot,
     Character? character,
-    StudioTurnConfigSnapshot? studioTurnConfig,
+    required PostGenEngineConfig engineConfig,
   }) async {
     final trailing = messages.isNotEmpty ? messages.last : null;
     if (trailing == null || trailing.role != 'assistant' || trailing.isError) {
@@ -148,7 +148,7 @@ class CleanerStage {
         promptPayload: promptPayload,
         mainModelContextSnapshot: mainModelContextSnapshot,
         character: character,
-        studioTurnConfig: studioTurnConfig,
+        engineConfig: engineConfig,
       );
     });
   }
@@ -160,16 +160,12 @@ class CleanerStage {
     PromptPayload? promptPayload,
     MainModelContextSnapshot? mainModelContextSnapshot,
     Character? character,
-    StudioTurnConfigSnapshot? studioTurnConfig,
+    required PostGenEngineConfig engineConfig,
   }) async {
     if (!ctx.ref.mounted || !_ownsRun) return;
 
     try {
-      final turnConfig =
-          studioTurnConfig ??
-          await ctx.ref
-              .read(studioTurnConfigResolverProvider)
-              .resolve(sessionId);
+      final turnConfig = engineConfig;
       final pipeline = turnConfig.pipelineSettings;
       if (!ctx.ref.mounted ||
           !_ownsRun ||
@@ -178,7 +174,7 @@ class CleanerStage {
       }
 
       // The cleaner must only rewrite the just-generated assistant message.
-      // If the trailing message is an error (e.g. Studio returned an empty
+      // If the trailing message is an error (e.g. the model returned an empty
       // response → writeError), there is nothing to clean — return early so
       // we never accidentally rewrite a PREVIOUS valid assistant message.
       final trailing = messages.isNotEmpty ? messages.last : null;
@@ -228,7 +224,7 @@ class CleanerStage {
       // independent ExtBlocks + Ledger stages before touching cleaner-only
       // prerequisites such as MemoryBook, preset blocks, or the cleaner API
       // slot, so a missing cleaner dependency cannot suppress post-generation.
-      if (!pipeline.cleaner.postCleanerEnabled && genId >= 0) {
+      if (!turnConfig.cleanerEnabled && genId >= 0) {
         debugPrint(
           '[PostCleaner] skipping — postCleanerEnabled=false session=$sessionId',
         );
@@ -260,30 +256,20 @@ class CleanerStage {
             finalAssistantText: lastAssistant.content,
             targetMessage: lastAssistant,
             cancelToken: _cleanerCancelToken,
-            studioTurnConfig: turnConfig,
+            engineConfig: turnConfig,
           );
         }
         return;
       }
 
-      // Broadcast rules are part of the selected preset's atomic runtime.
-      final broadcastBlocks =
-          turnConfig.preset?.runtime.broadcastBlocks ?? const <String>[];
-      final studioConfigEnabled = turnConfig.enabled;
-      final studioPreset = turnConfig.preset;
+      final broadcastBlocks = turnConfig.broadcastBlocks;
       if (!ctx.ref.mounted ||
           !_ownsRun ||
           !ctx.abortHandler.isCurrentGen(genId)) {
         return;
       }
 
-      // Cleaner is Studio-only. Skip when Studio is disabled.
-      if (!studioConfigEnabled) {
-        debugPrint('[PostCleaner] skipping — Studio not enabled');
-        return;
-      }
-
-      // Resolve the Studio cleaner slot (fail-explicit).
+      // Resolve the Post Clean connection.
       final AuxApiConfig cleanerConfig;
       try {
         cleanerConfig = turnConfig.resolveCleanerConfig(
@@ -350,9 +336,9 @@ class CleanerStage {
         character: effectiveChar,
         cleanerConfig: cleanerConfig,
         beautyState: beautyState,
-        cleanerBlocks: studioPreset?.blocks ?? const [],
+        cleanerBlocks: turnConfig.cleanerBlocks,
         macroCtx: cleanerMacroCtx,
-        studioTurnConfig: turnConfig,
+        engineConfig: turnConfig,
       );
     } catch (e) {
       debugPrint('[PostCleaner] failed session=$sessionId error=$e');
@@ -464,9 +450,9 @@ class CleanerStage {
     Character? character,
     required AuxApiConfig cleanerConfig,
     String? beautyState,
-    List<StudioPresetBlock> cleanerBlocks = const [],
+    List<PresetBlock> cleanerBlocks = const [],
     MacroContext? macroCtx,
-    StudioTurnConfigSnapshot? studioTurnConfig,
+    required PostGenEngineConfig engineConfig,
   }) async {
     final isManualRerun = genId < 0;
     bool abortCheck() =>
@@ -993,7 +979,7 @@ class CleanerStage {
       }
     }
 
-    // Stage 7: Studio Ledger — fired here so it always receives the final
+    // Tracker (Ledger) — fired here so it always receives the final
     // canonical text. Runs on both auto and manual rerun — on manual rerun
     // Ledger resolves its own dedicated slot from the same turn snapshot.
     // Skip on manual rerun when both auto toggles were off — Ledger already
@@ -1020,7 +1006,7 @@ class CleanerStage {
         targetMessage: ledgerTargetMessage ?? targetMessage,
         isManualRerun: isManualRerun,
         cancelToken: _cleanerCancelToken,
-        studioTurnConfig: studioTurnConfig,
+        engineConfig: engineConfig,
       );
     }
   }
@@ -1037,6 +1023,7 @@ class CleanerStage {
   Future<void> rerun({
     required String sessionId,
     required String messageId,
+    required PostGenEngineConfig engineConfig,
   }) async {
     final key = CleanerRunKey(sessionId: sessionId, messageId: messageId);
     await ctx.ref.read(cleanerRunRegistryProvider).run(key, (lease) async {
@@ -1046,13 +1033,18 @@ class CleanerStage {
         ledger: ledger,
         lease: lease,
       );
-      await worker._rerun(sessionId: sessionId, messageId: messageId);
+      await worker._rerun(
+        sessionId: sessionId,
+        messageId: messageId,
+        engineConfig: engineConfig,
+      );
     });
   }
 
   Future<void> _rerun({
     required String sessionId,
     required String messageId,
+    required PostGenEngineConfig engineConfig,
   }) async {
     if (!ctx.ref.mounted || !_ownsRun) return;
 
@@ -1069,17 +1061,9 @@ class CleanerStage {
         : target.content;
     if (finalText.trim().isEmpty) return;
 
-    final turnConfig = await ctx.ref
-        .read(studioTurnConfigResolverProvider)
-        .resolve(sessionId);
-    if (!ctx.ref.mounted || !_ownsRun) return;
-    if (!turnConfig.enabled) {
-      debugPrint('[PostCleaner] rerun skipped — Studio not enabled');
-      return;
-    }
+    final turnConfig = engineConfig;
     final pipeline = turnConfig.pipelineSettings;
-    final studioPreset = turnConfig.preset!;
-    final broadcastBlocks = studioPreset.runtime.broadcastBlocks;
+    final broadcastBlocks = turnConfig.broadcastBlocks;
 
     // Collect recent chat history before the target message for continuity
     // checks (same window as the auto path).
@@ -1094,7 +1078,7 @@ class CleanerStage {
       }
     }
 
-    // Resolve the Studio cleaner slot (fail-explicit).
+    // Resolve the Post Clean connection.
     final AuxApiConfig cleanerConfig;
     try {
       cleanerConfig = turnConfig.resolveCleanerConfig(
@@ -1157,9 +1141,9 @@ class CleanerStage {
         character: character,
         cleanerConfig: cleanerConfig,
         beautyState: beautyState,
-        cleanerBlocks: studioPreset.blocks,
+        cleanerBlocks: turnConfig.cleanerBlocks,
         macroCtx: cleanerMacroCtx,
-        studioTurnConfig: turnConfig,
+        engineConfig: turnConfig,
       );
     } catch (e) {
       debugPrint('[PostCleaner] rerun failed session=$sessionId error=$e');

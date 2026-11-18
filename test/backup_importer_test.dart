@@ -1215,156 +1215,48 @@ void main() {
       expect(sp.getStringList('stringList'), equals(['a', 'b', 'c']));
     });
 
-    test('restores Studio preset blocks in canonical order', () async {
-      final blocks = [
-        {
-          'id': 'anime',
-          'title': 'Anime-Style Story',
-          'kind': 'prompt',
-          'role': 'system',
-          'section': 'final',
-          'enabled': true,
-          'content': '<loomstyle>anime</loomstyle>',
-        },
-        {
-          'id': 'bratty',
-          'title': 'Bratty Ass Narrative',
-          'kind': 'prompt',
-          'role': 'system',
-          'section': 'final',
-          'enabled': false,
-          'content': '<loomstyle>bratty</loomstyle>',
-        },
-      ];
+    test('an archive from before Studio was removed still restores', () async {
       final archive = buildGlzArchive();
       archive.addFile(
         ArchiveFile.bytes(
           'tables/studio_preset_rows.jsonl',
           utf8.encode(
-            '${jsonEncode({'preset_id': 'studio_loom_causal_direct_v1', 'name': 'Loom Direct', 'blocks_json': jsonEncode(blocks), 'agent_enabled_json': '{}', 'execution_mode': 'direct', 'updated_at': 42})}\n',
+            '${jsonEncode({'preset_id': 'studio_1', 'name': 'Old', 'blocks_json': '[]', 'updated_at': 42})}\n',
+          ),
+        ),
+      );
+      archive.addFile(
+        ArchiveFile.bytes(
+          'tables/preset_folders.jsonl',
+          utf8.encode('${jsonEncode({'folder_id': 'f1', 'name': 'F'})}\n'),
+        ),
+      );
+      archive.addFile(
+        ArchiveFile.bytes(
+          'tables/preset_folder_members.jsonl',
+          utf8.encode(
+            '${jsonEncode({'folder_id': 'f1', 'preset_id': 'studio_1', 'kind': 'agentic'})}\n'
+            '${jsonEncode({'folder_id': 'f1', 'preset_id': 'plain', 'kind': 'normal'})}\n',
           ),
         ),
       );
 
       await writeAndImport(archive, db, imageStorage);
 
-      final row = await db
-          .customSelect(
-            'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
-            variables: [
-              drift.Variable.withString('studio_loom_causal_direct_v1'),
-            ],
-          )
-          .getSingle();
-      final restored = jsonDecode(row.read<String>('blocks_json')) as List;
-      expect(restored.map((block) => block['id']), ['anime', 'bratty']);
-      expect(restored.first['type'], 'instruction');
-      expect(restored.first, isNot(contains('kind')));
-      expect(restored.last['enabled'], isFalse);
-    });
-
-    test('stages legacy Studio config runtime into restored presets', () async {
-      final archive = buildGlzArchive();
-      final customBlocks = jsonEncode([
-        {
-          'id': 'custom',
-          'type': 'instruction',
-          'content': 'keep custom blocks',
-          'section': 'final',
-        },
-      ]);
-      archive.addFile(
-        ArchiveFile.bytes(
-          'tables/studio_preset_rows.jsonl',
-          utf8.encode(
-            '${jsonEncode({'preset_id': 'custom', 'name': 'Custom', 'blocks_json': customBlocks, 'agent_enabled_json': '{"final":true}', 'execution_mode': 'direct', 'updated_at': 42})}\n',
-          ),
-        ),
+      final members = await db
+          .customSelect('SELECT preset_id FROM preset_folder_members')
+          .get();
+      expect(
+        [for (final row in members) row.read<String>('preset_id')],
+        ['plain'],
       );
-      archive.addFile(
-        ArchiveFile.bytes(
-          'tables/studio_config_rows.jsonl',
-          utf8.encode(
-            '${jsonEncode({
-              'session_id': 'session-1',
-              'run_api_config_id': 'legacy-api',
-              'expensive_api_config_id': 'explicit-api',
-              'max_final_history_messages': 19,
-              'updated_at': 10,
-              'agents_json': jsonEncode([
-                {'id': 'agent_session-1_continuity_123', 'sourceBlockNames': 'legacy'},
-              ]),
-            })}\n',
-          ),
-        ),
-      );
-
-      await writeAndImport(archive, db, imageStorage);
-
-      final row = await db
+      final studioTables = await db
           .customSelect(
-            'SELECT blocks_json, agents_json, expensive_api_config_id, '
-            'cheap_api_config_id, cleaner_api_config_id, '
-            'max_final_history_messages, agent_enabled_json, execution_mode '
-            'FROM studio_preset_rows WHERE preset_id = ?',
-            variables: [drift.Variable.withString('custom')],
+            "SELECT name FROM sqlite_master WHERE name LIKE 'studio_%'",
           )
-          .getSingle();
-      final restored = jsonDecode(row.read<String>('agents_json')) as List;
-      expect(restored.single['controllerId'], 'continuity');
-      expect(restored.single, isNot(contains('sourceBlockNames')));
-      expect(row.read<String>('expensive_api_config_id'), 'explicit-api');
-      expect(row.read<String>('cheap_api_config_id'), 'legacy-api');
-      expect(row.read<String>('cleaner_api_config_id'), 'legacy-api');
-      expect(row.read<int>('max_final_history_messages'), 19);
-      final restoredBlocks =
-          jsonDecode(row.read<String>('blocks_json')) as List;
-      expect(restoredBlocks.single['id'], 'custom');
-      expect(restoredBlocks.single['content'], 'keep custom blocks');
-      expect(row.read<String>('agent_enabled_json'), '{"final":true}');
-      expect(row.read<String>('execution_mode'), 'direct');
+          .get();
+      expect(studioTables, isEmpty);
     });
-
-    test(
-      'legacy JSON table import stages Studio runtime after any map order',
-      () async {
-        final preset = {
-          'preset_id': 'legacy-custom',
-          'name': 'Legacy Custom',
-          'blocks_json': '[]',
-          'agent_enabled_json': '{}',
-          'execution_mode': 'assisted',
-          'updated_at': 5,
-        };
-        final config = {
-          'session_id': 'profile',
-          'profile_id': 'profile',
-          'agents_json': jsonEncode([
-            {'id': 'final', 'controllerId': 'final'},
-          ]),
-          'run_api_config_id': 'legacy-api',
-          'max_final_history_messages': 11,
-          'updated_at': 9,
-        };
-
-        await FlutterBackupImporter(db, imageStorage).importFromLegacyJson({
-          'tables': {
-            'studio_preset_rows': [preset],
-            'studio_config_rows': [config],
-          },
-        });
-
-        final row = await db
-            .customSelect(
-              "SELECT agents_json, expensive_api_config_id, max_final_history_messages "
-              "FROM studio_preset_rows WHERE preset_id = 'legacy-custom'",
-            )
-            .getSingle();
-        expect(jsonDecode(row.read<String>('agents_json')), hasLength(1));
-        expect(row.read<String>('expensive_api_config_id'), 'legacy-api');
-        expect(row.read<int>('max_final_history_messages'), 11);
-      },
-    );
 
     test('restores info blocks with the reserved order column', () async {
       final archive = buildGlzArchive();
@@ -1417,10 +1309,12 @@ void main() {
       archive.addFile(
         ArchiveFile.bytes(
           'tables/characters.jsonl',
-          utf8.encode([
-            for (var i = 0; i < rowCount; i++)
-              jsonEncode({'char_id': 'char_$i', 'name': 'Card $i'}),
-          ].join('\n')),
+          utf8.encode(
+            [
+              for (var i = 0; i < rowCount; i++)
+                jsonEncode({'char_id': 'char_$i', 'name': 'Card $i'}),
+            ].join('\n'),
+          ),
         ),
       );
 
@@ -1441,14 +1335,16 @@ void main() {
       archive.addFile(
         ArchiveFile.bytes(
           'tables/characters.jsonl',
-          utf8.encode([
-            for (var i = 0; i < rowCount; i++)
-              jsonEncode({
-                'char_id': 'big_$i',
-                'name': 'Big $i',
-                'description': filler,
-              }),
-          ].join('\n')),
+          utf8.encode(
+            [
+              for (var i = 0; i < rowCount; i++)
+                jsonEncode({
+                  'char_id': 'big_$i',
+                  'name': 'Big $i',
+                  'description': filler,
+                }),
+            ].join('\n'),
+          ),
         ),
       );
 
@@ -1585,88 +1481,106 @@ void main() {
       }
     });
 
-    test('restores the active persona from settings.json user_avatar',
-        () async {
-      final archive = Archive()
-        ..addFile(
-          ArchiveFile.bytes('User Avatars/Alice.png', Uint8List.fromList([1])),
-        )
-        ..addFile(
-          ArchiveFile.bytes(
-            'settings.json',
-            utf8.encode(
-              jsonEncode({
-                'user_avatar': 'Alice.png',
-                'power_user': {
-                  'personas': {'Alice.png': 'Alice', 'Bob.png': 'Bob'},
-                  'persona_descriptions': {
-                    'Alice.png': {'description': 'Alice desc'},
-                  },
-                },
-              }),
+    test(
+      'restores the active persona from settings.json user_avatar',
+      () async {
+        final archive = Archive()
+          ..addFile(
+            ArchiveFile.bytes(
+              'User Avatars/Alice.png',
+              Uint8List.fromList([1]),
             ),
-          ),
-        );
-
-      final result = await _importArchive(archive, db, imageStorage);
-
-      expect(result.errors, isEmpty);
-      expect(result.personas, 2);
-      final alice = (await db.select(db.personas).get())
-          .firstWhere((p) => p.name == 'Alice');
-
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('activePersonaId'), equals(alice.personaId));
-    });
-
-    test('falls back to default_persona and restores character connections',
-        () async {
-      final archive = Archive()
-        ..addFile(
-          ArchiveFile.bytes('characters/Seraphina.png', _characterPng('Seraphina')),
-        )
-        ..addFile(
-          ArchiveFile.bytes('User Avatars/Alice.png', Uint8List.fromList([1])),
-        )
-        ..addFile(
-          ArchiveFile.bytes(
-            'settings.json',
-            utf8.encode(
-              jsonEncode({
-                'power_user': {
-                  'default_persona': 'Alice.png',
-                  'personas': {'Alice.png': 'Alice'},
-                  'persona_descriptions': {
-                    'Alice.png': {
-                      'description': 'Alice desc',
-                      'connections': [
-                        {'type': 'character', 'id': 'Seraphina.png'},
-                        {'type': 'group', 'id': 'some-group-id'},
-                      ],
+          )
+          ..addFile(
+            ArchiveFile.bytes(
+              'settings.json',
+              utf8.encode(
+                jsonEncode({
+                  'user_avatar': 'Alice.png',
+                  'power_user': {
+                    'personas': {'Alice.png': 'Alice', 'Bob.png': 'Bob'},
+                    'persona_descriptions': {
+                      'Alice.png': {'description': 'Alice desc'},
                     },
                   },
-                },
-              }),
+                }),
+              ),
             ),
-          ),
+          );
+
+        final result = await _importArchive(archive, db, imageStorage);
+
+        expect(result.errors, isEmpty);
+        expect(result.personas, 2);
+        final alice = (await db.select(db.personas).get()).firstWhere(
+          (p) => p.name == 'Alice',
         );
 
-      final result = await _importArchive(archive, db, imageStorage);
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('activePersonaId'), equals(alice.personaId));
+      },
+    );
 
-      expect(result.errors, isEmpty);
-      final persona = (await db.select(db.personas).get()).single;
-      final character = (await db.select(db.characters).get()).single;
+    test(
+      'falls back to default_persona and restores character connections',
+      () async {
+        final archive = Archive()
+          ..addFile(
+            ArchiveFile.bytes(
+              'characters/Seraphina.png',
+              _characterPng('Seraphina'),
+            ),
+          )
+          ..addFile(
+            ArchiveFile.bytes(
+              'User Avatars/Alice.png',
+              Uint8List.fromList([1]),
+            ),
+          )
+          ..addFile(
+            ArchiveFile.bytes(
+              'settings.json',
+              utf8.encode(
+                jsonEncode({
+                  'power_user': {
+                    'default_persona': 'Alice.png',
+                    'personas': {'Alice.png': 'Alice'},
+                    'persona_descriptions': {
+                      'Alice.png': {
+                        'description': 'Alice desc',
+                        'connections': [
+                          {'type': 'character', 'id': 'Seraphina.png'},
+                          {'type': 'group', 'id': 'some-group-id'},
+                        ],
+                      },
+                    },
+                  },
+                }),
+              ),
+            ),
+          );
 
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('activePersonaId'), equals(persona.personaId));
+        final result = await _importArchive(archive, db, imageStorage);
 
-      final connections =
-          jsonDecode(prefs.getString('personaConnections')!) as Map<String, dynamic>;
-      final characterConnections =
-          connections['character'] as Map<String, dynamic>;
-      expect(characterConnections[character.charId], equals(persona.personaId));
-      expect(characterConnections, hasLength(1));
-    });
+        expect(result.errors, isEmpty);
+        final persona = (await db.select(db.personas).get()).single;
+        final character = (await db.select(db.characters).get()).single;
+
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getString('activePersonaId'), equals(persona.personaId));
+
+        final connections =
+            jsonDecode(prefs.getString('personaConnections')!)
+                as Map<String, dynamic>;
+        final characterConnections =
+            connections['character'] as Map<String, dynamic>;
+        expect(
+          characterConnections[character.charId],
+          equals(persona.personaId),
+        );
+        expect(characterConnections, hasLength(1));
+      },
+    );
   });
 }
 
@@ -1704,16 +1618,32 @@ Uint8List _characterPng(String name) {
   final textData = <int>[...utf8.encode('chara'), 0, ...utf8.encode(card)];
   final length = textData.length;
   return Uint8List.fromList([
-    137, 80, 78, 71, 13, 10, 26, 10,
+    137,
+    80,
+    78,
+    71,
+    13,
+    10,
+    26,
+    10,
     (length >> 24) & 0xff,
     (length >> 16) & 0xff,
     (length >> 8) & 0xff,
     length & 0xff,
     ...utf8.encode('tEXt'),
     ...textData,
-    0, 0, 0, 0,
-    0, 0, 0, 0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
     ...utf8.encode('IEND'),
-    0, 0, 0, 0,
+    0,
+    0,
+    0,
+    0,
   ]);
 }

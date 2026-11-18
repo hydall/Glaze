@@ -6,7 +6,6 @@ import 'package:flutter/painting.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/state/character_provider.dart';
-import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/chat_session_ops_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
@@ -389,16 +388,13 @@ class SyncController {
     _ref.invalidate(lorebooksProvider);
     _ref.invalidate(chatSessionOpsProvider);
     _ref.invalidate(chatHistoryProvider);
-    _ref.invalidate(activeStudioPresetProvider);
-    _ref.invalidate(studioPresetProvider);
-    // Both preset libraries are read once and cached — neither is a Drift
-    // stream — and the pull writes straight through their repositories. Without
-    // these two the Presets screen kept showing the list it had read at
+    // The preset library is read once and cached — it is not a Drift stream —
+    // and the pull writes straight through its repository. Without this the
+    // Presets screen kept showing the list it had read at
     // startup: a preset synced from another device was invisible until the app
     // was restarted, and so was a cover image, whose file the pull drops next
     // to the path the preset already points at.
     _ref.invalidate(presetListProvider);
-    _ref.invalidate(studioPresetListProvider);
     _ref.invalidate(globalRegexProvider);
     _ref.invalidate(studioRegexProvider);
     // The chat layout lives in preferences read once into these notifiers.

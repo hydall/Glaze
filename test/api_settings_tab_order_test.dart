@@ -24,9 +24,9 @@ void main() {
   });
 
   test('the bodies follow the strip', () {
-    expect(screen, contains('// 0 = LLM, 1 = Studio agents'));
+    expect(screen, contains('// 0 = LLM, 1 = auxiliary connections'));
     expect(screen, contains('0 => _buildLlmTab(list, activeName),'));
-    expect(screen, contains('_ => StudioSlotsTab('));
+    expect(screen, contains('_ => AuxSlotsTab('));
   });
 
   test('a deep link at the MemoryBook slot opens the Agents tab', () {

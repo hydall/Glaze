@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/post_cleaner_state_provider.dart';
-import '../state/studio_cycle_state_provider.dart';
 import '../chrome/chat_chrome_channel.dart';
 import 'chat_status_card_shell.dart';
 
@@ -11,10 +10,6 @@ import 'chat_status_card_shell.dart';
 ///
 /// Live status card shown over the chat while the POST-cleaner runs.
 /// Auto-dismisses 2.5s after the cleaner finishes.
-///
-/// When the Studio tracker-cycle is active, the cleaner phase is surfaced
-/// as the `3/3 - Cleaning` step inside [StudioStatusCard] instead, and this
-/// card hides itself to avoid duplication.
 class PostCleanerStatusCard extends ConsumerStatefulWidget {
   const PostCleanerStatusCard({super.key, required this.channel});
 
@@ -32,7 +27,6 @@ class _PostCleanerStatusCardState extends ConsumerState<PostCleanerStatusCard> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(postCleanerStateProvider);
-    final studioState = ref.watch(studioCycleStateProvider);
     final cs = Theme.of(context).colorScheme;
 
     // Track phase transitions to trigger auto-dismiss.
@@ -46,13 +40,6 @@ class _PostCleanerStatusCardState extends ConsumerState<PostCleanerStatusCard> {
     }
 
     if (state.phase == PostCleanerPhase.idle) return const SizedBox.shrink();
-
-    // When the Studio cycle is active (running/writingFinal/done/cleaning),
-    // the cleaner phase is shown as 3/3 inside StudioStatusCard — hide this
-    // card to avoid duplication.
-    if (studioState.isActive || studioState.phase == StudioCyclePhase.done) {
-      return const SizedBox.shrink();
-    }
 
     final isFactChecking = state.phase == PostCleanerPhase.factChecking;
     final isRunning = state.phase == PostCleanerPhase.running;

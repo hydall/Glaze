@@ -24,9 +24,6 @@ import '../db/repositories/memory_catalog_repo.dart';
 import '../db/repositories/memory_entity_repo.dart';
 import '../db/repositories/memory_salience_repo.dart';
 import '../db/repositories/memory_cadence_repo.dart';
-import '../db/repositories/studio_config_repo.dart';
-import '../db/repositories/studio_preset_repo.dart';
-import '../models/studio_config.dart';
 import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
 import '../db/repositories/ledger_raw_tracker_state_reader.dart';
@@ -59,16 +56,11 @@ import '../services/image_storage_service.dart';
 import '../services/migration_service.dart';
 import '../services/card_rewriter/effective_canon_context_loader.dart';
 import '../services/card_rewriter/effective_canon_read_repository.dart';
-import 'studio_feature_provider.dart';
 
 // Re-export so existing call sites that `import db_provider.dart` can still
 // read pipelineSettingsProvider (previously defined here as a
 // FutureProvider.family before the singleton-global refactor).
 export 'pipeline_settings_provider.dart' show pipelineSettingsProvider;
-
-// Re-export the global Studio master switch so the generation pipeline stages
-// (which already import db_provider) can gate Studio without extra imports.
-export 'studio_feature_provider.dart' show studioFeatureEnabledProvider;
 
 final _captureRepos = Expando<LlmRequestCaptureRepo>();
 
@@ -263,34 +255,6 @@ final memorySalienceRepoProvider = Provider<MemorySalienceRepo>((ref) {
 
 final memoryCadenceRepoProvider = Provider<MemoryCadenceRepo>((ref) {
   return MemoryCadenceRepo(ref.watch(appDbProvider));
-});
-
-final studioConfigRepoProvider = Provider<StudioConfigRepo>((ref) {
-  return StudioConfigRepo(ref.watch(appDbProvider));
-});
-
-final studioPresetRepoProvider = Provider<StudioPresetRepo>((ref) {
-  return StudioPresetRepo(ref.watch(appDbProvider));
-});
-
-// `studioPresetProvider` — the preset a turn actually runs — lives in
-// `active_studio_preset_provider.dart`: it needs the active-preset id, and that
-// provider already imports this file.
-
-final studioPresetListProvider = FutureProvider<List<StudioPreset>>((
-  ref,
-) async {
-  return ref.watch(studioPresetRepoProvider).getAll();
-});
-
-/// Whether Studio is enabled globally. The session id remains part of the
-/// provider API for its chat UI consumers, but no longer controls activation.
-final sessionStudioEnabledProvider = FutureProvider.family<bool, String>((
-  ref,
-  sessionId,
-) async {
-  if (sessionId.isEmpty) return false;
-  return ref.watch(studioFeatureEnabledProvider);
 });
 
 final trackerRepoProvider = Provider<TrackerRepo>((ref) {

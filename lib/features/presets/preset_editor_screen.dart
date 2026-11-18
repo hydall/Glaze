@@ -32,7 +32,7 @@ import 'preset_deletion.dart';
 import 'preset_image.dart';
 import 'preset_list_provider.dart';
 import 'preset_export.dart';
-import '../studio/widgets/studio_preset_options_sheet.dart';
+import '../../shared/widgets/confirm_delete_sheet.dart';
 import 'widgets/preset_block_group_row.dart';
 import 'widgets/preset_block_row.dart';
 import 'widgets/preset_dashboard_card.dart';
@@ -883,7 +883,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   }
 
   Future<void> _deleteFolder(PresetBlockFolder folder) async {
-    final confirmed = await confirmStudioDelete(
+    final confirmed = await confirmDeleteSheet(
       context,
       title: 'folder_delete_title'.tr(),
       description: 'preset_block_folder_delete_confirm'.tr(args: [folder.name]),
@@ -898,7 +898,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     _scheduleSave();
   }
 
-  /// Which kind of folder to create — the two the agentic editor has: a
+  /// Which kind of folder to create: a
   /// checklist, or a pick-one where the blocks become radio options.
   void _chooseFolderKind() {
     GlazeBottomSheet.show<void>(
@@ -1964,7 +1964,8 @@ class _AuthorsNoteBlockEditor extends ConsumerWidget {
             context,
             charId: charId,
             content: content,
-            hint: "Author's note content is tied to a chat. Open a chat to edit it.",
+            hint:
+                "Author's note content is tied to a chat. Open a chat to edit it.",
             onEdit: () =>
                 showAuthorsNoteSheet(context, charId, presetId: presetId),
           ),

@@ -9,7 +9,7 @@ import '../../db/repositories/memory_book_repo.dart';
 import '../../models/character_knowledge_fact.dart';
 import '../../models/memory_book.dart';
 import '../../models/pipeline_settings.dart';
-import '../../models/studio_config.dart';
+import '../../models/preset.dart';
 import '../../models/studio_ledger_export.dart';
 import '../../models/studio_regex.dart';
 import '../../utils/id_generator.dart';
@@ -25,6 +25,7 @@ import 'ledger_prompt_factory.dart';
 import 'ledger_run_diagnostics.dart';
 import 'ledger_run_result.dart';
 import 'ledger_turn_committer.dart';
+import 'ledger_engine.dart';
 
 enum LedgerAttemptPhase { initial, parserRepair }
 
@@ -62,10 +63,10 @@ class LedgerTurnRequest {
   final bool forceEnabled;
   final FutureOr<bool> Function()? isStillCurrent;
   final CancelToken? cancelToken;
-  final List<StudioPresetBlock> ledgerBlocks;
+  final List<PresetBlock> ledgerBlocks;
   final MacroContext? macroCtx;
   final bool commitSnapshot;
-  final StudioLedgerEngine engine;
+  final LedgerEngine engine;
   final LedgerAttemptCallback? onAttemptStart;
 }
 
@@ -151,7 +152,7 @@ class LedgerTurnRunner {
     final sw = Stopwatch()..start();
 
     try {
-      // ── 1. LLM config is resolved by the caller via StudioSlotResolver ──
+      // ── 1. LLM config is resolved by the caller via AuxApiConfigResolver ──
       if (token.isCancelled ||
           await _canonAuthority.passesCurrentnessGuard(
                 request.isStillCurrent,

@@ -17,7 +17,6 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
       return const CharacterDeletionResult(
         characterIds: {},
         sessionIds: {},
-        studioConfigSessionIds: {},
         detachedLorebookIds: {},
       );
     }
@@ -31,15 +30,6 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
         _db.chatSessions,
       )..where((row) => row.characterId.isIn(ids))).get();
       final sessionIds = sessionRows.map((row) => row.sessionId).toSet();
-      final studioConfigSessionIds = <String>{};
-      if (sessionIds.isNotEmpty) {
-        final configs = await (_db.select(
-          _db.studioConfigRows,
-        )..where((row) => row.sessionId.isIn(sessionIds))).get();
-        for (final config in configs) {
-          studioConfigSessionIds.add(config.sessionId);
-        }
-      }
 
       final retainedVariantGroups = <String>{};
       for (final row in characterRows) {
@@ -69,7 +59,9 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
                       row.activationTargetId.isIn(orphanedLorebookTargets),
                 ))
                 .get();
-      final detachedLorebookIds = lorebooks.map((row) => row.lorebookId).toSet();
+      final detachedLorebookIds = lorebooks
+          .map((row) => row.lorebookId)
+          .toSet();
 
       final sessionDeletion = SessionDeletionQueries(_db);
       for (final sessionId in sessionIds) {
@@ -85,16 +77,15 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
       // global scope — entries, settings and embeddings all stay intact and the
       // user can re-connect it to another character.
       if (detachedLorebookIds.isNotEmpty) {
-        await (_db.update(_db.lorebooks)..where(
-              (row) => row.lorebookId.isIn(detachedLorebookIds),
-            ))
-            .write(
-              LorebooksCompanion(
-                activationScope: const Value('global'),
-                activationTargetId: const Value(null),
-                updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
-              ),
-            );
+        await (_db.update(
+          _db.lorebooks,
+        )..where((row) => row.lorebookId.isIn(detachedLorebookIds))).write(
+          LorebooksCompanion(
+            activationScope: const Value('global'),
+            activationTargetId: const Value(null),
+            updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+          ),
+        );
       }
       await (_db.delete(
         _db.characterRevisionRows,
@@ -128,7 +119,6 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
       return CharacterDeletionResult(
         characterIds: characterIds,
         sessionIds: sessionIds,
-        studioConfigSessionIds: studioConfigSessionIds,
         detachedLorebookIds: detachedLorebookIds,
       );
     });

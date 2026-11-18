@@ -27,7 +27,6 @@ const _sessionTables = <(String, String)>[
   ('rewrite_jobs', 'chat_session_id'),
   ('rewrite_operations', 'chat_session_id'),
   ('character_session_baseline_rows', 'chat_session_id'),
-  ('studio_config_rows', 'session_id'),
   ('chat_summaries', 'session_id'),
   ('info_blocks', 'session_id'),
   ('ledger_debug_runs', 'session_id'),
@@ -57,7 +56,6 @@ void main() {
 
     expect(result.characterIds, {'target'});
     expect(result.sessionIds, {'target-session'});
-    expect(result.studioConfigSessionIds, {'target-session'});
     expect(result.detachedLorebookIds, {'target-lorebook'});
     await _expectCharacterCount(db, 'target', 'target-session', 0);
     await _expectCharacterCount(db, 'control', 'control-session', 1);
@@ -95,13 +93,13 @@ void main() {
     final result = await repo.deleteCharacters({'first', 'second'});
 
     expect(result.detachedLorebookIds, {'first-lorebook', 'second-lorebook'});
-    final remaining = await (db.select(db.lorebooks)
-          ..where((row) => row.activationScope.equals('global')))
-        .get();
-    expect(
-      remaining.map((row) => row.lorebookId).toSet(),
-      {'first-lorebook', 'second-lorebook'},
-    );
+    final remaining = await (db.select(
+      db.lorebooks,
+    )..where((row) => row.activationScope.equals('global'))).get();
+    expect(remaining.map((row) => row.lorebookId).toSet(), {
+      'first-lorebook',
+      'second-lorebook',
+    });
   });
 
   test(
@@ -138,26 +136,29 @@ void main() {
     expect(remaining.variantOrder, 0);
   });
 
-  test('deleting the group representative keeps a shared lorebook attached', () async {
-    await db.customStatement(
-      "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('cover', 'cover', 'cover', 0)",
-    );
-    await db.customStatement(
-      "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('variant', 'variant', 'cover', 1)",
-    );
-    await db.customStatement(
-      "INSERT INTO lorebooks (lorebook_id, name, activation_scope, activation_target_id, entries_json) VALUES ('shared', 'Shared', 'character', 'cover', '[]')",
-    );
+  test(
+    'deleting the group representative keeps a shared lorebook attached',
+    () async {
+      await db.customStatement(
+        "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('cover', 'cover', 'cover', 0)",
+      );
+      await db.customStatement(
+        "INSERT INTO characters (char_id, name, variant_group_id, variant_order) VALUES ('variant', 'variant', 'cover', 1)",
+      );
+      await db.customStatement(
+        "INSERT INTO lorebooks (lorebook_id, name, activation_scope, activation_target_id, entries_json) VALUES ('shared', 'Shared', 'character', 'cover', '[]')",
+      );
 
-    final result = await repo.deleteCharacters({'cover'});
+      final result = await repo.deleteCharacters({'cover'});
 
-    expect(result.detachedLorebookIds, isEmpty);
-    final shared = await (db.select(
-      db.lorebooks,
-    )..where((row) => row.lorebookId.equals('shared'))).getSingle();
-    expect(shared.activationScope, 'character');
-    expect(shared.activationTargetId, 'cover');
-  });
+      expect(result.detachedLorebookIds, isEmpty);
+      final shared = await (db.select(
+        db.lorebooks,
+      )..where((row) => row.lorebookId.equals('shared'))).getSingle();
+      expect(shared.activationScope, 'character');
+      expect(shared.activationTargetId, 'cover');
+    },
+  );
 
   test(
     'session deletion retains global transitions until character deletion',
@@ -229,7 +230,6 @@ Future<void> _seedCharacter(
     "INSERT INTO rewrite_operation_revisions (rewrite_operation_id, revision, snapshot_json) VALUES ('operation_$id', '1', '{}')",
     "INSERT INTO rewrite_evidence_rows (id, rewrite_operation_id, evidence_json) VALUES ('evidence_$id', 'operation_$id', '{}')",
     "INSERT INTO character_session_baseline_rows (chat_session_id, character_id, baseline_card_json, baseline_hash) VALUES ('$sessionId', '$characterId', '{}', 'hash')",
-    "INSERT INTO studio_config_rows (session_id) VALUES ('$sessionId')",
     "INSERT INTO chat_summaries (session_id, content) VALUES ('$sessionId', 'summary')",
     "INSERT INTO info_blocks (id, session_id, message_id, block_id, block_name, block_type, content) VALUES ('block_$id', '$sessionId', 'message', 'block', 'Block', 'info', 'content')",
     "INSERT INTO ledger_debug_runs (id, session_id, kind, status, created_at) VALUES ('ledger_debug_$id', '$sessionId', 'normal', 'ok', 1)",

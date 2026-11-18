@@ -7,7 +7,6 @@ import '../models/lorebook.dart';
 import '../models/memory_book.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
-import '../models/studio_config.dart';
 
 abstract class SyncCharacterStore {
   Future<List<Character>> getAll();
@@ -87,20 +86,6 @@ abstract class SyncTrackerValueStore {
   Future<void> insertRaw(Map<String, dynamic> tracker);
 }
 
-abstract class SyncStudioConfigStore {
-  Future<List<StudioConfig>> getAll();
-  Future<StudioConfig?> getById(String id);
-  Future<void> put(StudioConfig config);
-  Future<void> delete(String id);
-}
-
-abstract class SyncStudioPresetStore {
-  Future<List<StudioPreset>> getAll();
-  Future<StudioPreset?> getById(String id);
-  Future<void> put(StudioPreset preset);
-  Future<void> delete(String id);
-}
-
 abstract class SyncChatSummaryStore {
   Future<List<String>> getAllSessionIds();
   Future<Map<String, dynamic>?> getBySessionId(String sessionId);
@@ -114,7 +99,7 @@ abstract class SyncCharacterFolderStore {
 }
 
 /// Generic folders for the non-legacy list domains (lorebooks, personas, image
-/// styles, regex) plus chat/Studio preset folders, synced as one singleton
+/// styles, regex) plus preset folders, synced as one singleton
 /// payload. Character folders travel in their own [SyncCharacterFolderStore].
 ///
 /// Each collection is replaced wholesale on apply — folders are small,

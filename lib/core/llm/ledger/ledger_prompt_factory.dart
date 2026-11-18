@@ -1,10 +1,11 @@
 import '../../models/character.dart';
 import '../../models/memory_book.dart';
-import '../../models/studio_config.dart';
+import '../../models/preset.dart';
 import '../../models/tracker.dart';
 import '../macro_engine.dart';
-import '../studio/studio_aux_prompt_assembler.dart';
+import '../aux_prompt_assembler.dart';
 import '../studio_ledger_prompt.dart';
+import 'ledger_engine.dart';
 
 const _ledgerSystemPromptBlockId = 'ledger_system';
 
@@ -18,14 +19,14 @@ class LedgerPromptFactory {
     required String recentHistoryText,
     required List<Tracker> currentTrackers,
     required List<MemoryEntry> recentMemoryEntries,
-    List<StudioPresetBlock> ledgerBlocks = const [],
+    List<PresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
     Character? character,
     Map<String, String> entityAliases = const {},
-    StudioLedgerEngine engine = StudioLedgerEngine.currentReconciled,
+    LedgerEngine engine = LedgerEngine.currentReconciled,
     List<String> gameClockHistory = const [],
   }) {
-    if (engine == StudioLedgerEngine.legacyTurnOnly) {
+    if (engine == LedgerEngine.legacyTurnOnly) {
       return _promptBuilder.buildLegacyTurnOnly(
         finalAssistantText: finalAssistantText,
         recentHistoryText: recentHistoryText,
@@ -39,7 +40,6 @@ class LedgerPromptFactory {
       (block) =>
           block.id == _ledgerSystemPromptBlockId &&
           block.enabled &&
-          block.injectionPoint == 'ledger' &&
           block.content.trim().isNotEmpty,
     );
     if (!hasActiveLedgerBlocks || macroCtx == null) {
@@ -150,9 +150,8 @@ Game clock (world:time, world:date, world:day):
   Treat the <clock_history> block as the authoritative recent trajectory — its
   newest line is where the clock currently stands.''';
 
-    return const StudioAuxPromptAssembler().assemble(
+    return const AuxPromptAssembler().assemble(
       blocks: ledgerBlocks,
-      injectionPoint: 'ledger',
       macroCtx: macroCtx,
       runtimeSuffix: runtimeSuffix,
       skipBlockIds: {

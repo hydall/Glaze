@@ -9,7 +9,6 @@ import '../models/ledger_settings.dart';
 import '../models/memory_book_api_settings.dart';
 import '../models/memory_pipeline_settings.dart';
 import '../models/pipeline_settings.dart';
-import '../models/studio_agent_settings.dart';
 import 'shared_prefs_provider.dart';
 
 /// Global pipeline LLM settings, persisted in SharedPreferences under the
@@ -17,7 +16,7 @@ import 'shared_prefs_provider.dart';
 /// the same [PipelineSettings] instance applies to every chat session.
 ///
 /// The JSON format changed from flat (all fields at the root level) to nested
-/// (fields grouped under `studioAgent`, `cleaner`, `ledger`, `memoryPipeline`,
+/// (fields grouped under `cleaner`, `ledger`, `memoryPipeline`,
 /// `memoryBookApi`, `cardRewriter` sub-objects). The [load] method handles both
 /// formats
 /// idempotently — flat JSON is migrated to nested on first load and persisted
@@ -56,10 +55,10 @@ class PipelineSettingsNotifier extends StateNotifier<PipelineSettings> {
   /// Parses the SharedPreferences JSON into [PipelineSettings], handling both
   /// the new nested format and the legacy flat format.
   ///
-  /// **Nested format** (current): JSON has `studioAgent`, `cleaner`, `ledger`,
-  /// `memoryPipeline`, `memoryBookApi`, `cardRewriter` sub-objects — parsed
-  /// directly via
-  /// [PipelineSettings.fromJson].
+  /// **Nested format** (current): JSON has `cleaner`, `ledger`,
+  /// `memoryPipeline`, `memoryBookApi`, `cardRewriter` sub-objects (and, from
+  /// before Studio was removed, a `studioAgent` one that is now ignored) —
+  /// parsed directly via [PipelineSettings.fromJson].
   ///
   /// **Flat format** (legacy): All fields at the root level. Each sub-model's
   /// `fromJson` picks up its own fields from the flat map and uses `@Default`
@@ -67,7 +66,7 @@ class PipelineSettingsNotifier extends StateNotifier<PipelineSettings> {
   /// `sidecar*` → `aux*` rename is applied first.
   PipelineSettings _parseSettingsJson(Map<String, dynamic> json) {
     // Already nested — parse directly.
-    if (json.containsKey('studioAgent')) {
+    if (_nestedKeys.any((key) => json[key] is Map)) {
       return PipelineSettings.fromJson(json);
     }
 
@@ -76,7 +75,6 @@ class PipelineSettingsNotifier extends StateNotifier<PipelineSettings> {
     // the flat map; unknown keys are ignored by freezed's generated decoder.
     final migrated = _migrateLegacySidecarJson(json);
     return PipelineSettings(
-      studioAgent: StudioAgentSettings.fromJson(migrated),
       cleaner: CleanerSettings.fromJson(migrated),
       ledger: LedgerSettings.fromJson(migrated),
       memoryPipeline: MemoryPipelineSettings.fromJson(migrated),
@@ -84,6 +82,16 @@ class PipelineSettingsNotifier extends StateNotifier<PipelineSettings> {
       cardRewriter: CardRewriterSettings.fromJson(migrated),
     );
   }
+
+  static const _nestedKeys = [
+    'studioAgent',
+    'cleaner',
+    'ledger',
+    'memoryPipeline',
+    'memoryBookApi',
+    'cardRewriter',
+    'translation',
+  ];
 
   /// Migrates very old installs that use `sidecar*` keys to the current
   /// `aux*` naming. Idempotent — uses `putIfAbsent` so already-migrated JSON

@@ -1,7 +1,6 @@
 class CharacterDeletionResult {
   final Set<String> characterIds;
   final Set<String> sessionIds;
-  final Set<String> studioConfigSessionIds;
 
   /// Character-scoped lorebooks that were detached back to global scope
   /// because the character they pointed at is gone. They are **not** deleted:
@@ -11,7 +10,6 @@ class CharacterDeletionResult {
   const CharacterDeletionResult({
     required this.characterIds,
     required this.sessionIds,
-    required this.studioConfigSessionIds,
     required this.detachedLorebookIds,
   });
 }

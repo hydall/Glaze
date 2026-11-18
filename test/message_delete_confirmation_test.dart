@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
-import 'package:glaze_flutter/core/state/studio_feature_provider.dart';
 import 'package:glaze_flutter/features/chat/widgets/message_actions.dart';
 import 'package:glaze_flutter/features/chat/widgets/message_delete_confirmation.dart';
 import 'package:glaze_flutter/features/settings/app_settings_provider.dart';
@@ -34,7 +33,9 @@ Future<void> _pumpButton(
   final container = ProviderContainer(
     overrides: [
       appSettingsProvider.overrideWith(() => _StubSettings(settings)),
-      studioFeatureSettledProvider.overrideWith((ref) => agentsActive),
+      sessionHasTrackerDataProvider(
+        's1',
+      ).overrideWith((ref) async => agentsActive),
       ...extraOverrides,
     ],
   );
@@ -63,8 +64,9 @@ Future<void> _pumpButton(
 }
 
 void main() {
-  testWidgets('plain chat warns only about the messages themselves',
-      (tester) async {
+  testWidgets('plain chat warns only about the messages themselves', (
+    tester,
+  ) async {
     bool? result;
     await _pumpButton(
       tester,
@@ -77,18 +79,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('delete_messages_title'), findsOneWidget);
-    expect(
-      find.textContaining('delete_messages_warning_base'),
-      findsOneWidget,
-    );
-    expect(
-      find.textContaining('delete_messages_warning_agents'),
-      findsNothing,
-    );
-    expect(
-      find.textContaining('delete_messages_warning_memory'),
-      findsNothing,
-    );
+    expect(find.textContaining('delete_messages_warning_base'), findsOneWidget);
+    expect(find.textContaining('delete_messages_warning_agents'), findsNothing);
+    expect(find.textContaining('delete_messages_warning_memory'), findsNothing);
     expect(
       find.textContaining('delete_messages_warning_confirm'),
       findsOneWidget,
@@ -101,13 +94,17 @@ void main() {
     expect(result, isFalse);
   });
 
-  testWidgets('an agentic preset adds the agents sentence', (tester) async {
+  testWidgets('tracker data adds the agents sentence', (tester) async {
     await _pumpButton(
       tester,
       settings: const AppSettings(),
       agentsActive: true,
-      onPressed: (context, ref) => confirmMessageDeletion(context, ref),
+      onPressed: (context, ref) =>
+          confirmMessageDeletion(context, ref, sessionId: 's1'),
       onResult: (_) {},
+      extraOverrides: [
+        memoryBookProvider('s1').overrideWith((ref) async => null),
+      ],
     );
 
     await tester.tap(find.text('go'));

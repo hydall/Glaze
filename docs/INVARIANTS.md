@@ -597,43 +597,13 @@ path writes MemoryBook entries.
 
 ---
 
-## 4b. Studio Tracker Invariants
+## 4b. Post-generation Engine Invariants
 
-These cover the tracker-around-generator pipeline used by Studio. See also
-`docs/rules/generation.md` for the rules every contributor touching `MemoryStudioService`,
-`ControllerPhaseRunner`, `StudioAgentExecutor`, or `ControllerBatcher` must
-follow.
-
-### INV-ST1: Trackers receive ≤ contextSize last messages, not full history ✅ ENFORCED (Phase 3)
-
-`StudioHistoryLimiter.limitTrackerHistory` owns the tracker history cap and
-slices the trailing `contextSize` messages before tracker prompt construction.
-It also owns per-message text truncation (head 40% + `[Trimmed ...]` marker +
-tail 60%, rune-counted) and conservative HTML stripping that preserves
-`==...==` markers and code fences. The tracker context hard-cap is 200.
-
-The final generator does NOT use this trim — it uses
-`StudioPreset.maxFinalHistoryMessages` (default 50). MemoryBook injection
-(`dynamic_context` block: memory, summary, worldInfo) is NOT trimmed — only
-the `chat_history` block is. Users without rolling summary keep long-term memory
-via MemoryBook (static `dynamic_context` injection), not via chat history.
-
-### INV-ST2: maxFinalHistoryMessages applies to the generator ✅ ENFORCED
-
-`StudioHistoryLimiter` keeps a persisted, stable `chat_history` suffix for the
-final generator. After a completed assistant turn crosses either
-`StudioPreset.maxFinalHistoryMessages` (default 50) or the 70K estimated token
-high-water mark, it advances the boundary by roughly half the current window
-on a complete user-assistant chunk boundary. A trailing user message never
-rotates the window. Trackers are governed by INV-ST1 instead.
-
-### INV-ST3: Same-(provider, model, phase) trackers batch into one LLM request ✅ ENFORCED (Phase 5)
-
-`ControllerBatcher.groupAgents` keys batch groups by resolved protocol, model,
-and agent phase. Agents selected by `shouldRunIndividually` are pulled out and
-run as individual requests. Pre-generation and post-processing agents must not
-share a batch because their runtime context differs; the POST-cleaner remains a
-separate post-generation rewrite pass.
+Studio is removed. These cover the engines it left behind — Post Clean, the
+Tracker (Ledger) and Card Rewriter — which the agents system takes over
+(`docs/plans/AGENTS.md`). INV-ST1, ST2, ST3, ST5, ST6 and ST7 described the
+Studio tracker / final-writer pipeline and are retired with it; their ids are
+not reused.
 
 ### INV-ST4: Nested agentSwipes (cleaned / final) ✅ ENFORCED
 
@@ -653,10 +623,7 @@ and `ChatRepo.removeAgentSwipe` are the atomic in-place swipe editers
 A full regeneration (`SavedMessageWriter.writeAssistant` with
 `regenTargetId`) resets `agentSwipes` to a single fresh `'final'` pointing
 at the new text — the old `'cleaned'` sub-swipe (which applied to the
-previous content) is dropped. The `studioFinalOnly` re-run branch (append a
-`'final'` without touching green swipes) is NOT restored: it depended on
-the removed 8-controller `regenerateIntermediateAgent` orchestration.
-Hold mode (Marinara) is not implemented.
+previous content) is dropped. Hold mode (Marinara) is not implemented.
 
 #### Swipe-first cleaner lifecycle (UX phase) ✅ ENFORCED
 
@@ -686,51 +653,13 @@ streamed text never loses what the user saw live:
 instance fields, reset in the `run` finally block so state
 never leaks across runs.
 
-### INV-ST5: Tracker failure aborts Studio after two retries ✅ ENFORCED
+### INV-ST8: Engine configuration is turn-scoped ✅ ENFORCED
 
-`ControllerPhaseRunner` owns the tracker phase and the hard-failure decision.
-`StudioBatchCoordinator` owns whole-batch retries, while
-`StudioAgentExecutor` owns individual tracker retries; each path gets the
-initial attempt plus two retries. If a tracker still fails, or a batch response
-has a missing/unparseable `<result>` block, `ControllerPhaseRunner` returns an
-error before the final generator runs. There is no individual fallback from an
-exhausted batch and no final generation with partial tracker output. The final
-generator's own failure also aborts the turn.
-
-### INV-ST6: Batch budget and concurrency caps ✅ ENFORCED (Phase 5.7.2)
-
-Batch `maxTokens` = Σ per-tracker `maxTokens`, capped by `resolved.contextSize ~/ 2`
-(output ceiling = half the context window; the other half is input). Batch
-`temperature` = MIN across the group (low-temp wins for deterministic
-trackers). Batch `contextSize` = MAX across the group (the tracker that needs
-20 messages gets 20; the tracker that needs 5 sees more, which is safe).
-
-Concurrent in-flight tracker requests: `_maxConcurrentGroups = 4` for the
-phase. Conservative default for desktop (Marinara runs 8/4 on a server; one
-user hitting one provider with 8 concurrent SSE streams is a real rate-limit
-risk).
-
-### INV-ST7: Studio cache-friendly prompt ordering ✅ ENFORCED (Phase 6.1)
-
-`ControllerBatcher.buildBatchSystemPrompt` orders the batch system prompt as
-`<role>` (shared role text) → `<lore>` (shared static + dynamic + trimmed
-history) → `<agents>` (per-agent `<agent_task>` XML) → required output format.
-Shared stable content sits at the prefix; per-agent volatile content sits at
-the tail. `StudioMessageBuilder.buildSharedBatchMessages` orders shared messages
-as `static_context` → `dynamic_context` → `chat_history` for the same reason.
-This gives the provider's prompt cache (Anthropic ephemeral /
-OpenRouter `cache_control`) a long stable prefix to hit across turns.
-`cacheControlTtl` / `cacheBreakpointMode` are wired through
-`ResolvedAgentConfig.fromApiConfig` → `ChatTransportRequest` → transport.
-
-### INV-ST8: Studio configuration is turn-scoped ✅ ENFORCED
-
-A normal generation resolves one `StudioTurnConfigSnapshot` at turn start and
-passes it through prompt construction, trackers, final generation,
-POST-cleaner, and Ledger. Downstream stages must prefer the supplied snapshot
-and must not re-read mutable Studio preset, API, or pipeline settings during
-that turn. The API-config list is immutable. A manual action that starts a
-separate operation may resolve a fresh snapshot.
+A post-generation run receives one immutable `PostGenEngineConfig` for the
+turn and passes it through POST-cleaner and Ledger. Downstream stages must use
+the supplied config and must not re-read mutable pipeline or API settings
+during that turn. The API-config list is immutable. A manual action that starts
+a separate operation builds a fresh config.
 
 `StudioLedgerService` remains the compatibility facade, but it does not own
 durable mutation details. `LedgerTurnCommitter` exclusively owns normal-turn
@@ -757,9 +686,9 @@ produces garbage entities. The 4 graph tables
 `memory_consolidation_rows`) remain in the DB for forward compat but
 receive no new rows.
 
-Entity tracking is handled by **Studio Ledger** (LLM-based, writes
+Entity tracking is handled by the **Tracker (Ledger)** (LLM-based, writes
 `npc:Name.field`, `world:location`, `scene.present_entities` into
-`tracker_rows`) — see INV-ST1 through INV-ST9.
+`tracker_rows`) — see INV-ST4, INV-ST8 and INV-ST9.
 
 **Do NOT re-enable** the heuristic extractor without rewriting it for
 non-English text. Reference for a future LLM-based approach:

@@ -10,7 +10,7 @@ part 'cleaner_settings.g.dart';
 ///
 /// Nested inside [PipelineSettings] under the `cleaner` field. The cleaner is
 /// always-on (Studio-only) — there is no enabled toggle. API config is
-/// resolved by [StudioSlotResolver] from `StudioPreset.cleanerApiConfigId`;
+/// resolved by [AuxApiConfigResolver] from `StudioPreset.cleanerApiConfigId`;
 /// `postCleanerModel` overrides the slot's model when non-empty.
 ///
 /// Sampling / reasoning parameters that the selected API preset also carries

@@ -157,9 +157,6 @@ class SessionDeletionQueries {
     await (_db.delete(
       _db.sessionLorebookEvolutionRows,
     )..where((row) => row.chatSessionId.equals(sessionId))).go();
-    await (_db.delete(
-      _db.studioConfigRows,
-    )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(_db.embeddings)..where(
           (row) =>
               row.sourceType.equals('session_lorebook_entry') &

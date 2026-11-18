@@ -11,7 +11,6 @@ import 'chat_provider.dart' show streamingStateProvider;
 import 'state/generation_phase_provider.dart';
 import 'state/post_cleaner_state_provider.dart'
     show PostCleanerState, cleanerCancelTokenProvider, postCleanerStateProvider;
-import 'state/studio_cycle_state_provider.dart';
 import 'chat_session_service.dart';
 import 'chat_state.dart';
 import 'services/continuation_message_merger.dart';
@@ -101,16 +100,6 @@ class AbortHandler {
         const StreamingState();
   }
 
-  void clearStudioCycle() {
-    if (!_ref.mounted) return;
-    final cur = _ref.read(studioCycleStateProvider);
-    if (cur.phase == StudioCyclePhase.running ||
-        cur.phase == StudioCyclePhase.writingFinal) {
-      _ref.read(studioCycleStateProvider.notifier).state =
-          const StudioCycleState.idle();
-    }
-  }
-
   Future<void> abortGeneration() {
     final active = _abortFuture;
     if (active != null) return active;
@@ -146,7 +135,6 @@ class AbortHandler {
     _ref.read(postCleanerStateProvider.notifier).state =
         const PostCleanerState.idle();
     clearStreaming();
-    clearStudioCycle();
     // The bubble stays up until the partial reply is durable; name that wait
     // instead of letting it fall back to "Generating…", which reads as the
     // run carrying on rather than stopping.

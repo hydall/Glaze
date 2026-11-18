@@ -13,21 +13,11 @@ import '../../shared/widgets/menu_group.dart';
 import '../../core/import/silly_tavern_preset_parser.dart';
 import '../../core/models/preset.dart';
 import '../../core/models/preset_folder.dart';
-import '../../core/models/studio_config.dart';
-import '../../core/models/studio_preset_codec.dart';
 import '../../core/services/featured_presets.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
-import '../../core/state/active_studio_preset_provider.dart';
 import '../../core/state/preset_folder_provider.dart';
-import '../../core/utils/time_helpers.dart';
 import '../../shared/widgets/glaze_spinner.dart';
-import '../studio/studio_availability.dart';
-import '../studio/studio_preset_stats.dart';
-import '../studio/studio_preset_workflow_provider.dart';
-import '../studio/widgets/studio_preset_options_sheet.dart';
-import 'studio_preset_editor_screen.dart';
-import 'studio_preset_export.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/folder_name_dialog.dart';
@@ -82,11 +72,8 @@ class PresetListScreen extends ConsumerStatefulWidget {
 class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   Preset? _editingPreset;
   bool _isCreating = false;
-  String? _editingStudioId;
   GlobalKey<PresetEditorBodyState> _editorKey =
       GlobalKey<PresetEditorBodyState>();
-  GlobalKey<StudioPresetEditorBodyState> _studioEditorKey =
-      GlobalKey<StudioPresetEditorBodyState>();
 
   /// Header buttons for the prompt block whose editor is open inside the
   /// preset editor, or null when none is.
@@ -107,9 +94,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   /// folder was opened.
   String? _autoOpenedFolderId;
   PresetListFilters _filters = const PresetListFilters();
-
-  /// Preset kind picked in the control-row dropdown; null = every kind.
-  PresetKind? _typeFilter;
 
   /// Controller of the list that is currently on top. Each list owns its own
   /// (see [_ScrollHost]) because the folder cross-fade keeps the outgoing one
@@ -143,8 +127,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   bool _reorderArmed = false;
 
   bool get _inEditor => _isCreating || _editingPreset != null;
-  bool get _inStudioEditor => _editingStudioId != null;
-  bool get _inAnyEditor => _inEditor || _inStudioEditor;
 
   @override
   void initState() {
@@ -174,29 +156,15 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     });
   }
 
-  void _openStudioEditor(String presetId) {
-    setState(() {
-      _editingStudioId = presetId;
-      // Fresh key so the editor's state re-initialises for the new preset.
-      _studioEditorKey = GlobalKey<StudioPresetEditorBodyState>();
-    });
-  }
-
   void _closeEditor() {
     setState(() {
       _editingPreset = null;
       _isCreating = false;
-      _editingStudioId = null;
       _blockActions = null;
     });
   }
 
   void _handleBack() {
-    if (_inStudioEditor) {
-      final handled = _studioEditorKey.currentState?.handleBack() ?? false;
-      if (!handled) _closeEditor();
-      return;
-    }
     if (_inEditor) {
       final handled = _editorKey.currentState?.handleBack() ?? false;
       if (!handled) _closeEditor();
@@ -271,27 +239,14 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   Widget build(BuildContext context) {
     final presets = ref.watch(presetListProvider);
     final activeId = ref.watch(activePresetIdProvider);
-    final studioPresets = ref.watch(studioPresetListProvider);
-    final activeStudioId =
-        ref.watch(activeStudioPresetProvider).value ?? 'default';
-    // The Studio master switch is the single "which kind is in effect" flag:
-    // ON → an agentic preset is active, OFF → a plain preset is active. Using
-    // it as the discriminator keeps the two lists mutually exclusive so exactly
-    // one card is ever highlighted.
-    final studioEnabled = ref.watch(studioFeatureEnabledProvider);
     final selection = ref.watch(presetSelectionProvider);
     final desktop = isDesktopLayout(context);
 
-    _resolveInitialFolder(
-      activeId: studioEnabled ? activeStudioId : activeId,
-      kind: studioEnabled ? PresetKind.agentic : PresetKind.normal,
-    );
+    _resolveInitialFolder(activeId: activeId, kind: PresetKind.normal);
     final folderId = _currentFolderId;
 
     final String title;
-    if (_inStudioEditor) {
-      title = 'Edit Agentic Preset';
-    } else if (_inEditor) {
+    if (_inEditor) {
       title = _editingPreset != null ? 'Edit Preset' : 'New Preset';
     } else if (folderId != null) {
       title = _folderName(folderId) ?? 'Presets';
@@ -310,7 +265,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       // out of the folder — and only closes the sheet once none of those is
       // left. Without this every one of them would be skipped and the sheet
       // would vanish on the first swipe.
-      canPop: !_inAnyEditor && !selection.active && folderId == null,
+      canPop: !_inEditor && !selection.active && folderId == null,
       // The type dropdown, the filter button and the sort chip belong to the
       // header, not to the scroll content: pinned there they stay reachable at
       // any scroll offset, in the modal sheet and as a fullscreen route alike.
@@ -320,7 +275,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       // On desktop the sheet lives in the sidebar, where a bar pinned to the
       // bottom ends up far from the list it acts on: the selection takes the
       // controls row's place in the header instead.
-      headerBottom: _inAnyEditor
+      headerBottom: _inEditor
           ? null
           : selection.active && desktop
           ? GlazeSelectionBar(
@@ -331,7 +286,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               onMore: () => _showSelectionActions(context, selection),
             )
           : _buildControlsRow(context),
-      floating: _inAnyEditor || !selection.active || desktop
+      floating: _inEditor || !selection.active || desktop
           ? null
           : Align(
               alignment: Alignment.bottomCenter,
@@ -345,13 +300,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
                 ),
               ),
             ),
-      body: _inStudioEditor
-          ? StudioPresetEditorBody(
-              key: _studioEditorKey,
-              presetId: _editingStudioId!,
-              onClose: _closeEditor,
-            )
-          : _inEditor
+      body: _inEditor
           ? PresetEditorBody(
               key: _editorKey,
               preset: _editingPreset,
@@ -370,14 +319,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               // overrides for its body (header inset + nav bar), which the
               // outer context doesn't carry.
               data: (list) => Builder(
-                builder: (context) => _buildBody(
-                  context,
-                  list,
-                  activeId,
-                  studioPresets.value ?? const [],
-                  activeStudioId,
-                  studioEnabled,
-                ),
+                builder: (context) => _buildBody(context, list, activeId),
               ),
             ),
     );
@@ -402,9 +344,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     BuildContext context,
     List<Preset> presets,
     String? activeId,
-    List<StudioPreset> studioList,
-    String activeStudioId,
-    bool studioEnabled,
   ) {
     final folderId = _currentFolderId;
     final memberships =
@@ -415,8 +354,8 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     final hasFolders =
         (ref.watch(presetFoldersProvider).value ?? const []).isNotEmpty;
 
-    final all = mergePresetItems(presets, studioList);
-    var items = all;
+    final allItems = [for (final p in presets) PresetItem(preset: p)];
+    var items = allItems;
     if (folderId != null) {
       final keys = memberships.presetsIn(folderId);
       items = items.where((e) => keys.contains(e.memberKey)).toList();
@@ -427,19 +366,11 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           .where((e) => memberships.foldersOf(e.id, e.kind).isEmpty)
           .toList();
     }
-    final kind = _typeFilter;
-    if (kind != null) {
-      items = items.where((e) => e.kind == kind).toList();
-    }
     items = items.where(_filters.matches).toList();
     items = sortPresetItems(items, sort);
     final reordering = sort.mode == PresetSortMode.manual && _reorderArmed;
 
-    // Studio ON ⇒ only an agentic preset can be active; Studio OFF ⇒ only a
-    // plain preset can be active. So the two kinds never both highlight.
-    bool isActive(PresetItem item) => item.isAgentic
-        ? (studioEnabled && item.studioPreset!.id == activeStudioId)
-        : (!studioEnabled && activeId == item.preset!.id);
+    bool isActive(PresetItem item) => activeId == item.preset.id;
 
     final activeIndex = items.indexWhere(isActive);
 
@@ -448,8 +379,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     // behalf.
     if (_didResolveInitialFolder &&
         (folderId == null || folderId == _autoOpenedFolderId) &&
-        !_filters.isActive &&
-        _typeFilter == null) {
+        !_filters.isActive) {
       _scheduleAutoScroll(activeIndex);
     }
 
@@ -493,14 +423,9 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               onLongPress: reordering
                   ? null
                   : () => _startSelection(item.id, item.kind),
-              onConnections: item.isAgentic
-                  ? null
-                  : () => showPresetConnections(context, item.preset!.id),
-              onEdit: item.isAgentic
-                  ? (studioAvailable
-                        ? () => _openStudioEditor(item.studioPreset!.id)
-                        : null)
-                  : () => _openEditor(item.preset),
+              onConnections: () =>
+                  showPresetConnections(context, item.preset.id),
+              onEdit: () => _openEditor(item.preset),
               onMenu: () => _showItemMenu(item),
             ),
           ),
@@ -552,7 +477,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               sliver: SliverReorderableList(
                 itemCount: items.length,
                 onReorderItem: (oldIndex, newIndex) =>
-                    _onManualReorder(items, all, oldIndex, newIndex),
+                    _onManualReorder(items, allItems, oldIndex, newIndex),
                 itemBuilder: (_, i) => ReorderableDelayedDragStartListener(
                   key: ValueKey(items[i].memberKey),
                   index: i,
@@ -658,19 +583,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       return;
     }
     if (isActive) return;
-    if (item.isAgentic && !studioAvailable) {
-      showStudioUnavailableSheet(context);
-      return;
-    }
-    if (item.isAgentic) {
-      ref.read(activeStudioPresetProvider.notifier).set(item.studioPreset!.id);
-      ref.read(studioFeatureEnabledProvider.notifier).enable();
-    } else {
-      setActivePreset(ref, item.preset!.id);
-      // Switching to a plain preset turns Studio off so the agentic pipeline
-      // stops overriding it.
-      ref.read(studioFeatureEnabledProvider.notifier).setEnabled(false);
-    }
+    setActivePreset(ref, item.preset.id);
   }
 
   /// Jumps the list so the active preset is visible on open. Runs at most once.
@@ -749,9 +662,8 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
   // ─── filters ───────────────────────────────────────────────────────────
 
-  /// Control row pinned to the header, mirroring the catalog's: the type
-  /// dropdown on the left, the filter-sheet button and the sort chip on the
-  /// right.
+  /// Control row pinned to the header, mirroring the catalog's: the
+  /// filter-sheet button and the sort chip on the right.
   Widget _buildControlsRow(BuildContext context) {
     return Consumer(
       builder: (context, ref, _) {
@@ -759,10 +671,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
             ref.watch(presetSortProvider).value?.mode ?? PresetSortMode.manual;
         final row = Row(
           children: [
-            GlazeDropdownChip(
-              label: _typeLabel(_typeFilter),
-              onTap: () => _showTypePicker(context),
-            ),
             const Spacer(),
             GlazeFilterIconButton(
               count: _filters.activeCount,
@@ -829,42 +737,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     );
   }
 
-  static String _typeLabel(PresetKind? kind) => switch (kind) {
-    null => 'preset_type_all'.tr(),
-    PresetKind.normal => 'preset_type_normal'.tr(),
-    PresetKind.agentic => 'preset_type_agentic'.tr(),
-  };
-
-  static IconData _typeIcon(PresetKind? kind) => switch (kind) {
-    null => Icons.apps_rounded,
-    PresetKind.normal => Icons.description_outlined,
-    PresetKind.agentic => Icons.smart_toy_outlined,
-  };
-
-  void _showTypePicker(BuildContext context) {
-    showGlazePickerSheet(
-      context,
-      title: 'preset_filter_type'.tr(),
-      items: [
-        for (final kind in const <PresetKind?>[
-          null,
-          PresetKind.normal,
-          PresetKind.agentic,
-        ])
-          GlazePickerItem(
-            label: _typeLabel(kind),
-            icon: _typeIcon(kind),
-            isActive: kind == _typeFilter,
-            // A null value is unambiguous here — it is the "every kind" row.
-            value: kind,
-          ),
-      ],
-      onSelect: (v) {
-        if (mounted) setState(() => _typeFilter = v as PresetKind?);
-      },
-    );
-  }
-
   void _showFilterSheet(BuildContext context) {
     showGlazeSheet<void>(
       context: context,
@@ -883,13 +755,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
   // ─── per-row overflow menu ─────────────────────────────────────────────
 
-  void _showItemMenu(PresetItem item) {
-    if (item.isAgentic) {
-      _showAgenticMenu(item.studioPreset!);
-    } else {
-      _showPlainMenu(item.preset!);
-    }
-  }
+  void _showItemMenu(PresetItem item) => _showPlainMenu(item.preset);
 
   void _showPlainMenu(Preset preset) {
     final notifier = ref.read(presetListProvider.notifier);
@@ -975,68 +841,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     await deleteStoredPresetCover(storage, preset.imagePath);
   }
 
-  void _showAgenticMenu(StudioPreset preset) {
-    showStudioPresetOptions(
-      context,
-      preset: preset,
-      onSelect: () => _startSelection(preset.id, PresetKind.agentic),
-      // While Studio is closed an agentic preset can only leave the app:
-      // exported or deleted.
-      onRename: studioAvailable
-          ? () => showStudioPresetRename(
-              context,
-              preset: preset,
-              onRename: (name) => unawaited(_renameAgentic(preset, name)),
-            )
-          : null,
-      onClone: studioAvailable ? () => unawaited(_cloneAgentic(preset)) : null,
-      onAddToFolder: studioAvailable
-          ? () => _showAddToFolder([
-              PresetFolderTarget(preset.id, PresetKind.agentic),
-            ])
-          : null,
-      onExport: () => unawaited(exportStudioPreset(context, preset)),
-      onDelete: () => unawaited(_deleteAgentic(preset)),
-    );
-  }
-
-  Future<void> _renameAgentic(StudioPreset preset, String name) async {
-    await ref
-        .read(studioPresetRepoProvider)
-        .upsert(
-          preset.copyWith(name: name, updatedAt: currentTimestampSeconds()),
-        );
-    if (mounted) ref.invalidate(studioPresetListProvider);
-  }
-
-  Future<void> _cloneAgentic(StudioPreset preset) async {
-    final now = currentTimestampSeconds();
-    await ref
-        .read(studioPresetRepoProvider)
-        .upsert(
-          preset.copyWith(
-            id: 'studio_$now',
-            name: '${preset.name} (copy)',
-            blocks: [...preset.blocks],
-            agentEnabled: {...preset.agentEnabled},
-            updatedAt: now,
-          ),
-        );
-    if (!mounted) return;
-    ref.invalidate(studioPresetListProvider);
-    GlazeToast.show(context, 'studio_preset_cloned'.tr());
-  }
-
-  Future<void> _deleteAgentic(StudioPreset preset) async {
-    final ok = await confirmStudioDelete(
-      context,
-      title: 'studio_delete_preset'.tr(),
-      description: 'studio_confirm_delete_preset'.tr(args: [preset.name]),
-    );
-    if (!ok || !mounted) return;
-    await _deleteItems([PresetItem(studioPreset: preset)]);
-  }
-
   // ─── add / import ──────────────────────────────────────────────────────
 
   void _showAddSheet(BuildContext context) {
@@ -1052,15 +856,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
             _openEditor(null);
           },
         ),
-        if (studioAvailable)
-          BottomSheetItem(
-            icon: Icons.smart_toy_outlined,
-            label: 'preset_add_agentic'.tr(),
-            onTap: () {
-              Navigator.of(context, rootNavigator: true).pop();
-              _createAgenticPreset();
-            },
-          ),
         BottomSheetItem(
           icon: Icons.file_upload_outlined,
           label: 'action_import'.tr(),
@@ -1093,34 +888,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     );
   }
 
-  Future<void> _createAgenticPreset() async {
-    final ctx = context;
-    try {
-      final repo = ref.read(studioPresetRepoProvider);
-      // Fresh installs never seed the built-in default preset (it only ships
-      // via the DB upgrade migration), so back-fill it here — otherwise there
-      // is nothing for createPreset to clone and the tap silently no-ops.
-      await repo.ensureDefaultSeeded();
-      final service = ref.read(studioPresetWorkflowServiceProvider);
-      final presets = await repo.getAll();
-      final result = await service.createPreset(
-        name: 'New Agentic Preset',
-        availablePresets: presets,
-      );
-      if (!ctx.mounted) return;
-      if (result != null) {
-        ref.invalidate(studioPresetListProvider);
-        GlazeToast.show(ctx, 'Created "${result.preset.name}"');
-      } else {
-        GlazeToast.show(ctx, 'error_create_agentic_preset_failed'.tr());
-      }
-    } catch (_) {
-      if (ctx.mounted) {
-        GlazeToast.show(ctx, 'error_create_agentic_preset_failed'.tr());
-      }
-    }
-  }
-
   Future<void> _importPreset() async {
     final ctx = context;
     FilePickerResult? result;
@@ -1136,12 +903,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     if (result == null || result.files.isEmpty) return;
 
     final notifier = ref.read(presetListProvider.notifier);
-    final studioWorkflow = ref.read(studioPresetWorkflowServiceProvider);
     final imported = <String>[];
     Object? lastError;
     var unreadable = 0;
-    var adjusted = 0;
-    var importedAgentic = false;
+    var retired = 0;
 
     for (final picked in result.files) {
       try {
@@ -1158,21 +923,9 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         final json = jsonDecode(jsonString) as Map<String, dynamic>;
 
         if (json.containsKey('agentEnabled')) {
-          // Decode through the codec, not `StudioPreset.fromJson`: exported
-          // files can carry the pre-typed block shape (`kind` instead of
-          // `type`/`contextSlot`), and only the codec maps it. Without it every
-          // block silently lands as a plain instruction — context, history and
-          // memory slots included — and the validator then rejects the ones
-          // that are legitimately blank. Every other entry point (cloud sync,
-          // backup import, the repo's read path) already goes through it.
-          final decoded = StudioPresetCodec.decodePreset(json);
-          adjusted += decoded.warnings.length;
-          await studioWorkflow.importPreset(
-            imported: decoded.preset,
-            name: decoded.preset.name,
-          );
-          importedAgentic = true;
-          imported.add(decoded.preset.name);
+          // An agentic (Studio) preset: Studio is gone, so there is nothing to
+          // import it into.
+          retired++;
         } else {
           final preset = parseSillyTavernPreset(json, picked.name);
           await notifier.add(preset);
@@ -1183,11 +936,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       }
     }
 
-    // The plain list refreshes itself (`notifier.add` invalidates it), but the
-    // agentic list is a plain FutureProvider the workflow service knows nothing
-    // about — without this the imported presets only appeared after a restart.
-    if (importedAgentic) ref.invalidate(studioPresetListProvider);
-
     if (!ctx.mounted) return;
 
     if (imported.isEmpty) {
@@ -1197,6 +945,8 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           lastError,
           prefix: 'error_import_failed_prefix'.tr(),
         );
+      } else if (retired > 0) {
+        GlazeToast.show(ctx, 'preset_import_agentic_retired'.tr());
       } else if (unreadable > 0) {
         GlazeToast.show(ctx, 'error_cannot_read_file'.tr());
       }
@@ -1204,14 +954,11 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     }
 
     final name = imported.first;
-    // Blocks the codec could not honour are carried over disabled rather than
-    // dropped, so say so instead of letting them look lost.
-    final suffix = adjusted > 0 ? ' — $adjusted block(s) adjusted' : '';
     GlazeToast.show(
       ctx,
       imported.length == 1
-          ? 'Imported "$name"$suffix'
-          : 'Imported ${imported.length} presets$suffix',
+          ? 'Imported "$name"'
+          : 'Imported ${imported.length} presets',
     );
   }
 
@@ -1221,12 +968,9 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   /// disappeared while the sheet was open.
   List<PresetItem> _selectedItems(PresetSelectionState selection) {
     final presets = ref.read(presetListProvider).value ?? const <Preset>[];
-    final studio =
-        ref.read(studioPresetListProvider).value ?? const <StudioPreset>[];
-    return mergePresetItems(
-      presets,
-      studio,
-    ).where((e) => selection.keys.contains(e.memberKey)).toList();
+    return [
+      for (final p in presets) PresetItem(preset: p),
+    ].where((e) => selection.keys.contains(e.memberKey)).toList();
   }
 
   void _showSelectionActions(
@@ -1307,9 +1051,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     String? lastError;
     for (final item in _selectedItems(selection)) {
       try {
-        final path = item.isAgentic
-            ? await saveStudioPresetJson(item.studioPreset!)
-            : await savePresetJson(item.preset!);
+        final path = await savePresetJson(item.preset);
         // Empty path = the user cancelled the save dialog — stop the loop
         // instead of counting the file as exported (or re-prompting).
         if (path.isEmpty) break;
@@ -1343,11 +1085,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     BuildContext context,
     PresetSelectionState selection,
   ) {
-    // The built-in `default` agentic preset is re-seeded on demand, so deleting
-    // it would only look like it worked.
-    final deletable = _selectedItems(
-      selection,
-    ).where((e) => !(e.isAgentic && e.id == 'default')).toList();
+    final deletable = _selectedItems(selection);
     if (deletable.isEmpty) {
       GlazeToast.show(context, 'preset_delete_none_toast'.tr());
       return;
@@ -1468,18 +1206,13 @@ class _PsCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Agentic presets share the plain preset's frame, active cross-fade and row
-    // layout — they only differ in the leading icon and the badges they carry,
-    // and never have a cover, connections or an inline editor.
-    final cover = item.isAgentic ? null : presetCoverImage(item.preset!);
+    final cover = presetCoverImage(item.preset);
 
-    var hasCharBinding = false;
-    var hasChatBinding = false;
-    if (!item.isAgentic) {
-      final connections = ref.watch(presetConnectionsProvider);
-      hasCharBinding = connections.character.values.contains(item.preset!.id);
-      hasChatBinding = connections.chat.values.contains(item.preset!.id);
-    }
+    final connections = ref.watch(presetConnectionsProvider);
+    final hasCharBinding = connections.character.values.contains(
+      item.preset.id,
+    );
+    final hasChatBinding = connections.chat.values.contains(item.preset.id);
 
     // A card filled with artwork needs a real frame even when idle — a hairline
     // disappears against the cover (same treatment as the Tools hero card).
@@ -1511,9 +1244,7 @@ class _PsCard extends ConsumerWidget {
         : const EdgeInsets.all(10);
 
     final Widget content;
-    if (item.isAgentic) {
-      content = Padding(padding: rowPadding, child: _buildAgenticRow(context));
-    } else if (cover == null) {
+    if (cover == null) {
       content = Padding(
         padding: rowPadding,
         child: _buildRow(
@@ -1543,7 +1274,12 @@ class _PsCard extends ConsumerWidget {
         ),
         duration: _activeFade,
         curve: Curves.easeOut,
-        child: InkWell(mouseCursor: SystemMouseCursors.click, onTap: onTap, onLongPress: onLongPress, child: content),
+        child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
+          onTap: onTap,
+          onLongPress: onLongPress,
+          child: content,
+        ),
         builder: (context, t, child) => FlatGroupSurface(
           color: context.cs.primary.withValues(alpha: 0.12 * t),
           accent: context.cs.primary.withValues(alpha: t),
@@ -1640,7 +1376,7 @@ class _PsCard extends ConsumerWidget {
     final secondaryText = onCover
         ? Colors.white.withValues(alpha: 0.75)
         : context.cs.onSurfaceVariant;
-    final preset = item.preset!;
+    final preset = item.preset;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1721,85 +1457,6 @@ class _PsCard extends ConsumerWidget {
           _RowIconButton(
             icon: Icons.more_vert,
             color: secondaryText,
-            onTap: onMenu,
-          ),
-        ],
-      ],
-    );
-  }
-
-  /// Agentic counterpart of [_buildRow]: same circular icon + name + badge-row
-  /// layout as a plain preset, so both kinds render identically. Differs only
-  /// in the leading glyph and the badges (token estimate + requests-per-turn),
-  /// and has no connection badge.
-  Widget _buildAgenticRow(BuildContext context) {
-    final sp = item.studioPreset!;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: context.cs.primary.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            Icons.smart_toy_outlined,
-            size: 20,
-            color: context.cs.primary,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                sp.name.isNotEmpty ? sp.name : 'Agentic Preset',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: context.cs.onSurface,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  PresetSmallBadge(
-                    icon: Icons.memory,
-                    label: '${item.tokens}',
-                    foreground: context.cs.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 8),
-                  PresetSmallBadge(
-                    icon: Icons.bolt,
-                    label: 'studio_requests_per_turn'.tr(
-                      args: ['${studioPresetRequestCount(sp)}'],
-                    ),
-                    foreground: context.cs.onSurfaceVariant,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        if (selectionMode)
-          _SelectionCheck(selected: isSelected, onCover: false)
-        else ...[
-          // Agentic presets are global, so there is no per-chat/character
-          // connection badge like a plain preset has.
-          if (onEdit != null)
-            _RowIconButton(
-              icon: Icons.edit_outlined,
-              color: context.cs.onSurfaceVariant,
-              onTap: onEdit,
-            ),
-          _RowIconButton(
-            icon: Icons.more_vert,
-            color: context.cs.onSurfaceVariant,
             onTap: onMenu,
           ),
         ],
@@ -1893,19 +1550,22 @@ class _ConnBadge extends StatelessWidget {
       color = context.cs.onSurfaceVariant.withValues(alpha: 0.5); // grey
     }
 
-    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 30,
-        height: 30,
-        decoration: BoxDecoration(
-          color: (hasChatBinding || hasCharBinding || isActive)
-              ? color.withValues(alpha: 0.12)
-              : Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(8),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: (hasChatBinding || hasCharBinding || isActive)
+                ? color.withValues(alpha: 0.12)
+                : Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(Icons.link, size: 16, color: color),
         ),
-        child: Icon(Icons.link, size: 16, color: color),
       ),
-    ));
+    );
   }
 }

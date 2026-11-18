@@ -374,12 +374,6 @@ class ChatSessionService {
             messageIds: messageIds,
           );
       await _ref
-          .read(studioConfigRepoProvider)
-          .copyForSessionBranch(
-            fromSessionId: current.id,
-            toSessionId: branch.id,
-          );
-      await _ref
           .read(trackerSnapshotRepoProvider)
           .copyForSessionBranch(
             fromSessionId: current.id,

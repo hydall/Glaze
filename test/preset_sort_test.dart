@@ -1,14 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
-import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/features/presets/preset_entry.dart';
 import 'package:glaze_flutter/features/presets/preset_sort.dart';
 
-PresetItem _plain(String id, String name, int createdAt) =>
-    PresetItem(preset: Preset(id: id, name: name, createdAt: createdAt));
-
-PresetItem _agentic(String id, String name, {int updatedAt = 0}) =>
-    PresetItem(studioPreset: StudioPreset(id: id, name: name, updatedAt: updatedAt));
+PresetItem _plain(String id, String name, int createdAt) => PresetItem(
+  preset: Preset(id: id, name: name, createdAt: createdAt),
+);
 
 List<String> _ids(List<PresetItem> items) => [for (final e in items) e.id];
 
@@ -17,10 +14,10 @@ void main() {
     final items = <PresetItem>[
       _plain('b', 'beta', 30),
       _plain('c', 'Alpha', 10),
-      _agentic('studio_20', 'gamma'),
+      _plain('studio_20', 'gamma', 20),
     ];
 
-    test('alphabetical ignores case and covers both kinds', () {
+    test('alphabetical ignores case', () {
       final sorted = sortPresetItems(
         items,
         const PresetSortState(mode: PresetSortMode.alphabetical),
@@ -28,7 +25,7 @@ void main() {
       expect(_ids(sorted), ['c', 'b', 'studio_20']);
     });
 
-    test('date added is newest first, agentic stamps read from the id', () {
+    test('date added is newest first', () {
       final sorted = sortPresetItems(
         items,
         const PresetSortState(mode: PresetSortMode.dateAdded),
@@ -41,7 +38,7 @@ void main() {
         items,
         const PresetSortState(
           mode: PresetSortMode.manual,
-          manualOrder: ['agentic:studio_20'],
+          manualOrder: ['normal:studio_20'],
         ),
       );
       // The listed one leads; 'b' and 'c' stay in the order they came in.

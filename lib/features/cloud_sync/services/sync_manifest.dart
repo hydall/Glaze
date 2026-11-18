@@ -23,8 +23,6 @@ class SyncManifestBuilder implements SyncManifestProvider {
   final SyncInfoBlockStore _infoBlockStore;
   final SyncTrackerSnapshotStore _trackerSnapshotStore;
   final SyncTrackerValueStore _trackerValueStore;
-  final SyncStudioConfigStore _studioConfigStore;
-  final SyncStudioPresetStore? _studioPresetStore;
   final SyncChatSummaryStore? _chatSummaryStore;
   final SyncCharacterFolderStore? _characterFolderStore;
   final SyncFolderStore? _folderStore;
@@ -53,8 +51,6 @@ class SyncManifestBuilder implements SyncManifestProvider {
     required this._infoBlockStore,
     required this._trackerSnapshotStore,
     required this._trackerValueStore,
-    required this._studioConfigStore,
-    this._studioPresetStore,
     this._chatSummaryStore,
     this._characterFolderStore,
     this._folderStore,
@@ -287,57 +283,6 @@ class SyncManifestBuilder implements SyncManifestProvider {
         updatedAt: updatedAt,
         hash: hash,
       );
-    }
-
-    final studioConfigs = await _studioConfigStore.getAll();
-    for (final config in studioConfigs) {
-      final id = config.sessionId;
-      final json = config.toJson();
-      final hash = SyncSerialization.computeStudioConfigHash(json);
-      final key = entryKey('studio_config', id);
-      final prevEntry = previous.entries[key];
-      final cloudEntry = cloudManifest?.entries[key];
-      var updatedAt = _resolveUpdatedAt(
-        hash: hash,
-        prevEntry: prevEntry,
-        cloudEntry: cloudEntry,
-        now: now,
-      );
-      if (config.updatedAt > updatedAt) updatedAt = config.updatedAt;
-
-      entries[key] = SyncManifestEntry(
-        type: 'studio_config',
-        id: id,
-        path: cloudPath('studio_config', id),
-        updatedAt: updatedAt,
-        hash: hash,
-      );
-    }
-
-    if (_studioPresetStore != null) {
-      final studioPresets = await _studioPresetStore.getAll();
-      for (final preset in studioPresets) {
-        final json = preset.toJson();
-        final hash = SyncSerialization.computeSyncHash(json);
-        final key = entryKey('studio_preset', preset.id);
-        final prevEntry = previous.entries[key];
-        final cloudEntry = cloudManifest?.entries[key];
-        var updatedAt = _resolveUpdatedAt(
-          hash: hash,
-          prevEntry: prevEntry,
-          cloudEntry: cloudEntry,
-          now: now,
-        );
-        if (preset.updatedAt > updatedAt) updatedAt = preset.updatedAt;
-
-        entries[key] = SyncManifestEntry(
-          type: 'studio_preset',
-          id: preset.id,
-          path: cloudPath('studio_preset', preset.id),
-          updatedAt: updatedAt,
-          hash: hash,
-        );
-      }
     }
 
     // Chat summaries — per-session, like tracker_value.
@@ -764,9 +709,6 @@ class SyncManifestBuilder implements SyncManifestProvider {
     final pipelineSettings = prefs.getString(
       SyncSerialization.pipelineSettingsKey,
     );
-    final activeStudioPresetId = prefs.getString(
-      SyncSerialization.activeStudioPresetKey,
-    );
     final globalRegexScripts = prefs.getString(
       SyncSerialization.globalRegexScriptsKey,
     );
@@ -780,7 +722,6 @@ class SyncManifestBuilder implements SyncManifestProvider {
       const type = 'local_storage';
       final payload = SyncSerialization.localStoragePayload(
         pipelineSettings: pipelineSettings,
-        activeStudioPresetId: activeStudioPresetId,
         globalRegexScripts: globalRegexScripts,
         studioRegexScripts: studioRegexScripts,
         appSettings: appSettings,

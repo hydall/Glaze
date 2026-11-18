@@ -17,8 +17,6 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/preset.dart';
-import '../../../core/models/studio_agent_codec.dart';
-import '../../../core/models/studio_preset_codec.dart';
 import '../../../core/application/session_deletion_store.dart';
 import '../../../core/application/character_deletion_store.dart';
 import '../../../shared/theme/theme_preset.dart';
@@ -54,8 +52,6 @@ class SyncEngine {
   final SyncInfoBlockStore _infoBlockStore;
   final SyncTrackerSnapshotStore _trackerSnapshotStore;
   final SyncTrackerValueStore _trackerValueStore;
-  final SyncStudioConfigStore _studioConfigStore;
-  final SyncStudioPresetStore? _studioPresetStore;
   final SyncChatSummaryStore? _chatSummaryStore;
   final SyncCharacterFolderStore? _characterFolderStore;
   final SyncFolderStore? _folderStore;
@@ -92,8 +88,6 @@ class SyncEngine {
     this._infoBlockStore,
     this._trackerSnapshotStore,
     this._trackerValueStore,
-    this._studioConfigStore,
-    this._studioPresetStore,
     this._chatSummaryStore,
     this._characterFolderStore,
     this._folderStore,
@@ -136,8 +130,6 @@ class SyncEngine {
     await _adapter.ensureFolder('$cloudBase/info_blocks');
     await _adapter.ensureFolder('$cloudBase/tracker_snapshots');
     await _adapter.ensureFolder('$cloudBase/tracker_values');
-    await _adapter.ensureFolder('$cloudBase/studio_configs');
-    await _adapter.ensureFolder('$cloudBase/studio_presets');
     await _adapter.ensureFolder('$cloudBase/chat_summaries');
     await _adapter.ensureFolder('$cloudBase/memory_graphs');
     await _adapter.ensureFolder('$cloudBase/character_knowledge');
@@ -925,16 +917,6 @@ class SyncEngine {
         final cloudHash = SyncSerialization.computeMemoryBookHash(cloudData);
         final equal = localHash == cloudHash;
         return equal;
-      case 'studio_config':
-        final localConfig = await _studioConfigStore.getById(cloudEntry.id);
-        if (localConfig == null) return false;
-        final cloudData = await SyncSerialization.readCloudEntity(
-          _adapter,
-          cloudEntry,
-        );
-        if (cloudData == null) return false;
-        return SyncSerialization.computeStudioConfigHash(cloudData) ==
-            SyncSerialization.computeStudioConfigHash(localConfig.toJson());
       case 'api_presets':
         if (cloudManifest.apiKeysIncluded) return false;
         final localAll = await _apiRepo.getAll();
@@ -1033,13 +1015,6 @@ class SyncEngine {
         case 'tracker_value':
           final trackers = await _trackerValueStore.getBySessionId(id);
           return {'__trackerValues': true, 'items': trackers};
-        case 'studio_config':
-          final config = await _studioConfigStore.getById(id);
-          return config?.toJson();
-        case 'studio_preset':
-          if (_studioPresetStore == null) return null;
-          final preset = await _studioPresetStore.getById(id);
-          return preset?.toJson();
         case 'chat_summary':
           if (_chatSummaryStore == null) return null;
           return _chatSummaryStore.getBySessionId(id);
@@ -1135,16 +1110,6 @@ class SyncEngine {
           break;
         case 'tracker_value':
           await _applyCloudTrackerValues(id, data);
-          break;
-        case 'studio_config':
-          await _studioConfigStore.put(StudioAgentCodec.decodeConfig(data));
-          break;
-        case 'studio_preset':
-          if (_studioPresetStore != null) {
-            await _studioPresetStore.put(
-              StudioPresetCodec.decodePreset(data).preset,
-            );
-          }
           break;
         case 'chat_summary':
           if (_chatSummaryStore != null) {
@@ -1492,14 +1457,6 @@ class SyncEngine {
         case 'tracker_value':
           await _trackerValueStore.deleteBySessionId(id);
           break;
-        case 'studio_config':
-          await _studioConfigStore.delete(id);
-          break;
-        case 'studio_preset':
-          if (_studioPresetStore != null) {
-            await _studioPresetStore.delete(id);
-          }
-          break;
         case 'chat_summary':
           if (_chatSummaryStore != null) {
             await _chatSummaryStore.deleteBySessionId(id);
@@ -1574,9 +1531,6 @@ class SyncEngine {
     final pipelineSettings = prefs.getString(
       SyncSerialization.pipelineSettingsKey,
     );
-    final activeStudioPresetId = prefs.getString(
-      SyncSerialization.activeStudioPresetKey,
-    );
     final globalRegexScripts = prefs.getString(
       SyncSerialization.globalRegexScriptsKey,
     );
@@ -1588,7 +1542,6 @@ class SyncEngine {
     );
     return SyncSerialization.localStoragePayload(
       pipelineSettings: pipelineSettings,
-      activeStudioPresetId: activeStudioPresetId,
       globalRegexScripts: globalRegexScripts,
       studioRegexScripts: studioRegexScripts,
       appSettings: appSettings,
@@ -1606,17 +1559,6 @@ class SyncEngine {
         await prefs.setString(
           SyncSerialization.pipelineSettingsKey,
           pipelineSettings,
-        );
-      }
-    }
-    final activeStudioPresetId = data[SyncSerialization.activeStudioPresetKey];
-    if (activeStudioPresetId is String) {
-      if (activeStudioPresetId.isEmpty) {
-        await prefs.remove(SyncSerialization.activeStudioPresetKey);
-      } else {
-        await prefs.setString(
-          SyncSerialization.activeStudioPresetKey,
-          activeStudioPresetId,
         );
       }
     }
@@ -1665,7 +1607,6 @@ class SyncEngine {
   Future<void> _deleteLocalStorage() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(SyncSerialization.pipelineSettingsKey);
-    await prefs.remove(SyncSerialization.activeStudioPresetKey);
     await prefs.remove(SyncSerialization.globalRegexScriptsKey);
     await prefs.remove(SyncSerialization.studioRegexScriptsKey);
     await AppSettingsPreferences.removeAll(prefs);

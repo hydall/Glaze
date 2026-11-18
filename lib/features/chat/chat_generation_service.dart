@@ -2,7 +2,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/chat_message.dart';
-import '../../core/llm/studio_turn_config_snapshot.dart';
 import 'chat_state.dart';
 import 'services/stream_generation_service.dart';
 import 'services/image_gen_processor.dart';
@@ -34,7 +33,6 @@ class ChatGenerationService {
     String guidanceType = 'GENERATION',
     String? regenTargetId,
     String? continueTargetId,
-    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     return StreamGenerationService(
       ref: _ref,
@@ -55,7 +53,6 @@ class ChatGenerationService {
       regenTargetId: regenTargetId,
       continueTargetId: continueTargetId,
       currentState: currentState,
-      studioTurnConfig: studioTurnConfig,
     );
   }
 

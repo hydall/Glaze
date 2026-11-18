@@ -2,21 +2,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/chat/chat_session_service.dart';
 import '../../features/chat_history/chat_history_provider.dart';
-import '../../features/settings/api_list_provider.dart';
-import '../llm/agent_runner.dart';
 import '../llm/aux_llm_client.dart';
 import '../llm/memory_graph_builder.dart';
 import '../llm/memory_provenance.dart';
 import '../llm/memory_cadence_service.dart';
 import '../llm/memory_post_turn_service.dart';
 import '../llm/memory_agentic_service.dart';
-import '../llm/memory_studio_service.dart';
 import '../llm/post_cleaner_service.dart';
 import '../llm/prompt/ledger_tracker_loader.dart';
 import '../llm/studio_ledger_service.dart';
-import '../llm/studio/agent_config_resolver.dart';
-import '../llm/controller_batcher.dart';
-import '../models/api_config.dart';
 import 'db_provider.dart';
 import 'studio_regex_provider.dart';
 
@@ -51,33 +45,6 @@ final memoryPostTurnServiceProvider = Provider<MemoryPostTurnService>((ref) {
 /// Agentic memory service (Phase 10). Read-only searchMemory tool.
 final memoryAgenticServiceProvider = Provider<MemoryAgenticService>((ref) {
   return MemoryAgenticService(ref);
-});
-
-/// Studio Mode pipeline service. Tracker-around-generator model.
-final agentRunnerProvider = Provider<AgentRunner>((ref) {
-  return AgentRunner(
-    configResolver: AgentConfigResolver(
-      loadApiConfigs: () async {
-        await ref.read(apiListProvider.future);
-        return ref.read(apiListProvider).value ?? const <ApiConfig>[];
-      },
-      readActiveApiConfig: () => ref.read(activeApiConfigProvider),
-      readPipelineSettings: () => ref.read(pipelineSettingsProvider),
-    ),
-    readPipelineSettings: () => ref.read(pipelineSettingsProvider),
-  );
-});
-
-final controllerBatcherProvider = Provider<ControllerBatcher>((ref) {
-  return ControllerBatcher(ref.read(agentRunnerProvider));
-});
-
-final memoryStudioServiceProvider = Provider<MemoryStudioService>((ref) {
-  return MemoryStudioService(
-    ref,
-    ref.read(agentRunnerProvider),
-    ref.read(controllerBatcherProvider),
-  );
 });
 
 /// POST-cleaner service (Stage 4). Rewrites the final assistant message
