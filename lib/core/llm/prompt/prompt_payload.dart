@@ -365,6 +365,70 @@ class PromptPayload {
     ledgerProjectionFreshnessProvenCurrent:
         ledgerProjectionFreshnessProvenCurrent,
   );
+
+  /// This payload with [extra] runtime blocks appended — how agent results
+  /// reach the main prompt without touching the preset.
+  PromptPayload withExtraRuntimePromptBlocks(List<RuntimePromptBlock> extra) =>
+      extra.isEmpty
+      ? this
+      : PromptPayload(
+    character: character,
+    persona: persona,
+    preset: preset,
+    history: history,
+    sessionId: sessionId,
+    apiConfig: apiConfig,
+    sessionVars: sessionVars,
+    globalVars: globalVars,
+    summaryContent: summaryContent,
+    summaryPrefix: summaryPrefix,
+    summarySegments: summarySegments,
+    memoryContent: memoryContent,
+    memoryMacroContent: memoryMacroContent,
+    memoryInjectionTarget: memoryInjectionTarget,
+    guidanceText: guidanceText,
+    continueInstruction: continueInstruction,
+    lorebooks: lorebooks,
+    lorebookSettings: lorebookSettings,
+    lorebookActivations: lorebookActivations,
+    vectorEntries: vectorEntries,
+    authorsNote: authorsNote,
+    characterDepthPrompt: characterDepthPrompt,
+    characterDepthPromptDepth: characterDepthPromptDepth,
+    characterDepthPromptRole: characterDepthPromptRole,
+    memoryCoverage: memoryCoverage,
+    globalRegexes: globalRegexes,
+    preScannedEntries: preScannedEntries,
+    triggeredMemories: triggeredMemories,
+    runtimePromptBlocks: [...runtimePromptBlocks, ...extra],
+    memorySelection: memorySelection,
+    memoryExcerptingEnabled: memoryExcerptingEnabled,
+    memoryPackingMode: memoryPackingMode,
+    memoryExcerptTokensPerChunk: memoryExcerptTokensPerChunk,
+    memoryExcerptChunksPerEntry: memoryExcerptChunksPerEntry,
+    chunkFirstTopEntries: chunkFirstTopEntries,
+    chunkFirstTopChunks: chunkFirstTopChunks,
+    arcContent: arcContent,
+    entitiesContent: entitiesContent,
+    studioSessionStateContent: studioSessionStateContent,
+    gameTime: gameTime,
+    gameDate: gameDate,
+    gameDay: gameDay,
+    characterKnowledgeContent: characterKnowledgeContent,
+    recalledMessagesContent: recalledMessagesContent,
+    recalledMessageChunks: recalledMessageChunks,
+    disableSourceWindowExclusion: disableSourceWindowExclusion,
+    sourceWindowVisibleMessageIds: sourceWindowVisibleMessageIds,
+    memoryInjectionFingerprint: memoryInjectionFingerprint,
+    effectiveCanonProjection: effectiveCanonProjection,
+    effectiveCanonRevisionNumber: effectiveCanonRevisionNumber,
+    effectiveCanonRevisionHash: effectiveCanonRevisionHash,
+    effectiveCanonCacheIdentity: effectiveCanonCacheIdentity,
+    ledgerPromptInjectionPolicy: ledgerPromptInjectionPolicy,
+    ledgerInjectionCacheIdentity: ledgerInjectionCacheIdentity,
+    ledgerProjectionFreshnessProvenCurrent:
+        ledgerProjectionFreshnessProvenCurrent,
+        );
 }
 
 String _latestText(List<ChatMessage> history, String role) => history

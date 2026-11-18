@@ -8,3 +8,4 @@ part 'tables/canon_and_rewrite.dart';
 part 'tables/studio_and_presets.dart';
 part 'tables/lorebooks.dart';
 part 'tables/extensions.dart';
+part 'tables/agents.dart';

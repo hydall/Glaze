@@ -93,6 +93,10 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
       await (_db.delete(
         _db.characterFolderMembers,
       )..where((row) => row.charId.isIn(ids))).go();
+      await (_db.delete(_db.agentBindingRows)..where(
+            (row) => row.scope.equals('character') & row.targetId.isIn(ids),
+          ))
+          .go();
       await (_db.delete(
         _db.characters,
       )..where((row) => row.charId.isIn(ids))).go();

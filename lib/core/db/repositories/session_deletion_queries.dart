@@ -15,6 +15,10 @@ class SessionDeletionQueries {
     required String? characterId,
     required bool preserveMemoryBookSettings,
   }) async {
+    // The agent run log describes messages that are going away.
+    await (_db.delete(
+      _db.agentRunRows,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
     // Durable rewrite provenance survives clear chat and message/swipe edits.
     // A full session cascade removes it in [_deleteRewriteProvenance].
     if (preserveMemoryBookSettings) {
@@ -140,6 +144,10 @@ class SessionDeletionQueries {
       preserveMemoryBookSettings: false,
     );
     await LorebookUseManifestRepo(_db).deleteBySessionId(sessionId);
+    await (_db.delete(_db.agentBindingRows)..where(
+          (row) => row.scope.equals('chat') & row.targetId.equals(sessionId),
+        ))
+        .go();
     // Child-first ordering keeps this safe when foreign keys are enabled.
     await _deleteRewriteProvenance(sessionId);
     await (_db.delete(

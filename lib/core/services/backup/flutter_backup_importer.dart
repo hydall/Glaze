@@ -154,6 +154,8 @@ class FlutterBackupImporter extends BackupHelpers {
       'folder_members',
       'preset_folders',
       'preset_folder_members',
+      'agent_definitions',
+      'agent_bindings',
       'character_folders',
       'character_folder_members',
       'lorebook_use_manifests',

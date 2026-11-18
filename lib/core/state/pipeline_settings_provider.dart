@@ -91,6 +91,7 @@ class PipelineSettingsNotifier extends StateNotifier<PipelineSettings> {
     'memoryBookApi',
     'cardRewriter',
     'translation',
+    'agents',
   ];
 
   /// Migrates very old installs that use `sidecar*` keys to the current

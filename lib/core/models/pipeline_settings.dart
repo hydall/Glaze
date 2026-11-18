@@ -6,6 +6,7 @@ import 'ledger_settings.dart';
 import 'memory_book_api_settings.dart';
 import 'memory_pipeline_settings.dart';
 import 'translation_settings.dart';
+import 'agents_settings.dart';
 
 part 'pipeline_settings.freezed.dart';
 part 'pipeline_settings.g.dart';
@@ -20,6 +21,7 @@ part 'pipeline_settings.g.dart';
 /// - [memoryBookApi] — MemoryBook draft-generation LLM (model/endpoint/key).
 /// - [cardRewriter] — review-only card-evolution enablement and dedicated LLM.
 /// - [translation] — display-only message / composer translation connection.
+/// - [agents] — the shared helper connection and limits of the agents.
 ///
 /// Singleton global, persisted in SharedPreferences under the 'pipelineSettings'
 /// key (see `pipeline_settings_provider.dart`). Previously per-session in the
@@ -38,6 +40,7 @@ abstract class PipelineSettings with _$PipelineSettings {
     @Default(MemoryBookApiSettings()) MemoryBookApiSettings memoryBookApi,
     @Default(CardRewriterSettings()) CardRewriterSettings cardRewriter,
     @Default(TranslationSettings()) TranslationSettings translation,
+    @Default(AgentsSettings()) AgentsSettings agents,
   }) = _PipelineSettings;
 
   factory PipelineSettings.fromJson(Map<String, dynamic> json) =>

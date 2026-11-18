@@ -258,6 +258,7 @@ MacroResult replaceMacros(String text, MacroContext ctx) {
   result = result.replaceAllMapped(RegExp(r'\{\{\/\/[^}]*\}\}'), (_) => '');
 
   result = replaceExtBlocksMacros(result, ctx.extBlocks);
+  result = replaceAgentMacros(result, ctx.extBlocks);
 
   final resolvedCharName = ctx.macroName ?? ctx.charName;
 
@@ -371,7 +372,7 @@ MacroResult replaceMacros(String text, MacroContext ctx) {
   );
 
   result = result.replaceAllMapped(
-    RegExp(r'\{\{studio_state\}\}', caseSensitive: false),
+    RegExp(r'\{\{(?:studio|tracker)_state\}\}', caseSensitive: false),
     (_) => ctx.studioSessionState ?? '',
   );
 
@@ -727,5 +728,19 @@ String replaceExtBlocksMacros(String text, Map<String, String> blocks) {
       caseSensitive: false,
     ),
     (m) => blocks[m.group(1)!.trim()] ?? '',
+  );
+}
+
+/// Key under which an agent's result travels in [MacroContext.extBlocks].
+String agentMacroKey(String agentId) => 'agent:$agentId';
+
+/// `{{agent::id}}`: the latest result of the agent [id] for this turn, or `''`
+/// when it has none. Results travel in the same map as ExtBlocks values, keyed
+/// by [agentMacroKey].
+String replaceAgentMacros(String text, Map<String, String> values) {
+  if (!text.contains('::')) return text;
+  return text.replaceAllMapped(
+    RegExp(r'\{\{\s*agent\s*::([\s\S]*?)\}\}', caseSensitive: false),
+    (m) => values[agentMacroKey(m.group(1)!.trim())] ?? '',
   );
 }

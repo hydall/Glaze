@@ -37,6 +37,8 @@ class BackupExporter {
   //         preset folders, alongside the existing character folders.
   //  15 — added installed plugins: packages under plugins/ and their data
   //         under plugin_data/ (manifest flag 'plugins').
+  //  agent_definitions and agent_bindings joined without a bump as well: an
+  //  older app skips tables it does not have.
   //  Studio's studio_config_rows and studio_preset_rows left the whitelist
   //  without a bump: nothing else in the format changed, and an archive that
   //  still carries them restores with those tables skipped.
@@ -81,6 +83,8 @@ class BackupExporter {
     'folder_members',
     'preset_folders',
     'preset_folder_members',
+    'agent_definitions',
+    'agent_bindings',
     'memory_catalog_rows',
     'memory_entity_rows',
     'memory_salience_rows',

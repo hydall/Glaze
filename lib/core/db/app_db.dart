@@ -32,6 +32,7 @@ part 'migrations/upgrade_v144.dart';
 part 'migrations/upgrade_v145.dart';
 part 'migrations/upgrade_v146.dart';
 part 'migrations/upgrade_v147.dart';
+part 'migrations/upgrade_v148.dart';
 
 @DriftDatabase(
   tables: [
@@ -91,6 +92,9 @@ part 'migrations/upgrade_v147.dart';
     CanonTransitionFactRefs,
     ExtensionPresets,
     InfoBlocks,
+    AgentDefinitionRows,
+    AgentBindingRows,
+    AgentRunRows,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -99,7 +103,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 147;
+  int get schemaVersion => 148;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -125,6 +129,7 @@ class AppDatabase extends _$AppDatabase {
       await _upgradeV145(m, from);
       await _upgradeV146(m, from);
       await _upgradeV147(m, from);
+      await _upgradeV148(m, from);
       // v140 and v141 have no step of their own: they bring databases already
       // at the previous version through this pass. v140 restores the indexes
       // and triggers their earlier upgrades missed; v141 replaces the request
