@@ -33,8 +33,7 @@ extension RegexPasses on PresetRegex {
   /// Unlike [altersDisplay], an empty list without flags reads as unticked:
   /// that is a script with neither box ticked — SillyTavern's "edit the
   /// message itself" — which the engine runs in every pass.
-  bool get ticksDisplay =>
-      usesStFlags ? markdownOnly : ephemerality.contains(1);
+  bool get ticksDisplay => usesStFlags ? markdownOnly : ephemerality.contains(1);
 
   /// What the editor's "Alter Outgoing Prompt" box shows (see [ticksDisplay]).
   bool get ticksPrompt => usesStFlags ? promptOnly : ephemerality.contains(2);

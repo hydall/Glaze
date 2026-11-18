@@ -42,15 +42,15 @@ class _InputBarState extends State<InputBar> {
     _controller.clear();
   }
 
-  @override
+@override
   Widget build(BuildContext context) {
     final inputContainer = Container(
       constraints: const BoxConstraints(minHeight: 56),
       decoration: BoxDecoration(
-        color: context.cs.surface.withValues(
-          alpha: widget.batterySaver ? 1.0 : 0.8,
+        color: context.cs.surface.withValues(alpha: widget.batterySaver ? 1.0 : 0.8),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.05),
         ),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
         borderRadius: BorderRadius.circular(28),
       ),
       child: TextField(
@@ -67,7 +67,10 @@ class _InputBarState extends State<InputBar> {
           border: InputBorder.none,
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,
-          contentPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+          contentPadding: EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 16,
+          ),
           filled: false,
         ),
       ),
@@ -97,58 +100,43 @@ class _InputBarState extends State<InputBar> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _CircleBtn(
-                      icon: Icons.auto_awesome,
-                      onTap: widget.onMagicDrawer,
-                      batterySaver: widget.batterySaver,
-                    ),
+                    _CircleBtn(icon: Icons.auto_awesome, onTap: widget.onMagicDrawer, batterySaver: widget.batterySaver),
                     const SizedBox(width: 8),
-                    _CircleBtn(
-                      icon: Icons.image_outlined,
-                      batterySaver: widget.batterySaver,
-                    ),
+                    _CircleBtn(icon: Icons.image_outlined, batterySaver: widget.batterySaver),
                     const SizedBox(width: 8),
-                    _CircleBtn(
-                      icon: Icons.fullscreen_rounded,
-                      batterySaver: widget.batterySaver,
-                    ),
+                    _CircleBtn(icon: Icons.fullscreen_rounded, batterySaver: widget.batterySaver),
                   ],
                 ),
-                MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: GestureDetector(
-                    onTap: widget.isGenerating ? widget.onStop : _handleSend,
-                    child: Container(
-                      height: 40,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: context.cs.primary,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            widget.isGenerating
-                                ? 'btn_stop'.tr()
-                                : 'btn_send'.tr(),
-                            style: const TextStyle(
-                              color: Colors.black,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Icon(
-                            widget.isGenerating
-                                ? Icons.stop_rounded
-                                : Icons.send_rounded,
-                            color: Colors.black,
-                            size: 18,
-                          ),
-                        ],
-                      ),
+                MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+                  onTap: widget.isGenerating ? widget.onStop : _handleSend,
+                  child: Container(
+                    height: 40,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: context.cs.primary,
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                  ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.isGenerating ? 'btn_stop'.tr() : 'btn_send'.tr(),
+                          style: const TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Icon(
+                          widget.isGenerating
+                              ? Icons.stop_rounded
+                              : Icons.send_rounded,
+                          color: Colors.black,
+                          size: 18,
+                        ),
+                      ],
+                    ),
+                  )),
                 ),
               ],
             ),
@@ -176,20 +164,17 @@ class _CircleBtn extends StatelessWidget {
       ),
       child: Center(child: Icon(icon, color: context.cs.primary, size: 20)),
     );
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: onTap,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: batterySaver
-              ? container
-              : BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                  child: container,
-                ),
-        ),
-      ),
+    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: batterySaver
+            ? container
+            : BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: container,
+              ),
+      )),
     );
   }
 }

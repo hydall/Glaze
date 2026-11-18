@@ -17,9 +17,7 @@ class JsPresetImporter extends BackupHelpers {
   JsPresetImporter(this.db, this.imageStorage);
 
   Future<void> importPresets(
-    Map<String, dynamic> kv,
-    Map<String, dynamic> ls,
-  ) async {
+      Map<String, dynamic> kv, Map<String, dynamic> ls) async {
     final presetList = <Map<String, dynamic>>[];
 
     for (final source in [kv, ls]) {
@@ -65,9 +63,7 @@ class JsPresetImporter extends BackupHelpers {
     for (final presetJson in presetList) {
       try {
         final preset = mapJsPreset(presetJson);
-        await db
-            .into(db.presets)
-            .insertOnConflictUpdate(
+        await db.into(db.presets).insertOnConflictUpdate(
               PresetsCompanion.insert(
                 presetId: preset.id,
                 name: preset.name,
@@ -79,9 +75,7 @@ class JsPresetImporter extends BackupHelpers {
   }
 
   Future<void> importDeletedEntries(
-    Map<String, dynamic> ls,
-    Map<String, dynamic> kv,
-  ) async {
+      Map<String, dynamic> ls, Map<String, dynamic> kv) async {
     final merged = <String, dynamic>{...kv, ...ls};
     final deletedEntries = <Map<String, dynamic>>[];
 
@@ -107,16 +101,11 @@ class JsPresetImporter extends BackupHelpers {
     if (deletedEntries.isNotEmpty) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
-        'gz_sync_deleted_entries',
-        jsonEncode(deletedEntries),
-      );
+          'gz_sync_deleted_entries', jsonEncode(deletedEntries));
     }
   }
 
-  Future<void> importTheme(
-    Map<String, dynamic> ls,
-    Map<String, dynamic> kv,
-  ) async {
+  Future<void> importTheme(Map<String, dynamic> ls, Map<String, dynamic> kv) async {
     final prefs = await SharedPreferences.getInstance();
 
     final themeState = ls['gz_theme_state'];
@@ -151,11 +140,7 @@ class JsPresetImporter extends BackupHelpers {
 
     if (presetsList == null || presetsList.isEmpty) return;
 
-    final activeId =
-        (ls['gz_theme_active_preset'] ??
-                kv['gz_theme_active_preset'] ??
-                'default')
-            .toString();
+    final activeId = (ls['gz_theme_active_preset'] ?? kv['gz_theme_active_preset'] ?? 'default').toString();
     final storage = await ThemePresetStorage.create();
     final imported = <ThemePreset>[];
 

@@ -19,7 +19,6 @@ typedef GuidedSwipeCallback = void Function(String id, String guidanceText);
 typedef EditSaveCallback = void Function(String id, String text);
 typedef EditCancelCallback = void Function(String id);
 typedef EditFocusCallback = void Function(String id, bool focused);
-
 /// [blockIndex] is the position of the tapped image inside its message, or
 /// null when the element carries no image-gen block (markdown images) — the
 /// handler then falls back to acting on the whole message.

@@ -4,9 +4,8 @@ import 'package:flutter/services.dart';
 /// other platform and on any failure (missing permission, live wallpaper,
 /// SecurityException) so callers can fall back to a plain surface.
 class Wallpaper {
-  static const MethodChannel _channel = MethodChannel(
-    'app.glaze.flutter/wallpaper',
-  );
+  static const MethodChannel _channel =
+      MethodChannel('app.glaze.flutter/wallpaper');
 
   /// Fetches the current home-screen wallpaper as raw PNG bytes. Reads only when
   /// the storage/media permission is already granted — never prompts. Returns

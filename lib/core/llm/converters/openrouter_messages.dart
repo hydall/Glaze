@@ -69,7 +69,10 @@ List<Map<String, dynamic>> cachingSystemPromptForOpenRouter(
   final sys = messages[sysIdx];
   if (sys.containsKey('cache_control')) return messages;
 
-  final cacheControl = <String, dynamic>{'type': 'ephemeral', 'ttl': ?ttl};
+  final cacheControl = <String, dynamic>{
+    'type': 'ephemeral',
+    'ttl': ?ttl,
+  };
 
   final content = sys['content'];
   if (content is List) {
@@ -90,7 +93,11 @@ List<Map<String, dynamic>> cachingSystemPromptForOpenRouter(
     }
   } else if (content is String) {
     sys['content'] = [
-      {'type': 'text', 'text': content, 'cache_control': cacheControl},
+      {
+        'type': 'text',
+        'text': content,
+        'cache_control': cacheControl,
+      },
     ];
   }
 
@@ -109,7 +116,11 @@ void _markCacheControlOnLastPart(Map<String, dynamic> message, String ttl) {
 
   if (content is String) {
     message['content'] = [
-      {'type': 'text', 'text': content, 'cache_control': cacheControl},
+      {
+        'type': 'text',
+        'text': content,
+        'cache_control': cacheControl,
+      },
     ];
     return;
   }

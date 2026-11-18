@@ -299,9 +299,7 @@ class ImageStorageService implements SyncImageStore {
     final file = File(avatarPath);
     if (await file.exists()) await file.delete();
     for (final ext in kThumbnailExtensions) {
-      final thumbFile = File(
-        p.join(baseDir, 'thumbnails', '$characterId.$ext'),
-      );
+      final thumbFile = File(p.join(baseDir, 'thumbnails', '$characterId.$ext'));
       if (await thumbFile.exists()) await thumbFile.delete();
     }
   }

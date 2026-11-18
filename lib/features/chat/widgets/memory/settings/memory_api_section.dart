@@ -59,8 +59,9 @@ class MemoryApiSections {
         modelRows: [
           ApiSlotModelRow(
             value: api.generationModel,
-            onChanged: (value) =>
-                onChanged(api.copyWith(generationModel: value)),
+            onChanged: (value) => onChanged(
+              api.copyWith(generationModel: value),
+            ),
           ),
         ],
         trailingItems: [
@@ -84,13 +85,15 @@ class MemoryApiSections {
                     : null,
               ),
             ),
-            onChanged: (value) =>
-                onChanged(api.copyWith(generationMaxTokens: value.round())),
+            onChanged: (value) => onChanged(
+              api.copyWith(generationMaxTokens: value.round()),
+            ),
           ),
           MenuRangeItem(
             label: 'memory_books_generation_temperature'.tr(),
             description: 'memory_books_generation_temperature_desc'.tr(),
-            value: api.generationTemperature ?? kMemoryDraftDefaultTemperature,
+            value:
+                api.generationTemperature ?? kMemoryDraftDefaultTemperature,
             min: 0,
             max: 2,
             divisions: 200,
@@ -104,8 +107,9 @@ class MemoryApiSections {
                     : null,
               ),
             ),
-            onChanged: (value) =>
-                onChanged(api.copyWith(generationTemperature: value)),
+            onChanged: (value) => onChanged(
+              api.copyWith(generationTemperature: value),
+            ),
           ),
           MenuItem(
             icon: Icons.hub_outlined,

@@ -20,8 +20,7 @@ mixin JsLorebookMapper on TypeConverters {
   Map<String, dynamic> mapJsLorebookEntry(Map<String, dynamic> e) {
     final keys = toStringList(e['keys'] ?? e['key']);
     final secondaryKeys = toStringList(
-      e['secondaryKeys'] ?? e['secondary_keys'] ?? e['keysecondary'],
-    );
+        e['secondaryKeys'] ?? e['secondary_keys'] ?? e['keysecondary']);
 
     var enabled = e['enabled'] as bool?;
     if (enabled == null) {

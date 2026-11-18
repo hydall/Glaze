@@ -21,17 +21,17 @@ class ModelFetcher {
   /// rejects the request, so an empty result means "nothing to offer", not
   /// necessarily an error.
   static Future<List<String>> fetchModelIds(ApiConfig config) async {
-    final models = await pickChatTransportFor(
-      config,
-    ).fetchModels(endpoint: config.endpoint, apiKey: config.apiKey);
-    final ids =
-        models
-            .map((m) => m['id'])
-            .whereType<String>()
-            .where((id) => id.trim().isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort();
+    final models = await pickChatTransportFor(config).fetchModels(
+      endpoint: config.endpoint,
+      apiKey: config.apiKey,
+    );
+    final ids = models
+        .map((m) => m['id'])
+        .whereType<String>()
+        .where((id) => id.trim().isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
     if (config.model.isNotEmpty && !ids.contains(config.model)) {
       ids.insert(0, config.model);
     }

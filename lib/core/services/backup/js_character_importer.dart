@@ -38,9 +38,7 @@ class JsCharacterImporter extends BackupHelpers {
       }
       await imageStorage.ensureThumbnailForAvatarPath(avatarPath);
 
-      await db
-          .into(db.characters)
-          .insertOnConflictUpdate(
+      await db.into(db.characters).insertOnConflictUpdate(
             CharactersCompanion.insert(
               charId: char['id'] as String? ?? '',
               name: char['name'] as String? ?? '',
@@ -51,33 +49,25 @@ class JsCharacterImporter extends BackupHelpers {
               firstMes: Value(char['first_mes'] as String?),
               mesExample: Value(char['mes_example'] as String?),
               systemPrompt: Value(char['system_prompt'] as String?),
-              postHistoryInstructions: Value(
-                char['post_history_instructions'] as String?,
-              ),
+              postHistoryInstructions:
+                  Value(char['post_history_instructions'] as String?),
               creator: Value(char['creator'] as String?),
               creatorNotes: Value(char['creator_notes'] as String?),
               color: Value(char['color'] as String?),
               tagsJson: Value(
-                char['tags'] != null ? jsonEncode(char['tags']) : null,
-              ),
+                  char['tags'] != null ? jsonEncode(char['tags']) : null),
               alternateGreetingsJson: Value(
-                char['alternate_greetings'] != null
-                    ? jsonEncode(char['alternate_greetings'])
-                    : null,
-              ),
+                  char['alternate_greetings'] != null
+                      ? jsonEncode(char['alternate_greetings'])
+                      : null),
               updatedAt: Value(base + i),
-              createdAt: Value(
-                _originalTimestamp(char) > 0
-                    ? _originalTimestamp(char)
-                    : base + i,
-              ),
+              createdAt: Value(_originalTimestamp(char) > 0 ? _originalTimestamp(char) : base + i),
               fav: Value(char['fav'] == true),
               extensionsJson: Value(extractExtensionsJson(char)),
               characterVersion: Value(
-                char['character_version'] is String
-                    ? char['character_version'] as String
-                    : '1',
-              ),
+                  char['character_version'] is String
+                      ? char['character_version'] as String
+                      : '1'),
               macroName: Value(char['macro_name'] as String?),
             ),
           );
@@ -85,12 +75,8 @@ class JsCharacterImporter extends BackupHelpers {
   }
 
   int _originalTimestamp(Map<String, dynamic> char) {
-    final raw = toInt(
-      char['updatedAt'] ??
-          char['updated_at'] ??
-          char['creation_date'] ??
-          char['created_at'],
-    );
+    final raw = toInt(char['updatedAt'] ?? char['updated_at'] ??
+        char['creation_date'] ?? char['created_at']);
     if (raw == null) return 0;
     if (raw > 1e12) return raw ~/ 1000;
     return raw;
@@ -111,20 +97,15 @@ class JsCharacterImporter extends BackupHelpers {
       }
       await imageStorage.ensureThumbnailForAvatarPath(avatarPath);
 
-      await db
-          .into(db.personas)
-          .insertOnConflictUpdate(
+      await db.into(db.personas).insertOnConflictUpdate(
             PersonasCompanion.insert(
               personaId: per['id'] as String? ?? '',
               name: per['name'] as String? ?? '',
               prompt: Value(
-                per['prompt'] as String? ?? per['description'] as String?,
-              ),
+                  per['prompt'] as String? ?? per['description'] as String?),
               avatarPath: Value(avatarPath),
-              createdAt: Value(
-                toInt(per['createdAt'] ?? per['created_at']) ??
-                    currentTimestampSeconds(),
-              ),
+              createdAt: Value(toInt(per['createdAt'] ?? per['created_at']) ??
+                  currentTimestampSeconds()),
             ),
           );
     }
@@ -138,8 +119,7 @@ class JsCharacterImporter extends BackupHelpers {
       final charId = char['id'] as String?;
       if (charId == null) continue;
 
-      final galleryRaw =
-          char['images'] ??
+      final galleryRaw = char['images'] ??
           char['gallery'] ??
           char['data']?['extensions']?['gallery'];
       if (galleryRaw is! List || galleryRaw.isEmpty) continue;
@@ -162,8 +142,8 @@ class JsCharacterImporter extends BackupHelpers {
           final ext = mime == 'image/png'
               ? 'png'
               : mime == 'image/webp'
-              ? 'webp'
-              : 'jpg';
+                  ? 'webp'
+                  : 'jpg';
           imagePath = await imageStorage.saveBytes(
             bytes,
             'gallery/$charId',
@@ -184,11 +164,11 @@ class JsCharacterImporter extends BackupHelpers {
       }
 
       if (galleryEntries.isNotEmpty) {
-        await (db.update(
-          db.characters,
-        )..where((t) => t.charId.equals(charId))).write(
-          CharactersCompanion(galleryJson: Value(jsonEncode(galleryEntries))),
-        );
+        await (db.update(db.characters)
+              ..where((t) => t.charId.equals(charId)))
+            .write(CharactersCompanion(
+          galleryJson: Value(jsonEncode(galleryEntries)),
+        ));
       }
     }
   }

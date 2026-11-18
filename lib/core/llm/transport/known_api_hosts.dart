@@ -40,7 +40,9 @@ class KnownApiHosts {
 
   /// Hosts that speak the Gemini native API (`/v1beta/models/…`). The version
   /// segment is added by the transport, so the base path is empty.
-  static const Set<String> geminiNative = {'generativelanguage.googleapis.com'};
+  static const Set<String> geminiNative = {
+    'generativelanguage.googleapis.com',
+  };
 
   /// Returns the canonical base path for [host], or `null` when the host is
   /// unknown. [host] is matched case-insensitively, with any port stripped.

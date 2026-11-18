@@ -6,8 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'platform_paths.dart';
 
 const Map<String, String> _baseImageFetchHeaders = {
-  'User-Agent':
-      'Mozilla/5.0 (compatible) AppleWebKit/537.36 (KHTML, like Gecko)'
+  'User-Agent': 'Mozilla/5.0 (compatible) AppleWebKit/537.36 (KHTML, like Gecko)'
       ' Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
 };
@@ -75,10 +74,7 @@ ImageProvider? imageProviderForSrc(String src) {
     // The UA matters: several image CDNs answer 403 to the bare Dart client
     // (`Dart/3.x (dart:io)`) while happily serving the same URL to the WebView,
     // which is exactly the "renders in the message, blank in the viewer" case.
-    return CachedNetworkImageProvider(
-      trimmed,
-      headers: _imageFetchHeaders(trimmed),
-    );
+    return CachedNetworkImageProvider(trimmed, headers: _imageFetchHeaders(trimmed));
   }
 
   return _fileProvider(imageSrcToFilePath(trimmed));

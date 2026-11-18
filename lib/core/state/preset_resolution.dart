@@ -51,16 +51,16 @@ typedef EffectivePresetChatKey = ({String charId, String? sessionId});
 /// ```
 final effectivePresetForChatProvider =
     Provider.family<Preset?, EffectivePresetChatKey>((ref, key) {
-      final presetsAsync = ref.watch(presetListProvider);
-      if (!presetsAsync.hasValue) return null;
+  final presetsAsync = ref.watch(presetListProvider);
+  if (!presetsAsync.hasValue) return null;
 
-      final globalPresetId = ref.watch(activePresetIdProvider);
-      final connections = ref.watch(presetConnectionsProvider);
-      return getEffectivePreset(
-        presetsAsync.requireValue,
-        key.charId,
-        key.sessionId,
-        globalPresetId,
-        connections,
-      );
-    });
+  final globalPresetId = ref.watch(activePresetIdProvider);
+  final connections = ref.watch(presetConnectionsProvider);
+  return getEffectivePreset(
+    presetsAsync.requireValue,
+    key.charId,
+    key.sessionId,
+    globalPresetId,
+    connections,
+  );
+});

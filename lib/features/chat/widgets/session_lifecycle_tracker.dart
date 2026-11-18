@@ -12,20 +12,13 @@ import '../unread_sessions_provider.dart';
 class SessionLifecycleTracker extends ConsumerStatefulWidget {
   final String charId;
   final Widget child;
-  const SessionLifecycleTracker({
-    super.key,
-    required this.charId,
-    required this.child,
-  });
+  const SessionLifecycleTracker({super.key, required this.charId, required this.child});
 
   @override
-  ConsumerState<SessionLifecycleTracker> createState() =>
-      _SessionLifecycleTrackerState();
+  ConsumerState<SessionLifecycleTracker> createState() => _SessionLifecycleTrackerState();
 }
 
-class _SessionLifecycleTrackerState
-    extends ConsumerState<SessionLifecycleTracker>
-    with WidgetsBindingObserver {
+class _SessionLifecycleTrackerState extends ConsumerState<SessionLifecycleTracker> with WidgetsBindingObserver {
   DateTime? _enteredAt;
 
   @override
@@ -78,8 +71,7 @@ class _SessionLifecycleTrackerState
           widget.charId,
         ),
       );
-    } else if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _flushTime();
     }
   }

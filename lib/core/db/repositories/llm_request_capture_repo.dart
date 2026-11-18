@@ -113,7 +113,9 @@ final class LlmRequestCaptureRepo
     int limit = maxRowsWithoutSession,
   }) {
     final query = db.select(db.llmRequestCaptureRows)
-      ..where((row) => row.sessionId.isNull() & row.stage.like('embedding%'))
+      ..where(
+        (row) => row.sessionId.isNull() & row.stage.like('embedding%'),
+      )
       ..orderBy([
         (row) => OrderingTerm.desc(row.createdAtMs),
         (row) => OrderingTerm.desc(row.id),

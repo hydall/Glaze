@@ -8,19 +8,17 @@ int? _toInt(dynamic value) {
 }
 
 Map<String, dynamic> normalizeJsMessage(
-  Map<String, dynamic> msg,
-  String charId,
-  int sessionIdx,
-  int mi,
-) {
+    Map<String, dynamic> msg, String charId, int sessionIdx, int mi) {
   var role = msg['role'] as String? ?? 'user';
   if (role == 'char') role = 'assistant';
 
   final content =
       (msg['text'] is String ? msg['text'] as String : null) ??
-      (msg['content'] is String ? msg['content'] as String : null) ??
-      (msg['mes'] is String ? msg['mes'] as String : null) ??
-      '';
+          (msg['content'] is String
+              ? msg['content'] as String
+              : null) ??
+          (msg['mes'] is String ? msg['mes'] as String : null) ??
+          '';
 
   final swipes = <String>[];
   final rawSwipes = msg['swipes'];
@@ -48,7 +46,8 @@ Map<String, dynamic> normalizeJsMessage(
   }
 
   return {
-    'id': msg['id']?.toString() ?? '${charId}_${sessionIdx}_$mi',
+    'id': msg['id']?.toString() ??
+        '${charId}_${sessionIdx}_$mi',
     'role': role,
     'content': content,
     'timestamp': msg['timestamp'],
@@ -61,17 +60,20 @@ Map<String, dynamic> normalizeJsMessage(
     'isError': msg['isError'] ?? false,
     'genTime': msg['genTime']?.toString(),
     'tokens': _toInt(msg['tokens']),
-    'greetingIndex': _toInt(msg['greetingIndex'] ?? msg['greeting_index']),
+    'greetingIndex':
+        _toInt(msg['greetingIndex'] ?? msg['greeting_index']),
     'contextRefs': msg['contextRefs'] is List
         ? List<String>.from((msg['contextRefs'] as List).whereType<String>())
         : <String>[],
     'swipeDirection': msg['swipeDirection'] is String
         ? msg['swipeDirection']
         : (msg['swipe_direction'] is String
-              ? msg['swipe_direction'] as String
-              : 'none'),
-    'isEditing': msg['isEditing'] == true || msg['is_editing'] == true,
-    'isTyping': msg['isTyping'] == true || msg['is_typing'] == true,
+            ? msg['swipe_direction'] as String
+            : 'none'),
+    'isEditing':
+        msg['isEditing'] == true || msg['is_editing'] == true,
+    'isTyping':
+        msg['isTyping'] == true || msg['is_typing'] == true,
     'guidanceText': msg['guidanceText'] is String
         ? msg['guidanceText'] as String
         : null,
@@ -83,24 +85,19 @@ Map<String, dynamic> normalizeJsMessage(
         : <TriggeredEntry>[],
     'triggeredMemories': msg['triggeredMemories'] is List
         ? parseTriggeredEntries(msg['triggeredMemories'] as List)
-              .map(
-                (e) => TriggeredEntry(
-                  id: e.id,
-                  name: e.name,
-                  lorebookName: e.lorebookName,
-                  lorebookId: e.lorebookId,
-                  source: 'memory',
-                ),
-              )
-              .toList()
+            .map((e) => TriggeredEntry(id: e.id, name: e.name, lorebookName: e.lorebookName, lorebookId: e.lorebookId, source: 'memory'))
+            .toList()
         : <TriggeredEntry>[],
     'swipesMeta': msg['swipesMeta'] is List
-        ? (msg['swipesMeta'] as List).whereType<Map<String, dynamic>>().toList()
+        ? (msg['swipesMeta'] as List)
+            .whereType<Map<String, dynamic>>()
+            .toList()
         : <Map<String, dynamic>>[],
     'memoryCoverage': msg['memoryCoverage'] is Map
         ? Map<String, dynamic>.from(msg['memoryCoverage'] as Map)
         : <String, dynamic>{},
-    'time': msg['time'] is String ? msg['time'] as String : null,
+    'time':
+        msg['time'] is String ? msg['time'] as String : null,
   };
 }
 
@@ -112,10 +109,7 @@ List<TriggeredEntry> parseTriggeredEntries(List<dynamic> raw) {
         name: item['name'] as String? ?? item['comment'] as String? ?? '',
         lorebookName: item['lorebookName'] as String? ?? '',
         lorebookId: item['lorebookId'] as String? ?? '',
-        source:
-            item['_source'] as String? ??
-            item['source'] as String? ??
-            'keyword',
+        source: item['_source'] as String? ?? item['source'] as String? ?? 'keyword',
       );
     }
     if (item is String) {

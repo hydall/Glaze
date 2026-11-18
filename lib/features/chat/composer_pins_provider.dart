@@ -157,8 +157,7 @@ class ComposerPin {
     if (refId.isEmpty) return null;
     for (final kind in ComposerPinKind.values) {
       if (kind.name != name) continue;
-      if (kind == ComposerPinKind.action &&
-          ComposerAction.byId(refId) == null) {
+      if (kind == ComposerPinKind.action && ComposerAction.byId(refId) == null) {
         return null;
       }
       return ComposerPin(kind: kind, refId: refId);
@@ -206,8 +205,7 @@ class ComposerPinsNotifier extends AsyncNotifier<List<ComposerPin>> {
   Future<List<ComposerPin>> build() async {
     final prefs = await ref.read(sharedPreferencesProvider.future);
     final saved =
-        prefs.getStringList(storageKey) ??
-        prefs.getStringList(legacyStorageKey);
+        prefs.getStringList(storageKey) ?? prefs.getStringList(legacyStorageKey);
     if (saved == null) return List<ComposerPin>.from(kDefaultComposerPins);
     return _withPermanents(decodeAll(saved));
   }

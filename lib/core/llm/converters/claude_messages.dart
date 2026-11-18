@@ -98,8 +98,7 @@ ClaudeConversionResult convertClaudeMessages(
       m['content'] = [
         if (thinkingBlocks is List) ...thinkingBlocks,
         if (text.trim().isNotEmpty) {'type': 'text', 'text': text},
-        for (final call in toolCalls.whereType<Map<dynamic, dynamic>>())
-          _toolUseBlock(call),
+        for (final call in toolCalls.whereType<Map<dynamic, dynamic>>()) _toolUseBlock(call),
       ];
       m.remove('name');
       continue;

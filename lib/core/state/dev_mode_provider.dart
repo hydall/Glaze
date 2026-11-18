@@ -46,8 +46,8 @@ class DevModeNotifier extends Notifier<bool> {
 /// dev setting, so it takes unlocking dev mode in About first.
 final hideBuildWatermarkProvider =
     NotifierProvider<HideBuildWatermarkNotifier, bool>(
-      HideBuildWatermarkNotifier.new,
-    );
+  HideBuildWatermarkNotifier.new,
+);
 
 class HideBuildWatermarkNotifier extends Notifier<bool> {
   static const _prefsKey = 'hideBuildWatermark';

@@ -37,10 +37,10 @@ WebViewEnvironment? get chatWebViewEnvironment => _chatWebViewEnvironment;
 /// controller should also pass it as `webViewController`, so the request runs
 /// on that WebView and no throwaway is created at all.
 CookieManager webViewCookieManager() => CookieManager.instance(
-  webViewEnvironment: defaultTargetPlatform == TargetPlatform.windows
-      ? _chatWebViewEnvironment
-      : null,
-);
+      webViewEnvironment: defaultTargetPlatform == TargetPlatform.windows
+          ? _chatWebViewEnvironment
+          : null,
+    );
 
 /// Cleaned-up User-Agent for the janitorai WebViews, or `null` to keep the
 /// native UA (no override).

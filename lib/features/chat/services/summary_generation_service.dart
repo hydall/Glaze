@@ -233,7 +233,8 @@ class SummaryGenerationService {
         final blocks = await _cleanBlocks(session.id, messages);
         final counts = _count(blocks, messages);
         final summaryTokens = counts.summaryTokens;
-        final used = budget.fixedTokens + summaryTokens + counts.historyTokens;
+        final used =
+            budget.fixedTokens + summaryTokens + counts.historyTokens;
 
         if (summaryTokens > budget.total * settings.mergePercent ~/ 100) {
           final parts = SummaryChain.mergeCandidate(

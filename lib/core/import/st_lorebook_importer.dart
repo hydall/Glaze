@@ -10,10 +10,7 @@ import '../models/lorebook.dart';
 class STLorebookImportResult {
   final Lorebook lorebook;
   final int entryCount;
-  const STLorebookImportResult({
-    required this.lorebook,
-    required this.entryCount,
-  });
+  const STLorebookImportResult({required this.lorebook, required this.entryCount});
 }
 
 LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
@@ -23,11 +20,7 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
   final rawSecondary = e['secondary_keys'] ?? e['keysecondary'] ?? <dynamic>[];
 
   List<String> parseKeys(dynamic v) {
-    if (v is List)
-      return v
-          .map((k) => k.toString().trim())
-          .where((k) => k.isNotEmpty)
-          .toList();
+    if (v is List) return v.map((k) => k.toString().trim()).where((k) => k.isNotEmpty).toList();
     if (v is String && v.isNotEmpty) return splitLorebookKeys(v);
     return [];
   }
@@ -52,12 +45,7 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
       return 'matchGlobal';
     }
     if (stPosition is String) {
-      if ([
-        'worldInfoBefore',
-        'worldInfoAfter',
-        'lorebooksMacro',
-        'matchGlobal',
-      ].contains(stPosition)) {
+      if (['worldInfoBefore', 'worldInfoAfter', 'lorebooksMacro', 'matchGlobal'].contains(stPosition)) {
         return stPosition;
       }
     }
@@ -65,14 +53,11 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
   }
 
   final rawFilter = e['characterFilter'];
-  LorebookCharacterFilter? charFilter =
-      _parseCharacterFilter(rawFilter) ??
+  LorebookCharacterFilter? charFilter = _parseCharacterFilter(rawFilter) ??
       _parseCharacterFilter(glazeMeta?['characterFilter']);
 
   return LorebookEntry(
-    id:
-        (e['uid']?.toString()) ??
-        '${DateTime.now().millisecondsSinceEpoch}_$index',
+    id: (e['uid']?.toString()) ?? '${DateTime.now().millisecondsSinceEpoch}_$index',
     comment: (e['comment'] as String?) ?? '',
     enabled: e['enabled'] != false && e['disable'] != true,
     constant: (e['constant'] as bool?) ?? false,
@@ -94,9 +79,7 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
     matchWholeWords: e['matchWholeWords'] as bool?,
     probability: (e['probability'] as int?) ?? 100,
     preventRecursion:
-        (e['preventRecursion'] as bool?) ??
-        (e['excludeRecursion'] as bool?) ??
-        false,
+        (e['preventRecursion'] as bool?) ?? (e['excludeRecursion'] as bool?) ?? false,
     sticky: (e['sticky'] as int?) ?? 0,
     cooldown: (e['cooldown'] as int?) ?? 0,
     delay: (e['delay'] as int?) ?? 0,
@@ -105,16 +88,12 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
         (e['groupProminence'] as int?) ?? (e['groupWeight'] as int?) ?? 100,
     characterFilter: charFilter,
     ignoreBudget:
-        (e['ignoreBudget'] as bool?) ??
-        (glazeMeta?['ignoreBudget'] as bool?) ??
-        false,
-    vectorSearch:
-        (e['vectorSearch'] as bool?) ??
+        (e['ignoreBudget'] as bool?) ?? (glazeMeta?['ignoreBudget'] as bool?) ?? false,
+    vectorSearch: (e['vectorSearch'] as bool?) ??
         (e['vector_search'] as bool?) ??
         (glazeMeta?['vectorSearch'] as bool?) ??
         false,
-    useKeywordSearch:
-        (e['useKeywordSearch'] as bool?) ??
+    useKeywordSearch: (e['useKeywordSearch'] as bool?) ??
         (e['use_keyword_search'] as bool?) ??
         (glazeMeta?['useKeywordSearch'] as bool?) ??
         true,
@@ -129,17 +108,13 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
 /// - bare name list `[...]` or a single `'Name'` string.
 LorebookCharacterFilter? _parseCharacterFilter(dynamic raw) {
   if (raw is Map) {
-    final names =
-        (raw['names'] as List?)
+    final names = (raw['names'] as List?)
             ?.map((n) => n.toString())
             .where((n) => n.isNotEmpty)
             .toList() ??
         const <String>[];
     if (names.isEmpty) return null;
-    return LorebookCharacterFilter(
-      names: names,
-      isExclude: raw['isExclude'] == true,
-    );
+    return LorebookCharacterFilter(names: names, isExclude: raw['isExclude'] == true);
   }
   if (raw is List && raw.isNotEmpty) {
     return LorebookCharacterFilter(
@@ -152,17 +127,11 @@ LorebookCharacterFilter? _parseCharacterFilter(dynamic raw) {
   return null;
 }
 
-Future<STLorebookImportResult> importSTLorebookFromFile(
-  String filePath, {
-  String? nameOverride,
-}) async {
+Future<STLorebookImportResult> importSTLorebookFromFile(String filePath, {String? nameOverride}) async {
   final file = File(filePath);
   final jsonString = await file.readAsString();
   final json = jsonDecode(jsonString) as Map<String, dynamic>;
-  return importSTLorebook(
-    json,
-    nameOverride: nameOverride ?? file.uri.pathSegments.last,
-  );
+  return importSTLorebook(json, nameOverride: nameOverride ?? file.uri.pathSegments.last);
 }
 
 /// The book-level `glazeMetadata` a Glaze export writes, when this file came
@@ -239,10 +208,7 @@ STLorebookImportResult _importEmbeddedCharacterBook(
   );
 }
 
-STLorebookImportResult importSTLorebook(
-  Map<String, dynamic> json, {
-  String nameOverride = 'Imported',
-}) {
+STLorebookImportResult importSTLorebook(Map<String, dynamic> json, {String nameOverride = 'Imported'}) {
   // A character card is not a World Info file. When the file has no top-level
   // entries of its own, read its embedded `character_book` instead of reporting
   // an empty import.

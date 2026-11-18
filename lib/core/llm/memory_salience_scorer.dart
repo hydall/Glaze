@@ -27,28 +27,10 @@ class MemorySalienceScorer {
     'death': ['death', 'died', 'dead', 'killed', 'slain', 'killing', 'murder'],
     'promise': ['promise', 'promised', 'vow', 'vowed', 'oath', 'swore'],
     'confession': ['confession', 'confessed', 'admitted', 'confess'],
-    'first_meeting': [
-      'first meeting',
-      'first met',
-      'first saw',
-      'first time they met',
-    ],
+    'first_meeting': ['first meeting', 'first met', 'first saw', 'first time they met'],
     'battle': ['battle', 'fought', 'fight', 'combat', 'skirmish', 'ambush'],
-    'discovery': [
-      'discovered',
-      'discovery',
-      'found out',
-      'uncovered',
-      'revealed',
-    ],
-    'departure': [
-      'departure',
-      'departed',
-      'left',
-      'leaving',
-      'farewell',
-      'goodbye',
-    ],
+    'discovery': ['discovered', 'discovery', 'found out', 'uncovered', 'revealed'],
+    'departure': ['departure', 'departed', 'left', 'leaving', 'farewell', 'goodbye'],
   };
 
   /// Scores a [MemoryEntry] and returns a [MemorySalience] record.
@@ -59,10 +41,7 @@ class MemorySalienceScorer {
   }) {
     final now = nowSeconds ?? currentTimestampSeconds();
     final text = '${entry.title} ${entry.content}'.toLowerCase();
-    final wordCount = entry.content
-        .split(RegExp(r'\s+'))
-        .where((w) => w.isNotEmpty)
-        .length;
+    final wordCount = entry.content.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
 
     final emotionalTags = <String>[];
     var emotionalComponent = 0.0;
@@ -71,13 +50,11 @@ class MemorySalienceScorer {
         emotionalTags.add(entry_.key);
       }
     }
-    if (emotionalTags.any(
-      (t) => t == 'grief' || t == 'betrayal' || t == 'tension' || t == 'dread',
-    )) {
+    if (emotionalTags.any((t) =>
+        t == 'grief' || t == 'betrayal' || t == 'tension' || t == 'dread')) {
       emotionalComponent = 0.3;
-    } else if (emotionalTags.any(
-      (t) => t == 'joy' || t == 'resolve' || t == 'humor',
-    )) {
+    } else if (emotionalTags
+        .any((t) => t == 'joy' || t == 'resolve' || t == 'humor')) {
       emotionalComponent = 0.2;
     }
 
@@ -88,34 +65,29 @@ class MemorySalienceScorer {
         narrativeFlags.add(entry_.key);
       }
     }
-    if (narrativeFlags.any(
-      (f) => f == 'death' || f == 'promise' || f == 'confession',
-    )) {
+    if (narrativeFlags
+        .any((f) => f == 'death' || f == 'promise' || f == 'confession')) {
       narrativeComponent = 0.4;
-    } else if (narrativeFlags.any(
-      (f) =>
-          f == 'first_meeting' ||
-          f == 'battle' ||
-          f == 'discovery' ||
-          f == 'departure',
-    )) {
+    } else if (narrativeFlags.any((f) =>
+        f == 'first_meeting' ||
+        f == 'battle' ||
+        f == 'discovery' ||
+        f == 'departure')) {
       narrativeComponent = 0.2;
     }
 
     final importanceComponent = (entry.importance.clamp(0, 1)) * 0.3;
     final lengthComponent = min(0.1, wordCount / 500);
 
-    final score =
-        (emotionalComponent +
-                narrativeComponent +
-                importanceComponent +
-                lengthComponent)
-            .clamp(0.0, 1.0);
+    final score = (emotionalComponent +
+            narrativeComponent +
+            importanceComponent +
+            lengthComponent)
+        .clamp(0.0, 1.0);
 
     final hasDialogue = RegExp(r'"[^"]*"|"[^"]*"').hasMatch(entry.content);
-    final hasAction = RegExp(
-      r'\b(said|walked|ran|grabbed|struck|looked|turned|stepped|reached)\b',
-    ).hasMatch(entry.content.toLowerCase());
+    final hasAction = RegExp(r'\b(said|walked|ran|grabbed|struck|looked|turned|stepped|reached)\b')
+        .hasMatch(entry.content.toLowerCase());
 
     return MemorySalience(
       id: 'salience_${entry.id}',

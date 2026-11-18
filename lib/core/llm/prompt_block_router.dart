@@ -15,14 +15,7 @@ class PromptBlockRouter {
     StudioStage.scenarioWriter: {'scenario', 'continuity'},
     StudioStage.director: {'director', 'style', 'continuity'},
     StudioStage.operator: {'operator', 'staging'},
-    StudioStage.mainResponder: {
-      'style',
-      'prose',
-      'intimacy',
-      'violence',
-      'utility',
-      'final',
-    },
+    StudioStage.mainResponder: {'style', 'prose', 'intimacy', 'violence', 'utility', 'final'},
   };
 
   /// Classify a block name into a shard category.
@@ -34,64 +27,50 @@ class PromptBlockRouter {
     if (lower.contains('memory') || lower.contains('recall')) return 'memory';
 
     // Scenario / arc — checked before continuity (arc is more specific to scenario)
-    if (lower.contains('scenario') ||
-        lower.contains('arc') ||
-        lower.contains('plot') ||
-        lower.contains('quest') ||
+    if (lower.contains('scenario') || lower.contains('arc') ||
+        lower.contains('plot') || lower.contains('quest') ||
         lower.contains('story')) {
       return 'scenario';
     }
 
     // Continuity (state, tracker, relationship)
-    if (lower.contains('continuity') ||
-        lower.contains('tracker') ||
-        lower.contains('state') ||
-        lower.contains('relationship')) {
+    if (lower.contains('continuity') || lower.contains('tracker') ||
+        lower.contains('state') || lower.contains('relationship')) {
       return 'continuity';
     }
 
     // Director
-    if (lower.contains('director') ||
-        lower.contains('tone') ||
-        lower.contains('pacing') ||
-        lower.contains('mood')) {
+    if (lower.contains('director') || lower.contains('tone') ||
+        lower.contains('pacing') || lower.contains('mood')) {
       return 'director';
     }
 
     // Operator / staging
-    if (lower.contains('operator') ||
-        lower.contains('staging') ||
-        lower.contains('camera') ||
-        lower.contains('blocking') ||
+    if (lower.contains('operator') || lower.contains('staging') ||
+        lower.contains('camera') || lower.contains('blocking') ||
         lower.contains('sensory')) {
       return 'operator';
     }
 
     // Style / prose
-    if (lower.contains('style') ||
-        lower.contains('prose') ||
-        lower.contains('writing') ||
-        lower.contains('language')) {
+    if (lower.contains('style') || lower.contains('prose') ||
+        lower.contains('writing') || lower.contains('language')) {
       return 'style';
     }
 
     // Intimacy / violence
-    if (lower.contains('intimacy') ||
-        lower.contains('romance') ||
+    if (lower.contains('intimacy') || lower.contains('romance') ||
         lower.contains('nsfw')) {
       return 'intimacy';
     }
-    if (lower.contains('violence') ||
-        lower.contains('combat') ||
+    if (lower.contains('violence') || lower.contains('combat') ||
         lower.contains('action')) {
       return 'violence';
     }
 
     // Utility / OOC
-    if (lower.contains('utility') ||
-        lower.contains('ooc') ||
-        lower.contains('system') ||
-        lower.contains('instruction')) {
+    if (lower.contains('utility') || lower.contains('ooc') ||
+        lower.contains('system') || lower.contains('instruction')) {
       return 'utility';
     }
 
@@ -109,13 +88,11 @@ class PromptBlockRouter {
     final allowedShards = stageShards[stage] ?? const {};
     return blocks
         .where((b) => allowedShards.contains(b.shard))
-        .map(
-          (b) => PresetBlockShard(
-            name: b.name,
-            content: b.content,
-            shard: b.shard,
-          ),
-        )
+        .map((b) => PresetBlockShard(
+              name: b.name,
+              content: b.content,
+              shard: b.shard,
+            ))
         .toList();
   }
 }
@@ -141,11 +118,7 @@ class PresetBlockInfo {
     required this.shard,
   });
 
-  factory PresetBlockInfo.classify(
-    String name,
-    String content, {
-    String? category,
-  }) {
+  factory PresetBlockInfo.classify(String name, String content, {String? category}) {
     return PresetBlockInfo(
       name: name,
       content: content,

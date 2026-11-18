@@ -112,47 +112,41 @@ class ChatHeader extends ConsumerWidget {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: onTapAvatar,
-              child: avatar,
-            ),
-          ),
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTapAvatar,
+            child: avatar,
+          )),
           const SizedBox(width: 8),
           Flexible(
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onTapInfo,
-                child: Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                        text: character.name,
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 14 * scale,
-                          fontWeight: FontWeight.w600,
-                        ),
+            child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onTapInfo,
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: character.name,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 14 * scale,
+                        fontWeight: FontWeight.w600,
                       ),
-                      TextSpan(
-                        text: '   $sessionName',
-                        style: TextStyle(
-                          color: secondaryColor,
-                          fontSize: 12 * scale,
-                        ),
+                    ),
+                    TextSpan(
+                      text: '   $sessionName',
+                      style: TextStyle(
+                        color: secondaryColor,
+                        fontSize: 12 * scale,
                       ),
-                    ],
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(letterSpacing: letterSpacing),
+                    ),
+                  ],
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(letterSpacing: letterSpacing),
               ),
-            ),
+            )),
           ),
           ?trailing,
         ],
@@ -164,57 +158,51 @@ class ChatHeader extends ConsumerWidget {
       // of its own that the desktop search field can take over.
       mainAxisSize: trailing == null ? MainAxisSize.max : MainAxisSize.min,
       children: [
-        MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onTapAvatar,
-            child: avatar,
-          ),
-        ),
+        MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTapAvatar,
+          child: avatar,
+        )),
         const SizedBox(width: 10),
         // With a trailing widget the text block only takes its own width, so
         // the trailing one lands right after the session line.
         Flexible(
           fit: trailing == null ? FlexFit.tight : FlexFit.loose,
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: onTapInfo,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    character.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: textColor,
-                      fontSize: 16 * scale,
-                      fontWeight: FontWeight.w600,
-                      height: 1.1,
-                      letterSpacing: letterSpacing,
-                    ),
+          child: MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTapInfo,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  character.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 16 * scale,
+                    fontWeight: FontWeight.w600,
+                    height: 1.1,
+                    letterSpacing: letterSpacing,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    sessionName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: secondaryColor,
-                      fontSize: 12 * scale,
-                      fontWeight: FontWeight.w400,
-                      height: 1.1,
-                      letterSpacing: letterSpacing,
-                    ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  sessionName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: secondaryColor,
+                    fontSize: 12 * scale,
+                    fontWeight: FontWeight.w400,
+                    height: 1.1,
+                    letterSpacing: letterSpacing,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ),
+          )),
         ),
         ?trailing,
       ],

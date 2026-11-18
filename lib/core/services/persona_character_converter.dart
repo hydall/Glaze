@@ -17,11 +17,7 @@ import '../utils/time_helpers.dart';
 /// Copies the avatar at [srcPath] into a fresh avatar file owned by [newId] so
 /// the new entity never shares (and later orphans) the source's image. Returns
 /// the saved path, or `null` when there is nothing to copy or the copy fails.
-Future<String?> _copyAvatar(
-  WidgetRef ref,
-  String? srcPath,
-  String newId,
-) async {
+Future<String?> _copyAvatar(WidgetRef ref, String? srcPath, String newId) async {
   final src = srcPath?.trim();
   if (src == null || src.isEmpty) return null;
   try {
@@ -67,11 +63,7 @@ Future<Persona> convertCharacterToPersona(
   Character character,
 ) async {
   final newId = generateId();
-  final avatarPath = await _copyAvatar(
-    ref,
-    character.avatarPath,
-    'persona_$newId',
-  );
+  final avatarPath = await _copyAvatar(ref, character.avatarPath, 'persona_$newId');
 
   final persona = Persona(
     id: newId,

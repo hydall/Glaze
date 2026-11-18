@@ -50,9 +50,9 @@ List<PngTextChunk> extractPngTextChunks(Uint8List pngBytes) {
       }
       if (nullIndex != -1 && nullIndex + 1 < chunkData.length) {
         final keyword = String.fromCharCodes(
-          Uint8List.sublistView(chunkData, 0, nullIndex),
-        );
-        final textBytes = Uint8List.sublistView(chunkData, nullIndex + 1);
+            Uint8List.sublistView(chunkData, 0, nullIndex));
+        final textBytes =
+            Uint8List.sublistView(chunkData, nullIndex + 1);
         final base64Text = String.fromCharCodes(textBytes);
         try {
           final decoded = base64Decode(base64Text);

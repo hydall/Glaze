@@ -73,9 +73,9 @@ class InstallerUpdater {
   /// unpacked from the zip is not, and an update would land in the setup's
   /// folder instead and leave this one as it is, so such copies get the
   /// setup's own window to install from.
-  bool get isInstalledBySetup => File(
-    p.join(p.dirname(_executablePath), 'uninstall', 'GlazeSetup.exe'),
-  ).existsSync();
+  bool get isInstalledBySetup =>
+      File(p.join(p.dirname(_executablePath), 'uninstall', 'GlazeSetup.exe'))
+          .existsSync();
 
   /// Fetches [asset] into a temporary folder and verifies it. Returns the
   /// checked file; anything that fails the check is deleted first.

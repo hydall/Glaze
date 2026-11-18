@@ -36,9 +36,8 @@ ResolvedProfiles resolveProfiles(
   bool mbUseSame = true;
 
   if (serviceProfileMap != null) {
-    final spmLlm =
-        (serviceProfileMap['llm'] as Map<String, dynamic>?)?['profileId']
-            as String?;
+    final spmLlm = (serviceProfileMap['llm'] as Map<String, dynamic>?)
+        ?['profileId'] as String?;
     if (spmLlm != null) llmProfileId = spmLlm;
 
     for (final svc in ['embedding', 'image_gen', 'memory_books']) {
@@ -53,10 +52,9 @@ ResolvedProfiles resolveProfiles(
     embUseSame = embConfig?['useSameAsLLM'] as bool? ?? true;
     final embProfileId = embConfig?['profileId'] as String?;
     if (embProfileId != null && embProfileId != llmProfileId) {
-      embProfile = allProfiles.cast<Map<String, dynamic>?>().firstWhere(
-        (p) => p?['id'] == embProfileId,
-        orElse: () => null,
-      );
+      embProfile = allProfiles
+          .cast<Map<String, dynamic>?>()
+          .firstWhere((p) => p?['id'] == embProfileId, orElse: () => null);
     }
 
     final imggenConfig =
@@ -64,20 +62,19 @@ ResolvedProfiles resolveProfiles(
     imggenUseSame = imggenConfig?['useSameAsLLM'] as bool? ?? true;
     final imggenProfileId = imggenConfig?['profileId'] as String?;
     if (imggenProfileId != null && imggenProfileId != llmProfileId) {
-      imggenProfile = allProfiles.cast<Map<String, dynamic>?>().firstWhere(
-        (p) => p?['id'] == imggenProfileId,
-        orElse: () => null,
-      );
+      imggenProfile = allProfiles
+          .cast<Map<String, dynamic>?>()
+          .firstWhere((p) => p?['id'] == imggenProfileId, orElse: () => null);
     }
 
-    final mbConfig = serviceProfileMap['memory_books'] as Map<String, dynamic>?;
+    final mbConfig =
+        serviceProfileMap['memory_books'] as Map<String, dynamic>?;
     mbUseSame = mbConfig?['useSameAsLLM'] as bool? ?? true;
     final mbProfileId = mbConfig?['profileId'] as String?;
     if (mbProfileId != null && mbProfileId != llmProfileId) {
-      mbProfile = allProfiles.cast<Map<String, dynamic>?>().firstWhere(
-        (p) => p?['id'] == mbProfileId,
-        orElse: () => null,
-      );
+      mbProfile = allProfiles
+          .cast<Map<String, dynamic>?>()
+          .firstWhere((p) => p?['id'] == mbProfileId, orElse: () => null);
     }
   } else {
     for (final p in allProfiles) {
@@ -99,10 +96,7 @@ ResolvedProfiles resolveProfiles(
     llmProfileId: llmProfileId,
     skipIds: skipIds,
     embedding: ServiceProfile(profile: embProfile, useSameAsLlm: embUseSame),
-    imageGen: ServiceProfile(
-      profile: imggenProfile,
-      useSameAsLlm: imggenUseSame,
-    ),
+    imageGen: ServiceProfile(profile: imggenProfile, useSameAsLlm: imggenUseSame),
     memoryBooks: ServiceProfile(profile: mbProfile, useSameAsLlm: mbUseSame),
   );
 }

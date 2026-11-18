@@ -70,14 +70,13 @@ class FolderRepo {
   }
 
   Future<void> rename(String folderId, String name) async {
-    await (_db.update(
-      _db.folders,
-    )..where((t) => t.folderId.equals(folderId))).write(
-      FoldersCompanion(
-        name: Value(name),
-        updatedAt: Value(currentTimestampSeconds()),
-      ),
-    );
+    await (_db.update(_db.folders)..where((t) => t.folderId.equals(folderId)))
+        .write(
+          FoldersCompanion(
+            name: Value(name),
+            updatedAt: Value(currentTimestampSeconds()),
+          ),
+        );
   }
 
   /// Deletes the folder and its membership rows (members are untouched).
@@ -96,12 +95,14 @@ class FolderRepo {
 
   /// Member rows belonging to [domain], resolved by joining the folder table.
   Stream<List<FolderMemberRow>> watchMembers(FolderDomain domain) {
-    final query = _db.select(_db.folderMembers).join([
-      innerJoin(
-        _db.folders,
-        _db.folders.folderId.equalsExp(_db.folderMembers.folderId),
-      ),
-    ])..where(_db.folders.domain.equals(domain.wireName));
+    final query =
+        _db.select(_db.folderMembers).join([
+            innerJoin(
+              _db.folders,
+              _db.folders.folderId.equalsExp(_db.folderMembers.folderId),
+            ),
+          ])
+          ..where(_db.folders.domain.equals(domain.wireName));
     return query.watch().map(
       (rows) => rows.map((row) => row.readTable(_db.folderMembers)).toList(),
     );
@@ -134,9 +135,10 @@ class FolderRepo {
     FolderDomain domain,
     String memberId,
   ) async {
-    final folderIds = _db.selectOnly(_db.folders)
-      ..addColumns([_db.folders.folderId])
-      ..where(_db.folders.domain.equals(domain.wireName));
+    final folderIds =
+        _db.selectOnly(_db.folders)
+          ..addColumns([_db.folders.folderId])
+          ..where(_db.folders.domain.equals(domain.wireName));
     await (_db.delete(_db.folderMembers)..where(
           (t) => t.memberId.equals(memberId) & t.folderId.isInQuery(folderIds),
         ))

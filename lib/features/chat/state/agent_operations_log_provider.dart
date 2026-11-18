@@ -41,8 +41,7 @@ class AgentOperationsLogState {
 /// Global agentic operations log. Shared across all sessions — UI filters by
 /// `sessionId` when needed. Writers append via `ref.read(...).notifier).state
 /// = state.append(record)`.
-final agentOperationsLogProvider = StateProvider<AgentOperationsLogState>((
-  ref,
-) {
+final agentOperationsLogProvider =
+    StateProvider<AgentOperationsLogState>((ref) {
   return const AgentOperationsLogState();
 });

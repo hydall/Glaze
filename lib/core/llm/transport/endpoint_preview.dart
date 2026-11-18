@@ -51,10 +51,9 @@ class EndpointPreview {
       LlmProtocol.openaiResponses => EndpointNormalizer.responsesUrl(
         rawEndpoint,
       ),
-      _ =>
-        useResponsesApi
-            ? EndpointNormalizer.responsesUrl(rawEndpoint)
-            : EndpointNormalizer.chatCompletionsUrl(rawEndpoint),
+      _ => useResponsesApi
+          ? EndpointNormalizer.responsesUrl(rawEndpoint)
+          : EndpointNormalizer.chatCompletionsUrl(rawEndpoint),
     };
     return EndpointPreview(url: url, isInvalid: url.isEmpty);
   }

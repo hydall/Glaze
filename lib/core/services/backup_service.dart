@@ -39,13 +39,11 @@ class BackupService {
   );
 
   BackupService(this._db, ImageStorageService _imageStorage)
-    : _imageStorage = _imageStorage;
+      : _imageStorage = _imageStorage;
 
-  Future<String> exportBackup({bool includeApiKeys = true}) => BackupExporter(
-    _db,
-    _imageStorage,
-    includeApiKeys: includeApiKeys,
-  ).export();
+  Future<String> exportBackup({bool includeApiKeys = true}) =>
+      BackupExporter(_db, _imageStorage, includeApiKeys: includeApiKeys)
+          .export();
 
   /// Cancels an in-flight import. The importer checks the flag at every
   /// major stage (before each table wipe and between batches).
@@ -74,11 +72,8 @@ class BackupService {
     onDetected?.call(format);
     switch (format) {
       case BackupFormat.sillyTavernZip:
-        await StBackupImporter(
-          _db,
-          _imageStorage,
-          _cancel,
-        ).importFromFile(filePath, onProgress: onProgress);
+        await StBackupImporter(_db, _imageStorage, _cancel)
+            .importFromFile(filePath, onProgress: onProgress);
         break;
       case BackupFormat.tavoZip:
         final data = await _takeInspectedTavo(filePath);
@@ -90,11 +85,8 @@ class BackupService {
         );
         break;
       case BackupFormat.flutterZip:
-        await FlutterBackupImporter(
-          _db,
-          _imageStorage,
-          _cancel,
-        ).importFromZipFile(filePath, onProgress: onProgress);
+        await FlutterBackupImporter(_db, _imageStorage, _cancel)
+            .importFromZipFile(filePath, onProgress: onProgress);
         break;
       case BackupFormat.legacyJsonGlaze:
         await _importLegacyJsonGlaze(filePath, onProgress: onProgress);
@@ -170,8 +162,7 @@ class BackupService {
         if (_isSillyTavernArchive(archive)) return BackupFormat.sillyTavernZip;
         if (_isFlutterGlazeArchive(archive)) return BackupFormat.flutterZip;
         throw const FormatException(
-          'ZIP is neither a SillyTavern nor a Glaze backup',
-        );
+            'ZIP is neither a SillyTavern nor a Glaze backup');
       }
       if (header.isNotEmpty && header[0] == 0x7B) {
         return BackupFormat.legacyJsonGlaze;
@@ -210,26 +201,21 @@ class BackupService {
     final jsonString = utf8.decode(bytes, allowMalformed: true);
     final data = jsonDecode(jsonString) as Map<String, dynamic>;
     onProgress?.call('Importing legacy backup...');
-    final isGlazeBackup =
-        data['_isGlazeBackup'] == true ||
+    final isGlazeBackup = data['_isGlazeBackup'] == true ||
         data.containsKey('tables') ||
         data.containsKey('characters');
     if (!isGlazeBackup) {
       throw const FormatException(
-        'Legacy backup is not a valid Glaze file. Please re-export from the source app.',
-      );
+          'Legacy backup is not a valid Glaze file. Please re-export from the source app.');
     }
     if (data['_source'] == 'flutter') {
       // Old Glaze Flutter v1 monolith. Refused by policy — tell the user
       // to re-export from a v2 build.
       throw const FormatException(
-        'Old Glaze backup format detected. Please re-export from the source app to continue.',
-      );
+          'Old Glaze backup format detected. Please re-export from the source app to continue.');
     }
-    await JsBackupImporter(
-      _db,
-      _imageStorage,
-    ).import(data, onProgress: onProgress);
+    await JsBackupImporter(_db, _imageStorage)
+        .import(data, onProgress: onProgress);
     await _deleteOrphanedSessions();
     await _applyPreferences(data);
   }
@@ -239,8 +225,7 @@ class BackupService {
     final prefsData = data['preferences'] as Map<String, dynamic>?;
     if (prefsData != null) {
       final themeKeys = prefs.getKeys().where(
-        (k) => k.startsWith('gz_theme_') || k.startsWith('glaze_theme_'),
-      );
+          (k) => k.startsWith('gz_theme_') || k.startsWith('glaze_theme_'));
       for (final k in themeKeys) {
         await prefs.remove(k);
       }
@@ -305,9 +290,8 @@ class BackupService {
   }
 
   Future<void> _deleteOrphanedSessions() async {
-    final charIds = (await _db.select(_db.characters).get())
-        .map((r) => r.charId)
-        .toSet();
+    final charIds =
+        (await _db.select(_db.characters).get()).map((r) => r.charId).toSet();
     if (charIds.isEmpty) return;
 
     final sessions = await _db.select(_db.chatSessions).get();
@@ -319,15 +303,9 @@ class BackupService {
 
     await _db.transaction(() async {
       for (final sid in orphanIds) {
-        await (_db.delete(
-          _db.chatSessions,
-        )..where((t) => t.sessionId.equals(sid))).go();
-        await (_db.delete(
-          _db.memoryBookRows,
-        )..where((t) => t.sessionId.equals(sid))).go();
-        await (_db.delete(
-          _db.chatSummaries,
-        )..where((t) => t.sessionId.equals(sid))).go();
+        await (_db.delete(_db.chatSessions)..where((t) => t.sessionId.equals(sid))).go();
+        await (_db.delete(_db.memoryBookRows)..where((t) => t.sessionId.equals(sid))).go();
+        await (_db.delete(_db.chatSummaries)..where((t) => t.sessionId.equals(sid))).go();
       }
     });
   }

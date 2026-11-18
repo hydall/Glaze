@@ -11,20 +11,15 @@ const _globalRegexKey = 'gz_global_regex_scripts';
 /// Handles field name mappings (scriptName→name, findRegex→regex, etc.) and all ST compatibility flags.
 Map<String, dynamic> normalizeJsGlobalRegex(Map<String, dynamic> raw) {
   final map = Map<String, dynamic>.from(raw);
-  if (!map.containsKey('id'))
-    map['id'] = '${DateTime.now().millisecondsSinceEpoch}';
+  if (!map.containsKey('id')) map['id'] = '${DateTime.now().millisecondsSinceEpoch}';
   if (!map.containsKey('name')) map['name'] = map['scriptName'] ?? 'Imported';
   if (!map.containsKey('regex')) map['regex'] = map['findRegex'] ?? '';
-  if (!map.containsKey('replacement'))
-    map['replacement'] = map['replaceString'] ?? '';
-  if (!map.containsKey('trimOut'))
-    map['trimOut'] = _joinTrimStrings(raw['trimStrings']);
+  if (!map.containsKey('replacement')) map['replacement'] = map['replaceString'] ?? '';
+  if (!map.containsKey('trimOut')) map['trimOut'] = _joinTrimStrings(raw['trimStrings']);
   if (!map.containsKey('placement')) {
     final p = raw['placement'];
     if (p is List) {
-      map['placement'] = p
-          .map((e) => e is int ? e : int.tryParse(e.toString()) ?? 1)
-          .toList();
+      map['placement'] = p.map((e) => e is int ? e : int.tryParse(e.toString()) ?? 1).toList();
     } else {
       map['placement'] = [1, 2];
     }
@@ -37,9 +32,7 @@ Map<String, dynamic> normalizeJsGlobalRegex(Map<String, dynamic> raw) {
   }
   if (map['placement'] is List) {
     map['placement'] = _migrateGlazePlacementIds(
-      (map['placement'] as List)
-          .map((e) => e is int ? e : int.tryParse(e.toString()) ?? 1)
-          .toList(),
+      (map['placement'] as List).map((e) => e is int ? e : int.tryParse(e.toString()) ?? 1).toList(),
     );
   }
   // Preserve runOnEdit as a direct bool for ST compatibility
@@ -47,12 +40,9 @@ Map<String, dynamic> normalizeJsGlobalRegex(Map<String, dynamic> raw) {
     map['runOnEdit'] = _coerceToBool(raw['runOnEdit']);
   }
   // Map ST flags to our new fields (accept both camelCase and any ST variants)
-  map['markdownOnly'] = _coerceToBool(
-    raw['markdownOnly'] ?? raw['markdown_only'],
-  );
+  map['markdownOnly'] = _coerceToBool(raw['markdownOnly'] ?? raw['markdown_only']);
   map['promptOnly'] = _coerceToBool(raw['promptOnly'] ?? raw['prompt_only']);
-  map['substituteRegex'] =
-      _coerceToInt(raw['substituteRegex'] ?? raw['substitute_regex']) ?? 0;
+  map['substituteRegex'] = _coerceToInt(raw['substituteRegex'] ?? raw['substitute_regex']) ?? 0;
   map['minDepth'] = _coerceToInt(map['minDepth']);
   map['maxDepth'] = _coerceToInt(map['maxDepth']);
   map['disabled'] = _coerceToBool(map['disabled']);
@@ -92,13 +82,7 @@ class GlobalRegexNotifier extends AsyncNotifier<List<PresetRegex>> {
     if (raw == null || raw.isEmpty) return [];
     try {
       final list = jsonDecode(raw) as List;
-      final result = list
-          .map(
-            (e) => PresetRegex.fromJson(
-              normalizeJsGlobalRegex(e as Map<String, dynamic>),
-            ),
-          )
-          .toList();
+      final result = list.map((e) => PresetRegex.fromJson(normalizeJsGlobalRegex(e as Map<String, dynamic>))).toList();
       await _persist(result);
       return result;
     } catch (_) {
@@ -175,5 +159,5 @@ class GlobalRegexNotifier extends AsyncNotifier<List<PresetRegex>> {
 
 final globalRegexProvider =
     AsyncNotifierProvider<GlobalRegexNotifier, List<PresetRegex>>(
-      GlobalRegexNotifier.new,
-    );
+  GlobalRegexNotifier.new,
+);

@@ -95,15 +95,13 @@ List<TopKResult> findTopKMulti(
     }
 
     if (maxScore >= 0) {
-      results.add(
-        TopKResult(
-          id: c.id,
-          score: maxScore,
-          bestQueryChunk: bestQC,
-          bestCandidateChunk: bestCC,
-          metadata: c.metadata,
-        ),
-      );
+      results.add(TopKResult(
+        id: c.id,
+        score: maxScore,
+        bestQueryChunk: bestQC,
+        bestCandidateChunk: bestCC,
+        metadata: c.metadata,
+      ));
     }
   }
 

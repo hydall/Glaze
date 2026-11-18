@@ -180,9 +180,7 @@ class AuditPromptBuilder {
         ..writeln(
           'Return ONLY JSON in this format: {"ok": true|false, "issues": ["..."], "beauty": {"speakers": {"Name": "#hex"}, "thoughts": {"Name": "#hex"}}}',
         )
-        ..writeln(
-          'The "beauty" field is optional but recommended when speaker colors are assigned.',
-        );
+        ..writeln('The "beauty" field is optional but recommended when speaker colors are assigned.');
     }
 
     return buffer.toString();
