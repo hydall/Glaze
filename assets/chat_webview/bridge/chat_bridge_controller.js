@@ -1305,42 +1305,44 @@ export class Bridge {
     const hasGreetings = isChar && messageIndex === 0 && greetingTotal > 1;
     const showRegen = ((!isChar && isLast) || isError) && !isGenerating && !isEditing;
 
-    center.innerHTML = '';
+    // Built off-DOM and then reconciled, so taps on the arrows survive an
+    // update landing mid-press (see _reconcileControls).
+    const fresh = document.createElement('div');
 
     if (hasSwipes) {
-      center.appendChild(this.renderer._createSwitcher(section.dataset.messageId, swipeIndex || 0, swipeTotal, 'swipe'));
+      fresh.appendChild(this.renderer._createSwitcher(section.dataset.messageId, swipeIndex || 0, swipeTotal, 'swipe'));
     } else if (hasGreetings) {
-      center.appendChild(this.renderer._createSwitcher(section.dataset.messageId, greetingIndex || 0, greetingTotal, 'greeting'));
+      fresh.appendChild(this.renderer._createSwitcher(section.dataset.messageId, greetingIndex || 0, greetingTotal, 'greeting'));
     }
 
     // Nested swipes: blue sub-swipe switcher.
     if (hasAgentSwipes) {
-      center.appendChild(this.renderer._createSwitcher(section.dataset.messageId, agentSwipeIndex || 0, agentSwipeTotal, 'agent-swipe'));
+      fresh.appendChild(this.renderer._createSwitcher(section.dataset.messageId, agentSwipeIndex || 0, agentSwipeTotal, 'agent-swipe'));
     }
 
     if (isChar && isLast && !isGenerating && !isEditing && agentSwipeTotal >= 1) {
       const rerun = document.createElement('div');
-      rerun.className = 'msg-rerun-cleaner';
+      rerun.className = 'msg-rerun-cleaner tavo-action-bar-button';
       rerun.dataset.action = 'rerun-cleaner';
       rerun.dataset.messageId = section.dataset.messageId;
       rerun.title = 'Re-run cleaner';
       rerun.innerHTML = ICON.rerunCleaner;
-      center.appendChild(rerun);
+      fresh.appendChild(rerun);
     }
 
     if (isChar && isLast && !isGenerating && !isEditing) {
       const guided = document.createElement('div');
-      guided.className = 'msg-guided-swipe-btn';
+      guided.className = 'msg-guided-swipe-btn tavo-action-bar-button';
       guided.dataset.action = 'toggle-guided';
       guided.dataset.messageId = section.dataset.messageId;
       guided.title = 'Guided swipe';
       guided.innerHTML = ICON.guided;
-      center.appendChild(guided);
+      fresh.appendChild(guided);
     }
 
     if (showRegen) {
       const regen = document.createElement('div');
-      regen.className = 'msg-regenerate';
+      regen.className = 'msg-regenerate tavo-action-bar-button';
       if (hasSwipes || hasGreetings || hasAgentSwipes) regen.classList.add('icon-only');
       regen.dataset.action = 'regenerate';
       regen.dataset.messageId = section.dataset.messageId;
@@ -1352,8 +1354,31 @@ export class Bridge {
         span.textContent = 'Regenerate';
         regen.appendChild(span);
       }
-      center.appendChild(regen);
+      fresh.appendChild(regen);
     }
+
+    this._reconcileControls(center, fresh);
+  }
+
+  /* Puts the freshly built footer controls into `center`. When the set of
+   * controls is the same as what is on screen — the common case while the
+   * reader flips through variations — only the counters are rewritten and the
+   * existing buttons stay. Replacing them on every update meant a tap that was
+   * pressed on one arrow and released on its replacement never became a click,
+   * so quick taps on the switcher were silently dropped. */
+  _reconcileControls(center, fresh) {
+    const signature = (el) => [...el.children].map((child) =>
+      `${child.className}|${child.dataset.kind || ''}|${child.dataset.action || ''}|${child.childElementCount}`
+    ).join(';');
+    if (signature(center) !== signature(fresh)) {
+      center.replaceChildren(...fresh.children);
+      return;
+    }
+    const nextCounts = fresh.querySelectorAll('.msg-switcher-count');
+    center.querySelectorAll('.msg-switcher-count').forEach((count, i) => {
+      const text = nextCounts[i]?.textContent ?? '';
+      if (count.textContent !== text) count.textContent = text;
+    });
   }
 
   setLastMessage(newLastId) {

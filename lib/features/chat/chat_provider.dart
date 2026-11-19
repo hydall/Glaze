@@ -439,6 +439,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<void> setGreeting(int messageIndex, int direction) =>
       _swipeCtrl.setGreeting(messageIndex, direction);
 
+  /// Jumps straight to blue sub-swipe [agentSwipeId] (variation picker).
+  Future<void> setAgentSwipe(int messageIndex, int agentSwipeId) =>
+      _swipeCtrl.setAgentSwipe(messageIndex, agentSwipeId);
+
+  /// See [ChatSwipeController.greetingOptions].
+  Future<List<String>> greetingOptions() => _swipeCtrl.greetingOptions();
+
   Future<void> switchSession(int sessionIndex) {
     // The message an impersonation wrote stays in the composer of the chat it
     // was written for; another session's first message must not inherit its

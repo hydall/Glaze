@@ -8,6 +8,7 @@ typedef MessageContextCallback =
     );
 typedef SwipeCallback = void Function(String id, String direction);
 typedef GreetingCallback = void Function(String id, int direction);
+typedef OpenVariantsCallback = void Function(String id, String kind);
 typedef RegenerateCallback = void Function(String id, String mode);
 typedef RerunCleanerCallback = void Function(String messageId);
 typedef TranslateMessageCallback =
@@ -19,6 +20,7 @@ typedef GuidedSwipeCallback = void Function(String id, String guidanceText);
 typedef EditSaveCallback = void Function(String id, String text);
 typedef EditCancelCallback = void Function(String id);
 typedef EditFocusCallback = void Function(String id, bool focused);
+
 /// [blockIndex] is the position of the tapped image inside its message, or
 /// null when the element carries no image-gen block (markdown images) — the
 /// handler then falls back to acting on the whole message.
@@ -46,6 +48,7 @@ class MessageActionsCallbacks {
   final SwipeCallback? onSwipe;
   final SwipeCallback? onAgentSwipe;
   final GreetingCallback? onChangeGreeting;
+  final OpenVariantsCallback? onOpenVariants;
   final RegenerateCallback? onRegenerate;
   final RerunCleanerCallback? onRerunCleaner;
   final TranslateMessageCallback? onTranslateMessage;
@@ -61,6 +64,7 @@ class MessageActionsCallbacks {
     this.onSwipe,
     this.onAgentSwipe,
     this.onChangeGreeting,
+    this.onOpenVariants,
     this.onRegenerate,
     this.onRerunCleaner,
     this.onTranslateMessage,

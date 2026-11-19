@@ -789,6 +789,10 @@ if (messageData.isEditing) classes.push('editing');
 
     const count = document.createElement('div');
     count.className = 'msg-switcher-count';
+    // Tapping the counter opens a picker over every variation (Flutter sheet).
+    count.dataset.action = 'open-variants';
+    count.dataset.kind = kind;
+    count.dataset.messageId = messageId;
     count.textContent = `${index + 1}/${total}`;
     wrap.appendChild(count);
 
