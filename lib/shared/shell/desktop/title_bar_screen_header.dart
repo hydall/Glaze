@@ -122,23 +122,36 @@ class _HeaderRow extends StatelessWidget {
     required this.endInset,
   });
 
+  /// A plain title lets a drag on the text through to the bar behind it,
+  /// unless the screen wants taps on it ([onTap]).
+  static Widget _titleText(
+    BuildContext context,
+    String title,
+    VoidCallback? onTap,
+  ) {
+    final text = Text(
+      title,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: context.cs.onSurface,
+        fontSize: 15,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+    if (onTap == null) return IgnorePointer(child: text);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: text,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final title =
         config.titleWidget ??
         (config.title != null
-            // Lets a drag on the text through to the bar behind it.
-            ? IgnorePointer(
-                child: Text(
-                  config.title!,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: context.cs.onSurface,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              )
+            ? _titleText(context, config.title!, config.onTitleTap)
             : null);
 
     return _TitleBarRow(

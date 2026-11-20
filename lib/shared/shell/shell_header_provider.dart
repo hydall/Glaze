@@ -34,9 +34,13 @@ class ShellHeaderConfig {
   /// so the shell header does not float on top of them.
   final bool hidden;
 
+  /// Called on a tap on the plain-text [title] (not on [titleWidget]).
+  final VoidCallback? onTitleTap;
+
   const ShellHeaderConfig({
     this.title,
     this.titleWidget,
+    this.onTitleTap,
     this.actions,
     this.showBack = false,
     this.onBack,

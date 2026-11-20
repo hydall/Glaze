@@ -4,13 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/platform/haptics.dart';
-import '../../../core/state/character_provider.dart';
 import '../../../features/chat_history/chat_history_list.dart';
 import '../../../features/guides/guide_anchor.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/hover_glow.dart';
-import '../../../shared/widgets/glaze_toast.dart';
 import '../shell_navigation_provider.dart';
 import 'desktop_floating_provider.dart';
 import 'desktop_glossary_popup.dart';
@@ -59,22 +56,7 @@ class _DesktopLeftSidebarState extends ConsumerState<DesktopLeftSidebar> {
     setState(() => _searchQuery = '');
   }
 
-  /// Secret gesture: tapping Characters [kRevealHiddenTapCount] times within
-  /// [kRevealHiddenTapWindow] reveals hidden characters.
-  void _registerCharactersTabTap() {
-    final revealed = ref
-        .read(revealHiddenCharactersProvider.notifier)
-        .registerCharactersTabTap();
-    if (revealed == null || !mounted) return;
-    Haptics.heavyImpact();
-    GlazeToast.show(
-      context,
-      revealed ? 'hidden_chars_revealed'.tr() : 'hidden_chars_hidden'.tr(),
-    );
-  }
-
   void _openCharacters() {
-    _registerCharactersTabTap();
     goShellBranch(
       context,
       ref,
