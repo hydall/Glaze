@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/character.dart';
-import '../../../core/models/chat_message.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/chat_session_ops_provider.dart';
@@ -11,6 +10,8 @@ import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/connection_sheet_widgets.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../character_list/widgets/character_picker_sheet.dart';
+import '../chat_history/chat_picker_sheet.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/help_tip.dart';
 
@@ -310,38 +311,26 @@ class _LorebookConnectionsSheetState
         .map((e) => _characterGroupId(chars, e.key))
         .toSet();
 
-    final representatives = <String, Character>{};
-    for (final character in chars) {
-      final groupId = _characterGroupId(chars, character.id);
-      final current = representatives[groupId];
-      if (current == null || character.variantOrder < current.variantOrder) {
-        representatives[groupId] = character;
-      }
-    }
-    final available = representatives.entries
-        .where((entry) => !existingGroupIds.contains(entry.key))
-        .toList();
-    if (available.isEmpty) {
+    final anyFree = chars.any(
+      (c) => !existingGroupIds.contains(_characterGroupId(chars, c.id)),
+    );
+    if (!anyFree) {
       GlazeToast.show(context, 'lorebook_all_chars_connected'.tr());
       return;
     }
 
-    final selected = await GlazeBottomSheet.show<MapEntry<String, Character>>(
+    final selected = await showCharacterPicker(
       context,
       title: 'lbc_add_character'.tr(),
-      items: available
-          .map(
-            (entry) => BottomSheetItem(
-              label: entry.value.name,
-              onTap: () =>
-                  Navigator.of(context, rootNavigator: true).pop(entry),
-            ),
-          )
-          .toList(),
+      excludedIds: existingGroupIds,
     );
 
     if (selected != null) {
-      _setCharacterActivation(lb.id, selected.key, enabled: true);
+      _setCharacterActivation(
+        lb.id,
+        _characterGroupId(chars, selected.id),
+        enabled: true,
+      );
     }
   }
 
@@ -361,22 +350,14 @@ class _LorebookConnectionsSheetState
       return;
     }
 
-    final chars = ref.read(charactersProvider).value ?? [];
-
-    final selected = await GlazeBottomSheet.show<ChatSession>(
+    final selected = await showChatPicker(
       context,
       title: 'lbc_add_chat'.tr(),
-      items: available.map((s) {
-        final char = chars.where((c) => c.id == s.characterId).firstOrNull;
-        return BottomSheetItem(
-          label: '${char?.name ?? s.characterId} #${s.sessionIndex}',
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(s),
-        );
-      }).toList(),
+      excludedSessionIds: existingIds,
     );
 
     if (selected != null) {
-      _toggleActivation(lb.id, 'chat', selected.id);
+      _toggleActivation(lb.id, 'chat', selected.sessionId);
     }
   }
 }

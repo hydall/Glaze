@@ -44,12 +44,19 @@ class CharacterCard extends ConsumerStatefulWidget {
   /// second near-identical widget — see the branches that read it.
   final bool inVariationsGrid;
 
+  /// Turns the card into a picker entry: a tap hands the character to this
+  /// callback instead of opening it, and the menu, bulk selection and the
+  /// variations chip are gone — the card only says "this one". Used by the
+  /// binding pickers, which show the library as it looks on the main screen.
+  final ValueChanged<Character>? onPick;
+
   const CharacterCard({
     super.key,
     required this.character,
     this.entryDelay = Duration.zero,
     this.folderId,
     this.inVariationsGrid = false,
+    this.onPick,
   });
 
   @override
@@ -151,11 +158,14 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
     // Bulk selection belongs to the library. Inside the variations grid a
     // long-press would select sibling rows whose bulk actions then apply to the
     // whole group anyway — a gesture that cannot mean what it looks like.
+    final picking = widget.onPick != null;
     final selectionActive =
         !widget.inVariationsGrid &&
+        !picking &&
         ref.watch(characterSelectionProvider.select((s) => s.active));
     final selected =
         !widget.inVariationsGrid &&
+        !picking &&
         ref.watch(
           characterSelectionProvider.select((s) => s.contains(character.id)),
         );
@@ -201,7 +211,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
 
     // Shared by long-press (touch) and right-click (desktop): both enter or
     // extend selection mode.
-    final VoidCallback? longPress = widget.inVariationsGrid
+    final VoidCallback? longPress = widget.inVariationsGrid || picking
         ? null
         : () {
             final notifier = ref.read(characterSelectionProvider.notifier);
@@ -224,7 +234,9 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
             onExit: (_) => setState(() => _hovered = false),
             child: GestureDetector(
               onTap: () {
-                if (selectionActive) {
+                if (picking) {
+                  widget.onPick!(character);
+                } else if (selectionActive) {
                   ref
                       .read(characterSelectionProvider.notifier)
                       .toggle(character.id);
@@ -285,7 +297,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
                           variationLabel: variationLabel,
                           // Inside the grid the chip is a label, not a door: every
                           // card would otherwise reopen the sheet you are already in.
-                          onVariationTap: widget.inVariationsGrid
+                          onVariationTap: widget.inVariationsGrid || picking
                               ? null
                               : () => _showVariations(context),
                         ),
@@ -306,6 +318,7 @@ class _CharacterCardState extends ConsumerState<CharacterCard>
                             ],
                           ),
                         ),
+                      if (!picking)
                       Positioned(
                         top: 8,
                         right: 8,
