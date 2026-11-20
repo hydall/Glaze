@@ -42,6 +42,7 @@ void main() {
       'dialog_grouping',
       'swipe_regeneration',
       'stream_auto_scroll',
+      'follow_composer_resize',
       'show_msg_id',
       'show_gen_time',
       'show_token_count',

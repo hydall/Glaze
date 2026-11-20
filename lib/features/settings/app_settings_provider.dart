@@ -158,6 +158,11 @@ abstract class AppSettings with _$AppSettings {
     /// as "disable" so an absent preference keeps the follow on. Sending a
     /// message still jumps to the bottom; only the per-chunk follow is off.
     @Default(false) bool disableStreamAutoScroll,
+
+    /// Scrolls the chat up with the composer as a long message makes it
+    /// taller. Off by default: the composer grows over the list instead. The
+    /// keyboard opening and closing moves the list either way.
+    @Default(false) bool followComposerResize,
     @Default(false) bool allowMessageScripts,
 
     /// Whether message HTML and CSS may load anything from the network:
@@ -260,6 +265,7 @@ abstract final class AppSettingsPreferences {
     'hideTooltips',
     'disableSwipeRegeneration',
     'disableStreamAutoScroll',
+    'followComposerResize',
     'allowMessageScripts',
     'allowExternalMedia',
     'confirmMessageDelete',
@@ -309,6 +315,9 @@ abstract final class AppSettingsPreferences {
       disableStreamAutoScroll:
           _coerceBool(prefs.get('disableStreamAutoScroll')) ??
           defaults.disableStreamAutoScroll,
+      followComposerResize:
+          _coerceBool(prefs.get('followComposerResize')) ??
+          defaults.followComposerResize,
       allowMessageScripts:
           _coerceBool(prefs.get('allowMessageScripts')) ??
           defaults.allowMessageScripts,
@@ -383,6 +392,7 @@ abstract final class AppSettingsPreferences {
       'hideTooltips': normalized.hideTooltips,
       'disableSwipeRegeneration': normalized.disableSwipeRegeneration,
       'disableStreamAutoScroll': normalized.disableStreamAutoScroll,
+      'followComposerResize': normalized.followComposerResize,
       'allowMessageScripts': normalized.allowMessageScripts,
       'allowExternalMedia': normalized.allowExternalMedia,
       'confirmMessageDelete': normalized.confirmMessageDelete,
@@ -502,6 +512,7 @@ abstract final class AppSettingsPreferences {
     hideTooltips: values['hideTooltips'] as bool,
     disableSwipeRegeneration: values['disableSwipeRegeneration'] as bool,
     disableStreamAutoScroll: values['disableStreamAutoScroll'] as bool,
+    followComposerResize: values['followComposerResize'] as bool,
     allowMessageScripts: values['allowMessageScripts'] as bool,
     allowExternalMedia: values['allowExternalMedia'] as bool,
     confirmMessageDelete: values['confirmMessageDelete'] as bool,

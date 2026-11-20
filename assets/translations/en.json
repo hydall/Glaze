@@ -1215,6 +1215,8 @@
   "desc_swipe_regeneration": "Regenerate a message by swiping it left",
   "menu_stream_auto_scroll": "Auto-scroll While Streaming",
   "desc_stream_auto_scroll": "Keep the chat scrolled to the bottom as a reply comes in",
+  "menu_follow_composer_resize": "Scroll With the Input Field",
+  "desc_follow_composer_resize": "Move the chat up as the input field grows while you type a long message",
   "desc_chat_layout": "Switch between bubbles or classic message layout",
   "settings_reset_title": "Reset Glaze Settings",
   "settings_reset_hint": "Returns app settings to their defaults and switches back to the default theme",

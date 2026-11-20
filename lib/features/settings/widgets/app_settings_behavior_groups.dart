@@ -95,6 +95,14 @@ class ChatGroup extends SettingsGroup {
           ).save(settings.copyWith(disableStreamAutoScroll: !v)),
         ),
         toggle(
+          id: 'follow_composer_resize',
+          label: 'menu_follow_composer_resize'.tr(),
+          description: 'desc_follow_composer_resize'.tr(),
+          value: settings.followComposerResize,
+          onChanged: (v) =>
+              notifierOf(ref).save(settings.copyWith(followComposerResize: v)),
+        ),
+        toggle(
           id: 'show_msg_id',
           label: 'menu_show_msg_id'.tr(),
           description: 'desc_show_msg_id'.tr(),
