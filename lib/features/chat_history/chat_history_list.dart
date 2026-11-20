@@ -75,6 +75,13 @@ class ChatHistoryList extends ConsumerStatefulWidget {
   /// chat must not take its own field away.
   final Widget? belowCount;
 
+  /// Picker mode (the binding sheets): a tap on a chat hands it here instead
+  /// of opening it, and long press / right-click do nothing.
+  final ValueChanged<ChatSessionInfo>? onPick;
+
+  /// Chats left out of the list — in picker mode, the ones already bound.
+  final Set<String> excludedSessionIds;
+
   const ChatHistoryList({
     super.key,
     this.collapsed = false,
@@ -84,6 +91,8 @@ class ChatHistoryList extends ConsumerStatefulWidget {
     this.controller,
     this.selectable = false,
     this.belowCount,
+    this.onPick,
+    this.excludedSessionIds = const {},
   });
 
   @override
@@ -125,9 +134,14 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
         _precacheAvatars(list);
         final settings = settingsAsync.value ?? const AppSettings();
         var filtered = list;
+        if (widget.excludedSessionIds.isNotEmpty) {
+          filtered = filtered
+              .where((s) => !widget.excludedSessionIds.contains(s.sessionId))
+              .toList();
+        }
         if (widget.searchQuery.isNotEmpty) {
           final q = widget.searchQuery.toLowerCase();
-          filtered = list
+          filtered = filtered
               .where(
                 (s) =>
                     s.characterName.toLowerCase().contains(q) ||
@@ -177,6 +191,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
           info: filtered[i - 1],
           collapsed: widget.collapsed,
           selectable: widget.selectable,
+          onPick: widget.onPick,
           index: i - 1,
         );
       },
@@ -223,7 +238,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
                         color: context.cs.onSurface,
                       ),
                     ),
-                    if (!searching) ...[
+                    if (!searching && widget.onPick == null) ...[
                       const SizedBox(height: 6),
                       Text(
                         'chats_empty_hint'.tr(),
@@ -282,6 +297,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
           sessions: group,
           isExpanded: isExpanded,
           selectable: widget.selectable,
+          onPick: widget.onPick,
           onTap: () {
             setState(() {
               if (isExpanded) {
@@ -321,12 +337,14 @@ class _ChatHistoryGroupSection extends StatefulWidget {
   final bool isExpanded;
   final bool selectable;
   final VoidCallback onTap;
+  final ValueChanged<ChatSessionInfo>? onPick;
 
   const _ChatHistoryGroupSection({
     required this.sessions,
     required this.isExpanded,
     required this.onTap,
     this.selectable = false,
+    this.onPick,
   });
 
   @override
@@ -397,6 +415,7 @@ class _ChatHistoryGroupSectionState extends State<_ChatHistoryGroupSection>
           sessions: widget.sessions,
           isExpanded: widget.isExpanded,
           onTap: widget.onTap,
+          picking: widget.onPick != null,
         ),
         ClipRect(
           child: FadeTransition(
@@ -429,6 +448,7 @@ class _ChatHistoryGroupSectionState extends State<_ChatHistoryGroupSection>
                             info: widget.sessions[i],
                             isGrouped: true,
                             selectable: widget.selectable,
+                            onPick: widget.onPick,
                             index: i,
                           ),
                         ],
@@ -453,6 +473,9 @@ class _SessionTile extends ConsumerStatefulWidget {
   /// See [ChatHistoryList.selectable].
   final bool selectable;
 
+  /// See [ChatHistoryList.onPick].
+  final ValueChanged<ChatSessionInfo>? onPick;
+
   /// Row position within its list — staggers the fade-in so rows cascade in
   /// on load instead of popping in all at once. Capped below so long lists
   /// don't take forever to finish appearing.
@@ -463,6 +486,7 @@ class _SessionTile extends ConsumerStatefulWidget {
     this.isGrouped = false,
     this.collapsed = false,
     this.selectable = false,
+    this.onPick,
     this.index = 0,
   });
 
@@ -810,6 +834,10 @@ class _SessionTileState extends ConsumerState<_SessionTile>
 
   /// Opens a chat, or toggles the row while a multi-selection is running.
   void _handleTap(bool selectionActive) {
+    if (widget.onPick != null) {
+      widget.onPick!(info);
+      return;
+    }
     if (selectionActive) {
       ref.read(chatHistorySelectionProvider.notifier).toggle(info.sessionId);
       return;
@@ -822,6 +850,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
   /// the shell header; where selection is unavailable it opens this row's own
   /// action menu, as it always did.
   void _handleContextGesture() {
+    if (widget.onPick != null) return;
     if (!widget.selectable) {
       unawaited(showChatSessionActions(context, ref, [info]));
       return;
@@ -933,10 +962,14 @@ class _GroupHeader extends ConsumerWidget {
   final bool isExpanded;
   final VoidCallback onTap;
 
+  /// Picker mode: the group only expands, it has no action menu.
+  final bool picking;
+
   const _GroupHeader({
     required this.sessions,
     required this.isExpanded,
     required this.onTap,
+    this.picking = false,
   });
 
   @override
@@ -954,8 +987,12 @@ class _GroupHeader extends ConsumerWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      onLongPress: () => _showGroupActions(context, ref, latest),
-      onSecondaryTap: () => _showGroupActions(context, ref, latest),
+      onLongPress: picking
+          ? null
+          : () => _showGroupActions(context, ref, latest),
+      onSecondaryTap: picking
+          ? null
+          : () => _showGroupActions(context, ref, latest),
       child: HoverGlow(
         borderRadius: BorderRadius.circular(12),
         hoverBorder: _hoverOutline,
