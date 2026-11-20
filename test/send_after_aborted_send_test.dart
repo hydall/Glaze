@@ -134,4 +134,59 @@ void main() {
       ['Hi', 'First', 'Second'],
     );
   });
+
+  test('Stop tapped right after Send calls the send off', () async {
+    SharedPreferences.setMockInitialValues({});
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    late _ParkedGenerationService generationService;
+    final container = ProviderContainer(
+      overrides: [
+        appDbProvider.overrideWithValue(db),
+        chatGenerationServiceProvider.overrideWith((ref) {
+          return generationService = _ParkedGenerationService(
+            ref,
+            (session) => throw StateError('no reply should run'),
+          );
+        }),
+      ],
+    );
+    addTearDown(() async {
+      container.dispose();
+      ChatSessionService.clearCache();
+      await db.close();
+    });
+
+    const session = ChatSession(
+      id: 's1',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: [
+        ChatMessage(id: 'm1', role: 'assistant', content: 'Hi', timestamp: 1),
+      ],
+    );
+    await container
+        .read(characterRepoProvider)
+        .put(const Character(id: 'c1', name: 'Alice'));
+    await container.read(chatRepoProvider).put(session);
+    await container.read(chatProvider('c1').future);
+    final notifier = container.read(chatProvider('c1').notifier);
+    // Built lazily on the first generation; read it so `calls` is countable.
+    container.read(chatGenerationServiceProvider);
+
+    final accepted = notifier.trySendMessage('First');
+    // The composer offers Stop from the tap on, before the chat has even
+    // painted the message.
+    await notifier.abortGeneration();
+
+    // Refused, so the composer puts the text back; nothing was written and no
+    // reply ran.
+    expect(await accepted, isFalse);
+    final persisted = await container.read(chatRepoProvider).getById('s1');
+    expect(persisted!.messages.map((m) => m.content), ['Hi']);
+    expect(generationService.calls, 0);
+    final state = container.read(chatProvider('c1')).requireValue;
+    expect(state.isSendPending, isFalse);
+    expect(state.isGenerating, isFalse);
+    expect(state.messages.map((m) => m.content), ['Hi']);
+  });
 }

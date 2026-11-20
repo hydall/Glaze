@@ -96,6 +96,7 @@ class ChatSwipeController {
         current.isGenerating ||
         current.isGeneratingImage ||
         current.isPostGenRunning ||
+        current.isStopping ||
         messageIndex < 0 ||
         messageIndex >= current.messages.length;
   }
@@ -252,7 +253,8 @@ class ChatSwipeController {
       if (current == null ||
           current.session == null ||
           current.isGenerating ||
-          current.isPostGenRunning) {
+          current.isPostGenRunning ||
+          current.isStopping) {
         return;
       }
       if (messageIndex != 0) return;

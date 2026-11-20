@@ -872,7 +872,11 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
       (_guidanceMode && _guidanceController.text.trim().isNotEmpty) ||
       _attachments.isNotEmpty;
 
+  /// Includes the send this composer is still handing over: the button is
+  /// Stop from the tap of Send on, never the empty-field action for the
+  /// moment between the field clearing and the chat painting the message.
   bool get _isGenerating =>
+      _isDispatchingSend ||
       widget.isGenerating ||
       widget.isGeneratingImage ||
       widget.isPostGenRunning;

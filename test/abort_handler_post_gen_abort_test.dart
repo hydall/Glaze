@@ -113,7 +113,7 @@ void main() {
   );
 
   test(
-    'Stop keeps generation blocked until partial persistence settles',
+    'Stop shows the run stopped at once and saves the partial behind it',
     () async {
       final gate = Completer<void>();
       final initialState = ChatState(
@@ -141,13 +141,30 @@ void main() {
       final abort = harness.handler.abortGeneration();
       await Future<void>.delayed(Duration.zero);
 
-      expect(harness.state.requireValue.isGenerating, isTrue);
+      // Optimistic: the run reads as stopped and the partial reply is in the
+      // chat before anything is written, while `isStopping` holds the
+      // message-mutating actions off and `settled` holds new runs back.
+      final stopping = harness.state.requireValue;
+      expect(stopping.isGenerating, isFalse);
+      expect(stopping.isStopping, isTrue);
+      expect(stopping.messages.last.content, 'Partial');
       expect(harness.persistedSessions, isEmpty);
+      var settled = false;
+      unawaited(harness.handler.settled.then((_) => settled = true));
+      await Future<void>.delayed(Duration.zero);
+      expect(settled, isFalse);
 
       gate.complete();
       await abort;
+      await Future<void>.delayed(Duration.zero);
 
+      expect(settled, isTrue);
       expect(harness.state.requireValue.isGenerating, isFalse);
+      expect(harness.state.requireValue.isStopping, isFalse);
+      expect(
+        harness.state.requireValue.messages.last.id,
+        harness.persistedSessions.single.messages.last.id,
+      );
       expect(harness.persistedSessions, hasLength(1));
       expect(harness.persistedSessions.single.messages.last.content, 'Partial');
     },
@@ -217,6 +234,59 @@ void main() {
         ).time,
         isNull,
       );
+    },
+  );
+
+  test(
+    'Stop on a regenerate with nothing streamed puts the old variation back '
+    'before the save',
+    () async {
+      final gate = Completer<void>();
+      const restoration = ChatMessage(
+        id: 'assistant-1',
+        role: 'assistant',
+        content: 'Original',
+        swipes: ['Original'],
+      );
+      // What the regenerate painted: a pending second variation, empty.
+      final pending = restoration.copyWith(
+        content: '',
+        isTyping: true,
+        swipes: const ['Original', ''],
+        swipeId: 1,
+      );
+      final harnessProvider = _abortHarnessProvider(
+        ChatState(
+          session: _session([pending]),
+          isGenerating: true,
+          regenTargetId: restoration.id,
+        ),
+        mutationGate: gate,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          extensionPostGenServiceProvider.overrideWith(
+            (ref) => _RecordingExtensionPostGenService(ref),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      final harness = container.read(harnessProvider);
+      harness.durableSession = _session([restoration]);
+      harness.handler.restorationMessage = restoration;
+
+      final abort = harness.handler.abortGeneration();
+
+      final stopping = harness.state.requireValue;
+      expect(stopping.isGenerating, isFalse);
+      expect(stopping.regenTargetId, isNull);
+      expect(stopping.messages.single.content, 'Original');
+      expect(stopping.messages.single.swipes, ['Original']);
+
+      gate.complete();
+      await abort;
+      expect(harness.state.requireValue.messages.single.content, 'Original');
+      expect(harness.state.requireValue.isStopping, isFalse);
     },
   );
 
