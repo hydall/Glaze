@@ -47,6 +47,7 @@ import 'character_detail_screen.dart';
 import 'character_editor_screen.dart';
 import 'character_selection_provider.dart';
 import 'filtered_characters_provider.dart';
+import 'reveal_hidden_hotkey.dart';
 import 'widgets/import_progress_dialog.dart';
 import 'widgets/widgets.dart';
 import '../../shared/widgets/glaze_sheet.dart';
@@ -199,6 +200,13 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
   @override
   int get headerBranchIndex => 1;
 
+  void _onTitleTap() {
+    final revealed = ref
+        .read(revealHiddenCharactersProvider.notifier)
+        .registerHeaderTap();
+    if (revealed != null) announceRevealHidden(revealed);
+  }
+
   @override
   ShellHeaderConfig buildShellHeader() {
     final catalogVisible = ref.read(catalogVisibleProvider);
@@ -216,6 +224,9 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           ? null
           : (inPicks ? _picksTitle : (folderTitle ?? 'header_characters'.tr())),
       titleWidget: inSearch ? _buildSearchField(context) : null,
+      // Secret gesture: a quick triple tap on "Characters" toggles hidden
+      // characters. Only on the top-level title, not a folder's name.
+      onTitleTap: inSearch || inFolder ? null : _onTitleTap,
       showBack: inFolder,
       onBack: inFolder ? _handleFolderBack : null,
       actions: inPicks || _searchInStrip

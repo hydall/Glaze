@@ -4,10 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/platform/haptics.dart';
-import '../../core/state/character_provider.dart';
 import '../shell/nav_retap_provider.dart';
 import '../theme/app_colors.dart';
-import 'glaze_toast.dart';
 
 /// The shell's four tabs and their tap handling, shared by the bottom
 /// [GlassNavBar] (phone upright) and the side [GlassNavRail] (phone sideways).
@@ -44,13 +42,8 @@ const kNavTabItems = [
   ),
 ];
 
-/// Index of the Characters tab in [kNavTabItems]. Tapping it
-/// [kRevealHiddenTapCount] times within [kRevealHiddenTapWindow] reveals hidden
-/// characters (secret gesture).
-const int _kCharactersTabIndex = 1;
-
 /// What a tap on tab [index] does, wherever the tab is drawn: haptics, the
-/// re-tap "back to top", the hidden-characters gesture, then [onTap].
+/// re-tap "back to top", then [onTap].
 void handleNavTabTap(
   BuildContext context,
   WidgetRef ref, {
@@ -65,18 +58,6 @@ void handleNavTabTap(
     // the top of its main view (sub-routes are popped by the shell's
     // goBranch(initialLocation: true)).
     ref.read(navReTapProvider.notifier).reTap(index);
-  }
-  if (index == _kCharactersTabIndex) {
-    final revealed = ref
-        .read(revealHiddenCharactersProvider.notifier)
-        .registerCharactersTabTap();
-    if (revealed != null && context.mounted) {
-      Haptics.heavyImpact();
-      GlazeToast.show(
-        context,
-        revealed ? 'hidden_chars_revealed'.tr() : 'hidden_chars_hidden'.tr(),
-      );
-    }
   }
   onTap(index);
 }

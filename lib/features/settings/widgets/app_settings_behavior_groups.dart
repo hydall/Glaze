@@ -9,6 +9,7 @@ import '../../chat/widgets/message_scripts_prompt_sheet.dart';
 import '../app_settings_provider.dart';
 import 'settings_group_base.dart';
 import 'settings_highlight.dart';
+import 'reveal_hidden_hotkey_item.dart';
 import 'settings_pickers.dart';
 
 /// The behaviour half of the settings screen: what the app does, as opposed to
@@ -354,6 +355,11 @@ class DesktopGroup extends SettingsGroup {
           value: settings.forceMobileLayout,
           onChanged: (v) =>
               notifierOf(ref).save(settings.copyWith(forceMobileLayout: v)),
+        ),
+        highlightIf(
+          'reveal_hidden_hotkey',
+          highlightId,
+          const RevealHiddenHotkeyItem(),
         ),
       ],
     );
