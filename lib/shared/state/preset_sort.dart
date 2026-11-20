@@ -145,3 +145,67 @@ List<T> sortPresetItems<T>(
   indexed.sort(compare);
   return [for (final e in indexed) e.item];
 }
+
+/// The full id order after the row at [oldIndex] of [visible] was dragged to
+/// [newIndex] (its final index, as `onReorderItem` reports it).
+///
+/// [visible] is what the user dragged over — one folder, or the rows a filter
+/// left; [full] is the whole list. The moved row lands right after the visible
+/// row it now follows, so rows hidden from view keep the places they had.
+List<String> reanchorOrder(
+  List<String> full,
+  List<String> visible,
+  int oldIndex,
+  int newIndex,
+) {
+  if (oldIndex == newIndex) return full;
+  final shown = List<String>.of(visible);
+  final moved = shown.removeAt(oldIndex);
+  shown.insert(newIndex, moved);
+  final result = List<String>.of(full)..remove(moved);
+  if (newIndex == 0) {
+    // Lands before the row that now follows it.
+    final next = shown.length > 1 ? shown[1] : null;
+    final at = next == null ? 0 : result.indexOf(next);
+    result.insert(at < 0 ? 0 : at, moved);
+    return result;
+  }
+  final anchor = shown[newIndex - 1];
+  result.insert(result.indexOf(anchor) + 1, moved);
+  return result;
+}
+
+/// The manual order of a sorted list after the row at [oldIndex] of
+/// [visible] was dragged to [newIndex].
+///
+/// [visible] is what the user dragged over (one folder, the rows a filter
+/// left); [all] is every item. The full manual order is rebuilt from [all], so
+/// items never dragged yet get a place too, and rows hidden from view keep the
+/// places they had.
+List<String> manualOrderAfterDrag<T>({
+  required List<T> all,
+  required List<T> visible,
+  required int oldIndex,
+  required int newIndex,
+  required PresetSortState state,
+  required String Function(T) idOf,
+  required String Function(T) nameOf,
+  required int Function(T) createdAtOf,
+}) {
+  final full = [
+    for (final e in sortPresetItems(
+      all,
+      state.copyWith(mode: PresetSortMode.manual),
+      idOf: idOf,
+      nameOf: nameOf,
+      createdAtOf: createdAtOf,
+    ))
+      idOf(e),
+  ];
+  return reanchorOrder(
+    full,
+    [for (final e in visible) idOf(e)],
+    oldIndex,
+    newIndex,
+  );
+}

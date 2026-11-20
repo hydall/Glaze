@@ -99,4 +99,41 @@ void main() {
       reason: 'a prompt-only script has no business in the display pass',
     );
   });
+
+  test('a script switched off in the active preset leaves the chat list '
+      'without a preset change', () async {
+    // Kept alive the way the open chat keeps it, by listening.
+    final sub = container.listen(displayRegexesProvider, (_, _) {});
+    addTearDown(sub.close);
+    expect(
+      (await container.read(displayRegexesProvider.future)).map((r) => r.id),
+      contains('preset-display'),
+    );
+
+    await container
+        .read(presetRepoProvider)
+        .put(
+          const Preset(
+            id: 'p1',
+            name: 'Preset',
+            regexes: [
+              PresetRegex(
+                id: 'preset-display',
+                name: 'Preset card',
+                regex: '/TRK/g',
+                ephemerality: [1],
+                disabled: true,
+              ),
+              _presetPromptOnly,
+            ],
+          ),
+        );
+    // Let the table-update stream deliver the write.
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(
+      (await container.read(displayRegexesProvider.future)).map((r) => r.id),
+      isNot(contains('preset-display')),
+    );
+  });
 }

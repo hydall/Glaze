@@ -4184,5 +4184,10 @@
   "model_tools_field_tags": "Теги",
   "model_tools_field_creator": "Автор",
   "model_tools_field_character_version": "Версия",
-  "model_tools_field_avatar": "Картинка"
+  "model_tools_field_avatar": "Картинка",
+  "lorebook_filter_unused": "Не подключены",
+  "lorebook_delete_selected_confirm": "Удалить лорбуки ({0})? Это нельзя отменить.",
+  "persona_delete_selected_confirm": "Удалить персоны ({0})? Это нельзя отменить.",
+  "persona_filter_bound": "Привязаны к персонажу или чату",
+  "persona_filter_unbound": "Не привязаны"
 }
