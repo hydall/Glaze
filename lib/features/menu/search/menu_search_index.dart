@@ -146,6 +146,22 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       groupKey: 'settings_group_chat',
     ),
     row(
+      'follow_composer_resize',
+      'menu_follow_composer_resize',
+      'desc_follow_composer_resize',
+      Icons.unfold_more_rounded,
+      const [
+        'scroll',
+        'input',
+        'composer',
+        'keyboard',
+        'прокрутка',
+        'поле ввода',
+        'композер',
+      ],
+      groupKey: 'settings_group_chat',
+    ),
+    row(
       'show_msg_id',
       'menu_show_msg_id',
       'desc_show_msg_id',

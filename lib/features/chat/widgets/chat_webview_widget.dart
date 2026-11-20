@@ -83,6 +83,10 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   /// already absorbed (a soft keyboard that shrinks the WebView instead of
   /// overlaying it) and pad only the remainder.
   final double viewportHeight;
+
+  /// The part of [bottomInset] whose changes leave the reading position alone
+  /// — the composer's height while following it as it grows is off, else 0.
+  final double nonScrollingInset;
   final double topInset;
 
   /// Rects of the Flutter glass overlays (header, input pill, buttons) in
@@ -199,6 +203,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.isSendPending = false,
     this.bottomInset = 0,
     this.viewportHeight = 0,
+    this.nonScrollingInset = 0,
     this.topInset = 0,
     this.blurRegions = const [],
     this.chromeChannel,
@@ -559,6 +564,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           memoryDrafts: widget.memoryDrafts,
           bottomInset: widget.bottomInset,
           viewportHeight: widget.viewportHeight,
+          nonScrollingInset: widget.nonScrollingInset,
           topInset: widget.topInset,
           blurRegions: widget.blurRegions,
           searchQuery: widget.searchQuery,
@@ -1196,6 +1202,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       bgNoiseIntensity: w.bgNoiseIntensity,
       bottomInset: w.bottomInset,
       viewportHeight: w.viewportHeight,
+      nonScrollingInset: w.nonScrollingInset,
       topInset: w.topInset,
       blurRegions: w.blurRegions,
       searchQuery: w.searchQuery,
@@ -1626,10 +1633,18 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   /// backgrounded, so an inset change pushed during the background transition
   /// can be dropped. The JS side no-ops when the padding already matches, so
   /// this is cheap to call defensively.
-  Future<void> applyBottomInset(double px, {double viewportHeight = 0}) {
+  Future<void> applyBottomInset(
+    double px, {
+    double viewportHeight = 0,
+    double nonScrollingInset = 0,
+  }) {
     final b = _bridge;
     if (b == null || !_ready) return Future.value();
-    return b.setBottomPadding(px, viewportHeight: viewportHeight);
+    return b.setBottomPadding(
+      px,
+      viewportHeight: viewportHeight,
+      nonScrollingInset: nonScrollingInset,
+    );
   }
 
   /// Pushes the mirrored glass rects at the page directly, bypassing the

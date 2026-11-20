@@ -18,6 +18,7 @@ void main() {
       'hideTooltips': bool,
       'disableSwipeRegeneration': bool,
       'disableStreamAutoScroll': bool,
+      'followComposerResize': bool,
       'allowMessageScripts': bool,
       'allowExternalMedia': bool,
       'confirmMessageDelete': bool,
@@ -321,6 +322,8 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.disableSwipeRegeneration;
     case 'disableStreamAutoScroll':
       return s.disableStreamAutoScroll;
+    case 'followComposerResize':
+      return s.followComposerResize;
     case 'confirmMessageDelete':
       return s.confirmMessageDelete;
     case 'allowExternalMedia':

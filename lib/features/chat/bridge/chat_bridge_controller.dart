@@ -1043,8 +1043,15 @@ class ChatBridgeController {
     bool scroll = true,
   }) =>
       layout.setSearch(query: query, activeIndex: activeIndex, scroll: scroll);
-  Future<void> setBottomPadding(double px, {double viewportHeight = 0}) =>
-      layout.setBottomPadding(px, viewportHeight: viewportHeight);
+  Future<void> setBottomPadding(
+    double px, {
+    double viewportHeight = 0,
+    double nonScrollingInset = 0,
+  }) => layout.setBottomPadding(
+    px,
+    viewportHeight: viewportHeight,
+    nonScrollingInset: nonScrollingInset,
+  );
   Future<void> setTopPadding(double px) => layout.setTopPadding(px);
   Future<void> setOverlayBlurRegions(List<ChatOverlayBlurRegion> regions) =>
       layout.setOverlayBlurRegions(regions);

@@ -32,10 +32,20 @@ class LayoutBridgeCommands {
   /// own viewport already absorbed when the soft keyboard shrank it — the page
   /// turns only the remainder into padding. Pass 0 to make the whole inset
   /// padding (the pre-measurement behaviour).
-  Future<void> setBottomPadding(double px, {double viewportHeight = 0}) {
+  ///
+  /// [nonScrollingInset] is the part of [px] whose changes must not move the
+  /// reading position — the composer's height when following it as it grows
+  /// is turned off, otherwise 0. A push in which only that part changed
+  /// re-pads the list without scrolling it.
+  Future<void> setBottomPadding(
+    double px, {
+    double viewportHeight = 0,
+    double nonScrollingInset = 0,
+  }) {
     return _host.evalJs(
       'window.bridge?.setBottomPadding('
-      '${px.toStringAsFixed(1)}, ${viewportHeight.toStringAsFixed(1)})',
+      '${px.toStringAsFixed(1)}, ${viewportHeight.toStringAsFixed(1)}, '
+      '${nonScrollingInset.toStringAsFixed(1)})',
     );
   }
 
