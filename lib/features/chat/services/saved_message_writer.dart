@@ -3,6 +3,7 @@ import '../../../core/utils/id_generator.dart';
 import '../../../core/utils/time_helpers.dart';
 import '../../image_gen/services/image_tag_markup.dart';
 import '../chat_state.dart';
+import 'variation_error_state.dart';
 
 /// Pure-function helpers for building the final [ChatState] after one
 /// generation cycle (success or error). Constructor injection of
@@ -325,32 +326,18 @@ class SavedMessageWriter {
       );
     }
     final original = saveSession.messages[idx];
-    final priorSwipes = original.swipes.isNotEmpty
-        ? [...original.swipes]
-        : [original.content];
-    final errorSwipes = [...priorSwipes, errorText];
-    // Build metas for the prior (healthy) swipes, then append the error
-    // swipe's meta carrying a per-swipe 'isError' marker so the error
-    // styling stays bound to this variation only (see
-    // ChatMessageService.setSwipe). The list is kept aligned 1:1 with
+    // Same base as the regen itself (`regenBaseOf`): a failed regen over an
+    // error replaces that error instead of stacking a second one, and the
+    // previously active healthy variation keeps its stats and blue sub-swipes
+    // in its own meta.
+    final base = regenBaseOf(original);
+    final errorSwipes = [...base.swipes, errorText];
+    // The error swipe's meta carries the per-swipe 'isError' marker so the
+    // error styling stays bound to this variation only (see
+    // ChatMessageService.setSwipe). The list is aligned 1:1 with
     // [errorSwipes] so the marker lands on the error swipe's index.
-    final priorMeta = <Map<String, dynamic>>[];
-    for (var i = 0; i < priorSwipes.length; i++) {
-      if (i < original.swipesMeta.length) {
-        priorMeta.add(original.swipesMeta[i]);
-      } else if (i == original.swipeId) {
-        priorMeta.add(<String, dynamic>{
-          'genTime': original.genTime,
-          'reasoning': original.reasoning,
-          'tokens': original.tokens,
-          'time': original.time,
-        });
-      } else {
-        priorMeta.add(<String, dynamic>{});
-      }
-    }
     final errorSwipesMeta = [
-      ...priorMeta,
+      ...base.swipesMeta,
       <String, dynamic>{'isError': true},
     ];
     final updated = original.copyWith(
@@ -364,6 +351,17 @@ class SavedMessageWriter {
       genTime: null,
       tokens: null,
       time: null,
+      // The error has no sub-swipes of its own. Keeping the previous
+      // variation's here let a variation switch save them into the error
+      // swipe's meta, and the error then came back showing healthy text in
+      // the error window (and a blue switcher that changed the text but not
+      // the error flag).
+      agentSwipes: const [],
+      agentSwipeId: 0,
+      studioOutputs: const [],
+      guidanceText: null,
+      triggeredLorebooks: const [],
+      triggeredMemories: const [],
     );
     final finalMessages = [...saveSession.messages];
     finalMessages[idx] = updated;

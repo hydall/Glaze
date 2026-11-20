@@ -396,7 +396,6 @@ void main() {
           },
           <String, dynamic>{},
           <String, dynamic>{
-            'isError': true,
             'agentSwipeId': 1,
             'agentSwipes': [
               const AgentSwipe(content: 'last final').toJson(),
@@ -428,7 +427,43 @@ void main() {
       expect(result.reasoning, 'last reasoning');
       expect(result.tokens, 17);
       expect(result.time, '12.05.2027 · RP_Day 2 · 14:15');
+      expect(result.isError, isFalse);
+    });
+
+    test('green deletion onto an error swipe shows the error\'s own text', () {
+      // The error swipe still carries sub-swipes left over from the reply it
+      // failed over (rows written before writeRegenError cleared them).
+      final message = ChatMessage(
+        id: 'a1',
+        role: 'assistant',
+        content: 'middle',
+        swipes: const ['first', 'middle', 'boom'],
+        swipeId: 1,
+        swipesMeta: [
+          <String, dynamic>{},
+          <String, dynamic>{},
+          <String, dynamic>{
+            'isError': true,
+            'agentSwipeId': 1,
+            'agentSwipes': [
+              const AgentSwipe(content: 'healthy').toJson(),
+              const AgentSwipe(
+                content: 'healthy cleaned',
+                kind: 'cleaned',
+              ).toJson(),
+            ],
+          },
+        ],
+        agentSwipes: const [AgentSwipe(content: 'middle')],
+      );
+
+      final result = ChatMessageService.removeActiveSwipe(message)!;
+
+      expect(result.swipes, ['first', 'boom']);
+      expect(result.swipeId, 1);
       expect(result.isError, isTrue);
+      expect(result.content, 'boom');
+      expect(result.agentSwipes.map((s) => s.content), ['boom']);
     });
 
     test('green deletion rejects the sole variation', () {
