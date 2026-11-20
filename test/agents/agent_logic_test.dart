@@ -253,6 +253,39 @@ void main() {
         expect(messages.last, {'role': 'user', 'content': 'Respond now.'});
       },
     );
+
+    test('skips stashed blocks and blocks in a disabled folder', () {
+      final messages = const AgentPromptBuilder().build(
+        agent: _agent('a').copyWith(
+          blocks: const [
+            PresetBlock(id: 'k', name: 'k', role: 'system', content: 'KEEP'),
+            PresetBlock(
+              id: 's',
+              name: 's',
+              role: 'system',
+              content: 'STASHED',
+              isStashed: true,
+            ),
+            PresetBlock(
+              id: 'f',
+              name: 'f',
+              role: 'system',
+              content: 'FOLDED',
+              folderId: 'off',
+            ),
+          ],
+          blockFolders: const [
+            PresetBlockFolder(id: 'off', name: 'off', enabled: false),
+          ],
+        ),
+        macroContext: ctx,
+        history: history,
+      );
+      final text = messages.map((m) => m['content']).join('\n');
+      expect(text, contains('KEEP'));
+      expect(text, isNot(contains('STASHED')));
+      expect(text, isNot(contains('FOLDED')));
+    });
   });
 
   group('injection', () {

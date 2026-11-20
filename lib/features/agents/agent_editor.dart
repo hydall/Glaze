@@ -6,14 +6,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/agent_definition.dart';
-import '../../core/models/preset.dart';
 import '../../core/state/agent_providers.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../shared/widgets/glaze_switch.dart';
 import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../settings/widgets/api_slot_group.dart';
-import 'agent_block_editor.dart';
+import '../settings/app_settings_provider.dart';
+import 'agent_prompt_card.dart';
 import 'agent_labels.dart';
 
 /// Edits one agent in place. Every change is saved shortly after it is made;
@@ -138,7 +137,12 @@ class AgentEditorBodyState extends ConsumerState<AgentEditorBody> {
             ),
           ],
         ),
-        _promptGroup(context),
+        AgentPromptCard(
+          agent: agent,
+          onChanged: _update,
+          addBlockAtTop:
+              ref.watch(appSettingsProvider).value?.addBlockAtTop ?? false,
+        ),
         if (agent.resultType == AgentResultType.contextInjection)
           _injectionGroup(context),
         _connectionGroup(context),
@@ -183,6 +187,12 @@ class AgentEditorBodyState extends ConsumerState<AgentEditorBody> {
                 ),
               );
             }),
+            MenuSwitchItem(
+              label: 'agents_run_alone'.tr(),
+              description: 'agents_run_alone_hint'.tr(),
+              value: agent.runAlone,
+              onChanged: (v) => _update(_agent.copyWith(runAlone: v)),
+            ),
             if (agent.phase != AgentPhase.postProcessing)
               MenuSwitchItem(
                 label: 'agents_param_reasoning'.tr(),
@@ -298,72 +308,6 @@ class AgentEditorBodyState extends ConsumerState<AgentEditorBody> {
       for (final id in ids)
         library.where((a) => a.id == id).firstOrNull?.displayName ?? id,
     ].join(', ');
-  }
-
-  Widget _promptGroup(BuildContext context) {
-    final blocks = _agent.blocks;
-    return MenuGroup(
-      header: 'agents_section_prompt'.tr(),
-      description: 'agents_prompt_hint'.tr(),
-      items: [
-        for (var i = 0; i < blocks.length; i++)
-          MenuItem(
-            icon: Icons.notes,
-            label: blocks[i].name.trim().isEmpty
-                ? 'agents_block_new'.tr()
-                : blocks[i].name,
-            subtitle:
-                '${blocks[i].role} · ${blocks[i].content.trim().split('\n').first}',
-            trailing: GlazeSwitch(
-              value: blocks[i].enabled,
-              onChanged: (v) => _setBlock(i, blocks[i].copyWith(enabled: v)),
-            ),
-            onTap: () => _editBlock(context, i),
-          ),
-        MenuItem(
-          icon: Icons.add,
-          label: 'agents_add_block'.tr(),
-          onTap: () {
-            final block = PresetBlock(
-              id: 'block_${DateTime.now().microsecondsSinceEpoch}',
-              name: 'agents_block_new'.tr(),
-              role: 'system',
-              content: '',
-            );
-            _update(_agent.copyWith(blocks: [..._agent.blocks, block]));
-            _editBlock(context, _agent.blocks.length - 1);
-          },
-        ),
-      ],
-    );
-  }
-
-  void _setBlock(int index, PresetBlock block) {
-    final blocks = [..._agent.blocks];
-    blocks[index] = block;
-    _update(_agent.copyWith(blocks: blocks));
-  }
-
-  void _editBlock(BuildContext context, int index) {
-    showAgentBlockEditor(
-      context,
-      block: _agent.blocks[index],
-      canMoveUp: index > 0,
-      canMoveDown: index < _agent.blocks.length - 1,
-      onChanged: (block) => _setBlock(index, block),
-      onDelete: () {
-        final blocks = [..._agent.blocks]..removeAt(index);
-        _update(_agent.copyWith(blocks: blocks));
-      },
-      onMove: (delta) {
-        final blocks = [..._agent.blocks];
-        final target = index + delta;
-        if (target < 0 || target >= blocks.length) return;
-        final moved = blocks.removeAt(index);
-        blocks.insert(target, moved);
-        _update(_agent.copyWith(blocks: blocks));
-      },
-    );
   }
 
   Widget _injectionGroup(BuildContext context) {

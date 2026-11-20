@@ -26,8 +26,8 @@ class AgentPromptBuilder {
     );
     final messages = <Map<String, String>>[];
     var historyPlaced = false;
-    for (final block in agent.blocks) {
-      if (!block.enabled || block.isStashed) continue;
+    for (final block in agent.activeBlocks) {
+      if (!block.enabled) continue;
       var content = block.content;
       if (content.contains(historyMacro)) {
         content = content.replaceAll(historyMacro, transcript);

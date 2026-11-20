@@ -362,8 +362,8 @@ PostGenEngineConfig buildEngineConfig({
     activeApiConfig: activeApiConfig,
     cleanerEnabled: rewrite != null,
     ledgerEnabled: tracker != null,
-    cleanerBlocks: rewrite?.blocks ?? const <PresetBlock>[],
-    ledgerBlocks: tracker?.blocks ?? const <PresetBlock>[],
+    cleanerBlocks: rewrite?.activeBlocks ?? const <PresetBlock>[],
+    ledgerBlocks: tracker?.activeBlocks ?? const <PresetBlock>[],
     broadcastBlocks: broadcast is List
         ? [for (final item in broadcast) '$item']
         : const <String>[],

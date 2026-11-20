@@ -44,8 +44,8 @@ List<Map<String, String>> buildBatchMessages({
   final tasks = StringBuffer();
   for (final agent in agents) {
     final parts = <String>[];
-    for (final block in agent.blocks) {
-      if (!block.enabled || block.isStashed) continue;
+    for (final block in agent.activeBlocks) {
+      if (!block.enabled) continue;
       final content = replaceMacros(
         block.content.replaceAll(
           AgentPromptBuilder.historyMacro,

@@ -3,6 +3,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import 'preset.dart';
+import 'preset_block_groups.dart';
 
 part 'agent_definition.freezed.dart';
 part 'agent_definition.g.dart';
@@ -193,4 +194,11 @@ abstract class AgentDefinition with _$AgentDefinition {
       _$AgentDefinitionFromJson(json);
 
   String get displayName => name.trim().isEmpty ? id : name.trim();
+
+  /// The blocks a request is built from: stashed blocks dropped, and every
+  /// block in a disabled folder reported as disabled.
+  List<PresetBlock> get activeBlocks => applyPresetFolderEnablement([
+    for (final block in blocks)
+      if (!block.isStashed) block,
+  ], blockFolders);
 }

@@ -7,44 +7,40 @@ import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
 
-/// Edits one prompt block of an agent: name, role, text, order, removal.
+/// Edits one prompt block of an agent: name, role, text, stash, removal.
 /// Every change is reported through [onChanged] as it happens.
 Future<void> showAgentBlockEditor(
   BuildContext context, {
   required PresetBlock block,
-  required bool canMoveUp,
-  required bool canMoveDown,
+  required bool stashed,
   required ValueChanged<PresetBlock> onChanged,
+  required ValueChanged<bool> onStash,
   required VoidCallback onDelete,
-  required ValueChanged<int> onMove,
 }) => GlazeBottomSheet.show<void>(
   context,
   title: 'agents_block_edit'.tr(),
   child: _AgentBlockEditor(
     block: block,
-    canMoveUp: canMoveUp,
-    canMoveDown: canMoveDown,
+    stashed: stashed,
     onChanged: onChanged,
+    onStash: onStash,
     onDelete: onDelete,
-    onMove: onMove,
   ),
 );
 
 class _AgentBlockEditor extends StatefulWidget {
   final PresetBlock block;
-  final bool canMoveUp;
-  final bool canMoveDown;
+  final bool stashed;
   final ValueChanged<PresetBlock> onChanged;
+  final ValueChanged<bool> onStash;
   final VoidCallback onDelete;
-  final ValueChanged<int> onMove;
 
   const _AgentBlockEditor({
     required this.block,
-    required this.canMoveUp,
-    required this.canMoveDown,
+    required this.stashed,
     required this.onChanged,
+    required this.onStash,
     required this.onDelete,
-    required this.onMove,
   });
 
   @override
@@ -124,24 +120,18 @@ class _AgentBlockEditorState extends State<_AgentBlockEditor> {
         ),
         MenuGroup(
           items: [
-            if (widget.canMoveUp)
-              MenuItem(
-                icon: Icons.arrow_upward,
-                label: 'agents_block_move_up'.tr(),
-                onTap: () {
-                  _close();
-                  widget.onMove(-1);
-                },
-              ),
-            if (widget.canMoveDown)
-              MenuItem(
-                icon: Icons.arrow_downward,
-                label: 'agents_block_move_down'.tr(),
-                onTap: () {
-                  _close();
-                  widget.onMove(1);
-                },
-              ),
+            MenuItem(
+              icon: widget.stashed
+                  ? Icons.unarchive_outlined
+                  : Icons.archive_outlined,
+              label: widget.stashed
+                  ? 'action_unstash'.tr()
+                  : 'action_stash'.tr(),
+              onTap: () {
+                _close();
+                widget.onStash(!widget.stashed);
+              },
+            ),
             MenuItem(
               icon: Icons.delete_outline,
               label: 'agents_block_delete'.tr(),
