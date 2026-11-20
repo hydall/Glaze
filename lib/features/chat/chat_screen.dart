@@ -1383,7 +1383,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         bindings,
         charId: widget.charId,
         sessionId: session.id,
-      ).any((agent) => agent.builtinKind == AgentBuiltin.tracker);
+      ).any((agent) => agent.resultType == AgentResultType.ledgerUpdate);
       if (!trackerOn) return true;
       final trackerRepo = ref.read(trackerRepoProvider);
       final existing = await Future.wait([

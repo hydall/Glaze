@@ -31,9 +31,11 @@ class AgentTurnPlan {
   bool get isEmpty =>
       preGenerationWaves.isEmpty && parallel.isEmpty && postProcessing.isEmpty;
 
-  /// The post agent of [builtinKind], if it runs this turn.
-  AgentDefinition? builtin(String builtinKind) => postProcessing
-      .where((agent) => agent.builtinKind == builtinKind)
+  /// The first post agent with [resultType] this turn — the one that drives
+  /// that engine (Post Clean for `text_rewrite`, the Tracker for
+  /// `ledger_update`, Card Rewriter for `card_update_proposal`).
+  AgentDefinition? firstOfType(String resultType) => postProcessing
+      .where((agent) => agent.resultType == resultType)
       .firstOrNull;
 
   /// The plan for the reply that follows [history] in a chat where [enabled]
@@ -94,23 +96,9 @@ class AgentTurnPlan {
     return keywords.any(text.contains);
   }
 
-  /// A result type the phase cannot carry, or a built-in engine on the wrong
-  /// result type, never runs.
-  static bool _validShape(AgentDefinition agent) {
-    if (!AgentResultType.allowedFor(agent.phase).contains(agent.resultType)) {
-      return false;
-    }
-    if (agent.phase != AgentPhase.postProcessing) return true;
-    // Post agents run on a built-in engine; a user agent may borrow the Post
-    // Clean engine (text_rewrite) with its own prompt.
-    return switch (agent.resultType) {
-      AgentResultType.textRewrite => true,
-      AgentResultType.ledgerUpdate => agent.builtinKind == AgentBuiltin.tracker,
-      AgentResultType.cardUpdateProposal =>
-        agent.builtinKind == AgentBuiltin.cardRewriter,
-      _ => false,
-    };
-  }
+  /// A result type the phase cannot carry never runs.
+  static bool _validShape(AgentDefinition agent) =>
+      AgentResultType.allowedFor(agent.phase).contains(agent.resultType);
 
   /// Drops agents whose dependencies do not run this turn, until stable.
   static List<AgentDefinition> _withDependencies(List<AgentDefinition> due) {

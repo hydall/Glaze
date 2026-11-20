@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/agents/agent_prompt_builder.dart';
 import 'package:glaze_flutter/core/llm/agents/agent_turn_plan.dart';
-import 'package:glaze_flutter/core/llm/agents/builtin_agents.dart';
+import 'package:glaze_flutter/core/llm/agents/agent_templates.dart';
 import 'package:glaze_flutter/core/llm/macro_engine.dart';
 import 'package:glaze_flutter/core/llm/prompt/runtime_prompt_block.dart';
 import 'package:glaze_flutter/core/models/agent_binding.dart';
@@ -16,7 +16,6 @@ AgentDefinition _agent(
   String id, {
   String phase = AgentPhase.preGeneration,
   String? resultType,
-  String? builtin,
   bool global = false,
   int everyN = 1,
   List<String> keywords = const [],
@@ -27,7 +26,6 @@ AgentDefinition _agent(
   name: id,
   phase: phase,
   resultType: resultType ?? AgentResultType.allowedFor(phase).first,
-  builtinKind: builtin,
   enabledGlobally: global,
   cadence: AgentCadence(everyN: everyN, keywords: keywords),
   dependsOn: dependsOn,
@@ -104,9 +102,9 @@ void main() {
             phase: AgentPhase.postProcessing,
             resultType: AgentResultType.textRewrite,
           ),
-          // A user agent cannot drive the Tracker engine.
+          // Any agent can drive the Tracker engine.
           _agent(
-            'fake_tracker',
+            'tracker',
             phase: AgentPhase.postProcessing,
             resultType: AgentResultType.ledgerUpdate,
           ),
@@ -117,7 +115,8 @@ void main() {
       );
       expect(plan.preGeneration.map((a) => a.id), ['pre']);
       expect(plan.parallel.map((a) => a.id), ['par']);
-      expect(plan.postProcessing.map((a) => a.id), ['clean']);
+      expect(plan.postProcessing.map((a) => a.id), ['clean', 'tracker']);
+      expect(plan.firstOfType(AgentResultType.ledgerUpdate)?.id, 'tracker');
     });
 
     test('every N-th reply counts the reply about to be written', () {
@@ -295,18 +294,18 @@ void main() {
 
   group('engine config', () {
     const chat = ApiConfig(id: 'chat', name: 'Chat');
-    final seeds = {for (final a in builtinAgentSeeds()) a.builtinKind!: a};
+    final seeds = {for (final t in agentTemplates) t.id: t.build()};
 
     test('Post Clean and Tracker map onto the engines', () {
       final config = buildEngineConfig(
-        rewrite: seeds[AgentBuiltin.postClean]!.copyWith(
+        rewrite: seeds['post_clean']!.copyWith(
           connection: const AgentConnection(
             mode: AgentConnectionMode.config,
             apiConfigId: 'cheap',
             model: 'm1',
           ),
         ),
-        tracker: seeds[AgentBuiltin.tracker],
+        tracker: seeds['tracker'],
         cardRewriter: null,
         pipelineSettings: const PipelineSettings(),
         apiConfigs: const [chat],
@@ -327,8 +326,8 @@ void main() {
     test('Card Rewriter switches its lane on', () {
       final config = buildEngineConfig(
         rewrite: null,
-        tracker: seeds[AgentBuiltin.tracker],
-        cardRewriter: seeds[AgentBuiltin.cardRewriter],
+        tracker: seeds['tracker'],
+        cardRewriter: seeds['card_rewriter'],
         pipelineSettings: const PipelineSettings(),
         apiConfigs: const [chat],
         activeApiConfig: chat,
@@ -339,7 +338,7 @@ void main() {
 
     test('the helper connection comes from the agent settings', () {
       final config = buildEngineConfig(
-        rewrite: seeds[AgentBuiltin.postClean]!.copyWith(
+        rewrite: seeds['post_clean']!.copyWith(
           connection: const AgentConnection(mode: AgentConnectionMode.helper),
         ),
         tracker: null,

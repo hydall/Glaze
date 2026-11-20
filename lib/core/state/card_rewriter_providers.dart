@@ -11,22 +11,21 @@ import '../models/card_rewriter_settings.dart';
 import '../services/card_rewriter/automated_card_evolution_service.dart';
 import 'db_provider.dart';
 import 'agent_providers.dart';
-import '../llm/agents/builtin_agents.dart';
 import '../models/agent_definition.dart';
 
 /// The Card Rewriter settings the lane runs on.
 ///
 /// Every reader — the services below, the Agent Ops management tab, the
 /// post-generation status card — goes through this one place. Whether the
-/// lane runs in a turn is decided by the built-in Card Rewriter agent (the
-/// Tracker stage checks the turn's plan), so the lane itself is always
-/// enabled here; its connection and model come from that agent.
+/// lane runs in a turn is decided by the turn's plan (a `card_update_proposal`
+/// agent), so the lane itself is always enabled here; its connection and model
+/// come from the first such agent in the library.
 final cardRewriterSettingsProvider = Provider<CardRewriterSettings>((ref) {
   final pipeline = ref.watch(pipelineSettingsProvider);
   final agent = ref
       .watch(agentLibraryProvider)
       .value
-      ?.where((a) => a.id == BuiltinAgentIds.cardRewriter)
+      ?.where((a) => a.resultType == AgentResultType.cardUpdateProposal)
       .firstOrNull;
   var settings = pipeline.cardRewriter.copyWith(enabled: true);
   if (agent == null) return settings;

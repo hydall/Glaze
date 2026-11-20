@@ -59,17 +59,6 @@ class AgentRepo {
     });
   }
 
-  /// Writes [seeds] whose ids are not stored yet; never overwrites an agent
-  /// the user already has, so edits to built-in agents survive.
-  Future<void> ensureSeeded(List<AgentDefinition> seeds) async {
-    final existing = (await _db.select(_db.agentDefinitionRows).get())
-        .map((row) => row.agentId)
-        .toSet();
-    for (final seed in seeds) {
-      if (!existing.contains(seed.id)) await put(seed);
-    }
-  }
-
   static AgentDefinition? decode(String raw) {
     try {
       return AgentDefinition.fromJson(

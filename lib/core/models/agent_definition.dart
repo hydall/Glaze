@@ -55,16 +55,6 @@ abstract final class AgentResultType {
   };
 }
 
-/// Built-in agents: they keep their own engine, but their prompt, connection
-/// and cadence are editable like any agent's.
-abstract final class AgentBuiltin {
-  static const postClean = 'post_clean';
-  static const tracker = 'tracker';
-  static const cardRewriter = 'card_rewriter';
-
-  static const all = [postClean, tracker, cardRewriter];
-}
-
 /// Which connection an agent runs on.
 abstract final class AgentConnectionMode {
   /// The chat's own connection.
@@ -165,8 +155,6 @@ abstract class AgentDefinition with _$AgentDefinition {
     @Default('') String name,
     @Default('') String description,
 
-    /// One of [AgentBuiltin] for a built-in agent, null for the user's own.
-    String? builtinKind,
     @Default(AgentPhase.preGeneration) String phase,
     @Default(AgentResultType.contextInjection) String resultType,
 
@@ -199,8 +187,6 @@ abstract class AgentDefinition with _$AgentDefinition {
 
   factory AgentDefinition.fromJson(Map<String, dynamic> json) =>
       _$AgentDefinitionFromJson(json);
-
-  bool get isBuiltin => builtinKind != null;
 
   String get displayName => name.trim().isEmpty ? id : name.trim();
 }

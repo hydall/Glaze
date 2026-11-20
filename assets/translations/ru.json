@@ -3992,7 +3992,6 @@
   "agents_delete_title": "Удалить агента",
   "agents_delete_confirm": "Удалить «{}» и его привязки?",
   "agents_bindings": "Где работает",
-  "agents_builtin": "Встроенный",
   "agents_on_everywhere": "Включён во всех чатах",
   "agents_phase_pre": "До ответа",
   "agents_phase_parallel": "Вместе с ответом",
@@ -4052,7 +4051,6 @@
   "agents_depth": "Глубина",
   "agents_role": "Роль",
   "agents_macro_hint": "В пресете: {}",
-  "agents_builtin_note": "Этот агент работает на встроенном движке. Промпт, подключение и частоту можно менять.",
   "agents_bindings_global": "Включён во всех чатах",
   "agents_bindings_global_desc": "Персонаж или чат ниже могут это переопределить.",
   "agents_bindings_characters": "Персонажи",
@@ -4084,5 +4082,16 @@
   "agents_import_failed": "Не удалось импортировать агента",
   "agents_imported": "Импортирован «{}»",
   "agents_exported": "Экспортирован «{}»",
-  "agents_copy_suffix": "копия"
+  "agents_copy_suffix": "копия",
+  "agents_from_template": "Из шаблона",
+  "agents_template_post_clean": "Post Clean",
+  "agents_template_post_clean_desc": "Переписывает ответ после получения: убирает повторы и клише в синий под-свайп, оригинал остаётся.",
+  "agents_template_tracker": "Трекер",
+  "agents_template_tracker_desc": "Ведёт состояние сцены после каждого ответа: время, место, кто рядом, отношения, кто что знает.",
+  "agents_template_card_rewriter": "Card Rewriter",
+  "agents_template_card_rewriter_desc": "Предлагает правки карточки и лорбука по ходу истории; каждую правку вы подтверждаете. Нужен Трекер.",
+  "agents_template_continuity": "Заметки о связности",
+  "agents_template_continuity_desc": "До ответа перечисляет факты, которым ответ не должен противоречить.",
+  "agents_template_director": "Режиссёр",
+  "agents_template_director_desc": "Вместе с ответом предлагает, куда может пойти сцена; это увидит следующий ответ."
 }

@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../db/repositories/agent_binding_repo.dart';
 import '../db/repositories/agent_repo.dart';
 import '../db/repositories/agent_run_repo.dart';
-import '../llm/agents/builtin_agents.dart';
+import '../llm/agents/agent_templates.dart';
 import '../models/agent_binding.dart';
 import '../models/agent_definition.dart';
 import '../models/agent_run.dart';
@@ -23,7 +23,7 @@ final agentRunRepoProvider = Provider<AgentRunRepo>(
   (ref) => AgentRunRepo(ref.watch(appDbProvider)),
 );
 
-/// The agent library, built-in agents seeded on first read.
+/// The agent library.
 final agentLibraryProvider =
     AsyncNotifierProvider<AgentLibraryNotifier, List<AgentDefinition>>(
       AgentLibraryNotifier.new,
@@ -34,9 +34,7 @@ class AgentLibraryNotifier extends AsyncNotifier<List<AgentDefinition>> {
 
   @override
   Future<List<AgentDefinition>> build() async {
-    final repo = ref.watch(agentRepoProvider);
-    await repo.ensureSeeded(builtinAgentSeeds());
-    return repo.getAll();
+    return ref.watch(agentRepoProvider).getAll();
   }
 
   Future<void> save(AgentDefinition agent) async {
@@ -61,7 +59,26 @@ class AgentLibraryNotifier extends AsyncNotifier<List<AgentDefinition>> {
     return agent;
   }
 
-  /// A copy of [source] as a user agent (a copied built-in keeps its engine).
+  /// A new agent from [template], named [name], after every existing one.
+  Future<AgentDefinition> createFromTemplate(
+    AgentTemplate template, {
+    required String name,
+    String description = '',
+  }) async {
+    final current = state.value ?? await future;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final agent = template.build().copyWith(
+      id: 'agent_$now',
+      name: name,
+      description: description,
+      order: _nextOrder(current),
+      updatedAt: now,
+    );
+    await save(agent);
+    return agent;
+  }
+
+  /// A copy of [source], off everywhere.
   Future<AgentDefinition> duplicate(AgentDefinition source) async {
     final current = state.value ?? await future;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -75,12 +92,7 @@ class AgentLibraryNotifier extends AsyncNotifier<List<AgentDefinition>> {
     return copy;
   }
 
-  /// Built-in agents can be edited but not deleted.
   Future<void> delete(String id) async {
-    final agent = (state.value ?? const [])
-        .where((a) => a.id == id)
-        .firstOrNull;
-    if (agent == null || agent.id.startsWith('builtin_')) return;
     await _repo.delete(id);
     ref.invalidateSelf();
     await future;
@@ -95,8 +107,8 @@ class AgentLibraryNotifier extends AsyncNotifier<List<AgentDefinition>> {
     await future;
   }
 
-  /// Imports an exported agent. Always a new user agent; the stored id and
-  /// built-in kind of the file are not trusted.
+  /// Imports an exported agent. Always a new agent; the stored id and links
+  /// of the file are not trusted.
   Future<AgentDefinition> importJson(String raw) async {
     final decoded = jsonDecode(raw);
     final map = decoded is Map && decoded['agent'] is Map
@@ -105,11 +117,8 @@ class AgentLibraryNotifier extends AsyncNotifier<List<AgentDefinition>> {
     final parsed = AgentDefinition.fromJson(Map<String, dynamic>.from(map));
     final current = state.value ?? await future;
     final now = DateTime.now().millisecondsSinceEpoch;
-    final builtin = parsed.builtinKind;
     final agent = parsed.copyWith(
       id: 'agent_$now',
-      // A copied built-in keeps its engine only if that engine exists.
-      builtinKind: AgentBuiltin.all.contains(builtin) ? builtin : null,
       enabledGlobally: false,
       dependsOn: const [],
       seesOutputsOf: const [],
@@ -174,26 +183,4 @@ final chatAgentsProvider =
             ),
           ),
       ]);
-    });
-
-/// Whether the agent of [builtinKind] is switched on in a chat (ignoring the
-/// chat's own off switch, which the caller checks against the session).
-final chatBuiltinAgentOnProvider =
-    Provider.family<bool, ({String charId, String sessionId, String kind})>((
-      ref,
-      key,
-    ) {
-      final entries =
-          ref
-              .watch(
-                chatAgentsProvider((
-                  charId: key.charId,
-                  sessionId: key.sessionId,
-                )),
-              )
-              .value ??
-          const <ChatAgentEntry>[];
-      return entries.any(
-        (entry) => entry.agent.builtinKind == key.kind && entry.state.enabled,
-      );
     });

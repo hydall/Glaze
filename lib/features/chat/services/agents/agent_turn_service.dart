@@ -234,11 +234,9 @@ class AgentTurnService {
   /// The settings Post Clean and the Tracker run on this turn, or null when
   /// neither runs.
   Future<PostGenEngineConfig?> engineConfigFor(AgentTurnPlan plan) async {
-    final rewrite = plan.postProcessing
-        .where((agent) => agent.resultType == AgentResultType.textRewrite)
-        .firstOrNull;
-    final tracker = plan.builtin(AgentBuiltin.tracker);
-    final cardRewriter = plan.builtin(AgentBuiltin.cardRewriter);
+    final rewrite = plan.firstOfType(AgentResultType.textRewrite);
+    final tracker = plan.firstOfType(AgentResultType.ledgerUpdate);
+    final cardRewriter = plan.firstOfType(AgentResultType.cardUpdateProposal);
     if (rewrite == null && tracker == null) return null;
     return buildEngineConfig(
       rewrite: rewrite,

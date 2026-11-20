@@ -3951,7 +3951,6 @@
   "agents_delete_title": "Delete agent",
   "agents_delete_confirm": "Delete «{}» and its bindings?",
   "agents_bindings": "Where it runs",
-  "agents_builtin": "Built-in",
   "agents_on_everywhere": "On in every chat",
   "agents_phase_pre": "Before the reply",
   "agents_phase_parallel": "With the reply",
@@ -4011,7 +4010,6 @@
   "agents_depth": "Depth",
   "agents_role": "Role",
   "agents_macro_hint": "In a preset: {}",
-  "agents_builtin_note": "This agent runs on its built-in engine. Its prompt, connection and cadence are yours to change.",
   "agents_bindings_global": "On in every chat",
   "agents_bindings_global_desc": "A character or a chat below can override it.",
   "agents_bindings_characters": "Characters",
@@ -4043,5 +4041,16 @@
   "agents_import_failed": "Could not import the agent",
   "agents_imported": "Imported «{}»",
   "agents_exported": "Exported «{}»",
-  "agents_copy_suffix": "copy"
+  "agents_copy_suffix": "copy",
+  "agents_from_template": "From a template",
+  "agents_template_post_clean": "Post Clean",
+  "agents_template_post_clean_desc": "Rewrites the reply after it arrives: repetition and clichés out, into a blue sub-swipe; the original stays.",
+  "agents_template_tracker": "Tracker",
+  "agents_template_tracker_desc": "Keeps the scene state after every reply: time, place, who is present, relationships, what each character knows.",
+  "agents_template_card_rewriter": "Card Rewriter",
+  "agents_template_card_rewriter_desc": "Proposes edits to the character card and lorebook as the story grows; every change waits for your review. Needs a Tracker.",
+  "agents_template_continuity": "Continuity notes",
+  "agents_template_continuity_desc": "Before the reply, lists the facts it must not contradict.",
+  "agents_template_director": "Director",
+  "agents_template_director_desc": "Beside the reply, suggests where the scene could go next; the next reply sees it."
 }

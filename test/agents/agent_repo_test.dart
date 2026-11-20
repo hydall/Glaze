@@ -4,7 +4,7 @@ import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/agent_binding_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/agent_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/agent_run_repo.dart';
-import 'package:glaze_flutter/core/llm/agents/builtin_agents.dart';
+import 'package:glaze_flutter/core/llm/agents/agent_templates.dart';
 import 'package:glaze_flutter/core/models/agent_binding.dart';
 import 'package:glaze_flutter/core/models/agent_definition.dart';
 import 'package:glaze_flutter/core/models/agent_run.dart';
@@ -14,21 +14,6 @@ void main() {
 
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
   tearDown(() => db.close());
-
-  test('seeding adds built-ins once and never overwrites an edit', () async {
-    final repo = AgentRepo(db);
-    await repo.ensureSeeded(builtinAgentSeeds());
-    final tracker = await repo.getById(BuiltinAgentIds.tracker);
-    expect(tracker?.builtinKind, AgentBuiltin.tracker);
-
-    await repo.put(tracker!.copyWith(name: 'Mine', enabledGlobally: true));
-    await repo.ensureSeeded(builtinAgentSeeds());
-
-    final again = await repo.getById(BuiltinAgentIds.tracker);
-    expect(again?.name, 'Mine');
-    expect(again?.enabledGlobally, isTrue);
-    expect(await repo.getAll(), hasLength(builtinAgentSeeds().length));
-  });
 
   test('deleting an agent drops its bindings', () async {
     final repo = AgentRepo(db);
@@ -104,5 +89,16 @@ void main() {
     final kept = await runs.forSession('s', limit: 1000);
     expect(kept, hasLength(AgentRunRepo.keepPerSession));
     expect(kept.first.createdAt, AgentRunRepo.keepPerSession + 4);
+  });
+
+  test('every template builds a valid, unnamed agent shape', () {
+    for (final template in agentTemplates) {
+      final agent = template.build();
+      expect(
+        AgentResultType.allowedFor(agent.phase),
+        contains(agent.resultType),
+        reason: template.id,
+      );
+    }
   });
 }

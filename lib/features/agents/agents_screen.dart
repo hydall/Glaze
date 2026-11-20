@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/llm/agents/agent_templates.dart';
 import '../../core/models/agent_definition.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/state/agent_providers.dart';
@@ -115,6 +116,19 @@ class _AgentsScreenState extends ConsumerState<AgentsScreen> {
             style: TextStyle(fontSize: 13, color: context.cs.onSurfaceVariant),
           ),
         ),
+        if (agents.isEmpty)
+          MenuGroup(
+            header: 'agents_from_template'.tr(),
+            items: [
+              for (final template in agentTemplates)
+                MenuItem(
+                  icon: agentPhaseIcon(template.build().phase),
+                  label: template.nameKey.tr(),
+                  subtitle: template.descriptionKey.tr(),
+                  onTap: () => _createFromTemplate(template),
+                ),
+            ],
+          ),
         for (final phase in AgentPhase.all)
           if (groups[phase]!.isNotEmpty)
             MenuGroup(
@@ -131,12 +145,11 @@ class _AgentsScreenState extends ConsumerState<AgentsScreen> {
 
   Widget _agentRow(BuildContext context, AgentDefinition agent) {
     final subtitle = [
-      if (agent.isBuiltin) 'agents_builtin'.tr(),
       agentResultLabel(agent.resultType),
       if (agent.description.trim().isNotEmpty) agent.description.trim(),
     ].join(' · ');
     return MenuItem(
-      icon: agent.isBuiltin ? Icons.auto_awesome : Icons.smart_toy_outlined,
+      icon: agentPhaseIcon(agent.phase),
       label: agent.displayName,
       subtitle: subtitle,
       onTap: () => setState(() => _editingId = agent.id),
@@ -184,6 +197,14 @@ class _AgentsScreenState extends ConsumerState<AgentsScreen> {
           },
         ),
         BottomSheetItem(
+          icon: Icons.auto_awesome_outlined,
+          label: 'agents_from_template'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _showTemplates(context);
+          },
+        ),
+        BottomSheetItem(
           icon: Icons.file_upload_outlined,
           label: 'agents_import'.tr(),
           onTap: () {
@@ -193,6 +214,36 @@ class _AgentsScreenState extends ConsumerState<AgentsScreen> {
         ),
       ],
     );
+  }
+
+  void _showTemplates(BuildContext context) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'agents_from_template'.tr(),
+      items: [
+        for (final template in agentTemplates)
+          BottomSheetItem(
+            icon: agentPhaseIcon(template.build().phase),
+            label: template.nameKey.tr(),
+            hint: template.descriptionKey.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _createFromTemplate(template);
+            },
+          ),
+      ],
+    );
+  }
+
+  Future<void> _createFromTemplate(AgentTemplate template) async {
+    final agent = await ref
+        .read(agentLibraryProvider.notifier)
+        .createFromTemplate(
+          template,
+          name: template.nameKey.tr(),
+          description: template.descriptionKey.tr(),
+        );
+    if (mounted) setState(() => _editingId = agent.id);
   }
 
   void _showAgentMenu(BuildContext context, AgentDefinition agent) {
@@ -232,25 +283,24 @@ class _AgentsScreenState extends ConsumerState<AgentsScreen> {
             _export(agent);
           },
         ),
-        if (!agent.isBuiltin)
-          BottomSheetItem(
-            icon: Icons.delete_outline,
-            label: 'agents_delete'.tr(),
-            isDestructive: true,
-            onTap: () async {
-              Navigator.of(context, rootNavigator: true).pop();
-              final ok = await confirmDeleteSheet(
-                context,
-                title: 'agents_delete_title'.tr(),
-                description: 'agents_delete_confirm'.tr(
-                  args: [agent.displayName],
-                ),
-              );
-              if (ok) {
-                await ref.read(agentLibraryProvider.notifier).delete(agent.id);
-              }
-            },
-          ),
+        BottomSheetItem(
+          icon: Icons.delete_outline,
+          label: 'agents_delete'.tr(),
+          isDestructive: true,
+          onTap: () async {
+            Navigator.of(context, rootNavigator: true).pop();
+            final ok = await confirmDeleteSheet(
+              context,
+              title: 'agents_delete_title'.tr(),
+              description: 'agents_delete_confirm'.tr(
+                args: [agent.displayName],
+              ),
+            );
+            if (ok) {
+              await ref.read(agentLibraryProvider.notifier).delete(agent.id);
+            }
+          },
+        ),
       ],
     );
   }

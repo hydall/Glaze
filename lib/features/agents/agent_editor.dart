@@ -8,7 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/agent_definition.dart';
 import '../../core/models/preset.dart';
 import '../../core/state/agent_providers.dart';
-import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_switch.dart';
 import '../../shared/widgets/list_controls.dart';
@@ -100,7 +99,6 @@ class AgentEditorBodyState extends ConsumerState<AgentEditorBody> {
   @override
   Widget build(BuildContext context) {
     final agent = _agent;
-    final builtin = agent.isBuiltin;
     final library = ref.watch(agentLibraryProvider).value ?? const [];
     final others = [
       for (final other in library)
@@ -112,17 +110,6 @@ class AgentEditorBodyState extends ConsumerState<AgentEditorBody> {
         bottom: MediaQuery.paddingOf(context).bottom + 32,
       ),
       children: [
-        if (builtin)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Text(
-              'agents_builtin_note'.tr(),
-              style: TextStyle(
-                fontSize: 13,
-                color: context.cs.onSurfaceVariant,
-              ),
-            ),
-          ),
         MenuGroup(
           header: 'agents_section_basics'.tr(),
           items: [
@@ -142,12 +129,12 @@ class AgentEditorBodyState extends ConsumerState<AgentEditorBody> {
               label: 'agents_field_phase'.tr(),
               currentValue: agentPhaseLabel(agent.phase),
               description: agentPhaseHint(agent.phase),
-              onTap: builtin ? () {} : () => _pickPhase(context),
+              onTap: () => _pickPhase(context),
             ),
             MenuSelectorItem(
               label: 'agents_field_result'.tr(),
               currentValue: agentResultLabel(agent.resultType),
-              onTap: builtin ? () {} : () => _pickResult(context),
+              onTap: () => _pickResult(context),
             ),
           ],
         ),
@@ -527,10 +514,7 @@ class AgentEditorBodyState extends ConsumerState<AgentEditorBody> {
   }
 
   void _pickResult(BuildContext context) {
-    // A user agent after the reply can only borrow the Post Clean engine.
-    final allowed = _agent.phase == AgentPhase.postProcessing
-        ? const [AgentResultType.textRewrite]
-        : AgentResultType.allowedFor(_agent.phase);
+    final allowed = AgentResultType.allowedFor(_agent.phase);
     showGlazePickerSheet(
       context,
       title: 'agents_field_result'.tr(),
