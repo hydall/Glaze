@@ -7,12 +7,23 @@ import 'active_selection_provider.dart';
 import 'global_regex_provider.dart';
 import 'studio_feature_provider.dart';
 
+/// Counts writes to the presets table, so a list read out of it is read again
+/// when a preset changes — a script switched on or off in the active preset
+/// included — not only when another preset becomes active.
+final presetWritesProvider = StreamProvider<int>((ref) {
+  var writes = 0;
+  return ref.watch(presetRepoProvider).watchWrites().map((_) => ++writes);
+});
+
 final activeRegexesProvider = FutureProvider<List<PresetRegex>>((ref) async {
   // Every dependency is subscribed here, before the first await. A `ref`
   // touched after one belongs to a build that a changed dependency may already
   // have replaced — and the Studio switch changes precisely then, as it comes
   // out of its loading window.
   final repo = ref.watch(presetRepoProvider);
+  // The active preset's own scripts live in its row: a toggle in the regex
+  // sheet rewrites that row, and the chat has to see it at once.
+  ref.watch(presetWritesProvider);
   // Awaited, not read. The global scripts load from SharedPreferences, and on a
   // cold start that has not finished by the time anything asks for this list:
   // reading `.value` then yielded null and dropped every global script from a

@@ -4141,5 +4141,10 @@
   "model_tools_field_tags": "Tags",
   "model_tools_field_creator": "Creator",
   "model_tools_field_character_version": "Version",
-  "model_tools_field_avatar": "Picture"
+  "model_tools_field_avatar": "Picture",
+  "lorebook_filter_unused": "Not connected",
+  "lorebook_delete_selected_confirm": "Delete {0} lorebooks? This cannot be undone.",
+  "persona_delete_selected_confirm": "Delete {0} personas? This cannot be undone.",
+  "persona_filter_bound": "Bound to a character or chat",
+  "persona_filter_unbound": "Not bound"
 }

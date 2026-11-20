@@ -13,7 +13,6 @@ import 'package:easy_localization/easy_localization.dart';
 import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
-import '../../shared/shell/nav_height_provider.dart';
 import '../../core/llm/regex_passes.dart';
 import '../../core/models/folder.dart';
 import '../../core/models/preset.dart';
@@ -31,19 +30,18 @@ import 'regex_list_controls.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/folder_section.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/folder_name_dialog.dart';
 import '../../shared/widgets/glaze_list_item.dart';
+import '../../shared/widgets/glaze_list_screen.dart';
 import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_switch.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/menu_group.dart';
-import '../../shared/widgets/selection_bar.dart';
 import '../../shared/widgets/sheet_view.dart';
 
 /// Where a newly added script lands. [agent] is the Studio list, which takes
@@ -757,57 +755,30 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     final studioRegexes = studioAsync.value ?? <StudioRegex>[];
 
     final isEdit = _view == 'edit';
-    // On desktop the add action belongs in the sheet's header — drawn in the
-    // sidebar panel's app bar, or the sheet window's title bar — instead of as
-    // a floating button over the list.
-    final desktop = isDesktopLayout(context);
     final selecting = _selected.isNotEmpty;
 
-    return SheetView(
+    return GlazeListScreen(
       startExpanded: widget.startExpanded,
-      showRouteBackground: false,
       title: isEdit ? 'regex_editor'.tr() : _levelTitle(activePreset),
       showBack: isEdit || widget.startExpanded || _area != null,
-      actions: !isEdit && desktop
-          ? [
-              SheetViewAction(
-                icon: const Icon(Icons.add),
-                tooltip: 'action_add_script'.tr(),
-                onPressed: () => _showAddMenu(context),
-              ),
-            ]
-          : const [],
+      addLabel: 'action_add_script'.tr(),
+      onAdd: () => _showAddMenu(context),
+      editing: isEdit,
       // The order hint and the filter button are pinned to the header, so
-      // they stay in reach at any scroll offset. On desktop the selection
-      // takes their place, as on the Presets list.
-      headerBottom: isEdit
-          ? null
-          : selecting && desktop
-          ? GlazeSelectionBar(
-              compact: true,
+      // they stay in reach at any scroll offset.
+      controls: _buildControlsRow(),
+      selection: selecting
+          ? GlazeListSelection(
               count: _selected.length,
               onCancel: _clearSelection,
               onMore: () => _showSelectionActions(context),
             )
-          : _buildControlsRow(),
+          : null,
       // A back gesture unwinds the same chain the header's back button walks —
       // leave the editor, drop the selection, step out of the folder — and only
       // closes the sheet once none of those is left.
       canPop: !isEdit && _area == null && !selecting,
       onBack: _handleBack,
-      floating: isEdit || !selecting || desktop
-          ? null
-          : Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, _floatingBottom()),
-                child: GlazeSelectionBar(
-                  count: _selected.length,
-                  onCancel: _clearSelection,
-                  onMore: () => _showSelectionActions(context),
-                ),
-              ),
-            ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 280),
         transitionBuilder: _buildTransition,
@@ -829,13 +800,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
                 studioRegexes: studioRegexes,
               ),
       ),
-      floatingActionButton: isEdit || desktop || selecting
-          ? null
-          : GlazeFab(
-              label: 'action_add_script'.tr(),
-              tooltip: 'action_add_script'.tr(),
-              onTap: () => _showAddMenu(context),
-            ),
     );
   }
 
@@ -858,14 +822,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         return folders?.where((f) => f.id == folderId).firstOrNull?.name ??
             'regex_global_scripts'.tr();
     }
-  }
-
-  /// The selection bar floats above whichever chrome sits at the bottom: the
-  /// shell nav bar when the screen is a route, the safe-area inset in a sheet.
-  double _floatingBottom() {
-    final navHeight = ref.watch(navHeightProvider);
-    final inset = MediaQuery.paddingOf(context).bottom;
-    return (navHeight > inset ? navHeight : inset) + 16;
   }
 
   // ── Header row ───────────────────────────────────────────────────────────────
@@ -1063,87 +1019,47 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     // while the rows are being picked.
     final draggable = !selecting && visible.length > 1;
 
-    return Builder(
+    return KeyedSubtree(
       key: const ValueKey('regex-list'),
-      builder: (innerContext) {
-        final flat = inSidebarPanel(innerContext);
-        final top = MediaQuery.paddingOf(innerContext).top + (flat ? 12 : 8);
-        final bottom = MediaQuery.paddingOf(innerContext).bottom + 96;
-        final list = CustomScrollView(
-          key: PageStorageKey('regex_list_${area?.name}_$folderId'),
-          slivers: [
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(16, top, 16, 0),
-              sliver: SliverList.list(
-                children: [
-                  if (lead != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: lead,
-                    ),
-                  ...folders,
-                  if (folders.isNotEmpty) const SizedBox(height: 8),
-                  // Folders hold one kind of script each, so the rows need no
-                  // label of their own; only the agent list explains itself.
-                  if (description != null) _ListHint(text: description),
-                  if (visible.isEmpty)
-                    _EmptyState(
-                      label: scripts.isEmpty && folderId != null
-                          ? 'folder_empty_items'.tr()
-                          : 'no_results'.tr(),
-                    ),
-                ],
-              ),
+      child: GlazeListBody(
+        levelKey: 'regex_${area?.name}_$folderId',
+        header: [
+          if (lead != null)
+            Padding(padding: const EdgeInsets.only(bottom: 12), child: lead),
+          ...folders,
+          if (folders.isNotEmpty) const SizedBox(height: 8),
+          // Folders hold one kind of script each, so the rows need no
+          // label of their own; only the agent list explains itself.
+          if (description != null) _ListHint(text: description),
+          if (visible.isEmpty)
+            GlazeListEmptyNote(
+              label: scripts.isEmpty && folderId != null
+                  ? 'folder_empty_items'.tr()
+                  : 'no_results'.tr(),
             ),
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(16, 0, 16, bottom),
-              sliver: SliverReorderableList(
-                itemCount: visible.length,
-                onReorderItem: (oldIndex, newIndex) => unawaited(
-                  _reorder(
-                    scope,
-                    reanchorOrder(runOrder, visibleIds, oldIndex, newIndex),
-                  ),
-                ),
-                itemBuilder: (_, i) => KeyedSubtree(
-                  key: ValueKey(_selectionKey(scope, visible[i].id)),
-                  child: _buildRow(
-                    innerContext,
-                    visible[i],
-                    scope,
-                    index: i,
-                    draggable: draggable,
-                    stages: stagesById[visible[i].id] ?? const {},
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-        // Stepping into a folder and back swaps the whole list, so it
-        // cross-fades instead of cutting.
-        return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
-          switchInCurve: Curves.easeOut,
-          switchOutCurve: Curves.easeIn,
-          layoutBuilder: (current, previous) => Stack(
-            fit: StackFit.expand,
-            children: [
-              for (final child in previous) IgnorePointer(child: child),
-              ?current,
-            ],
+        ],
+        itemCount: visible.length,
+        itemKey: (i) => _selectionKey(scope, visible[i].id),
+        onReorder: (oldIndex, newIndex) => unawaited(
+          _reorder(
+            scope,
+            reanchorOrder(runOrder, visibleIds, oldIndex, newIndex),
           ),
-          child: KeyedSubtree(
-            key: ValueKey('${area?.name}/$folderId'),
-            child: list,
-          ),
-        );
-      },
+        ),
+        itemBuilder: (context, i) => _buildRow(
+          context,
+          visible[i],
+          scope,
+          index: i,
+          draggable: draggable,
+          stages: stagesById[visible[i].id] ?? const {},
+        ),
+      ),
     );
   }
 
-  /// A folder as a row of the list — the same card a script is, with a
-  /// chevron — so folders and scripts read as one list.
+  /// A folder as a row of the list, which only opens while nothing is being
+  /// picked.
   Widget _folderRow({
     required String key,
     required IconData icon,
@@ -1153,23 +1069,13 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     required VoidCallback onTap,
     VoidCallback? onMenu,
   }) {
-    return GlazeListItem(
+    return GlazeFolderRow(
       key: ValueKey(key),
-      leading: GlazeListIcon(icon: icon),
-      title: name,
+      icon: icon,
+      name: name,
       subtitle: subtitle ?? '$count',
       onTap: _selected.isNotEmpty ? null : onTap,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (onMenu != null) GlazeListMenuButton(onTap: onMenu),
-          Icon(
-            Icons.chevron_right_rounded,
-            size: 20,
-            color: context.cs.onSurfaceVariant,
-          ),
-        ],
-      ),
+      onMenu: onMenu,
     );
   }
 
@@ -1189,10 +1095,9 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     final muted = context.cs.onSurfaceVariant.withValues(alpha: 0.5);
 
     return GlazeListItem(
-      leading: GlazeListIcon(
-        icon: Icons.code_rounded,
-        color: script.disabled ? muted : null,
-      ),
+      // An active script is outlined in the accent; a disabled one keeps the
+      // plain hairline.
+      accent: script.disabled ? null : context.cs.primary,
       title: script.name,
       subtitle: script.regex.isNotEmpty ? script.regex : null,
       selected: picked,
@@ -1206,16 +1111,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
             ),
       onLongPress: selecting ? null : () => _startSelection(key),
       trailing: selecting
-          ? Padding(
-              padding: const EdgeInsets.all(5),
-              child: Icon(
-                picked
-                    ? Icons.check_circle_rounded
-                    : Icons.radio_button_unchecked_rounded,
-                size: 22,
-                color: picked ? context.cs.primary : muted,
-              ),
-            )
+          ? GlazeSelectionCheck(selected: picked)
           : Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1730,25 +1626,6 @@ class _PresetChip extends StatelessWidget {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  final String label;
-  const _EmptyState({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: Center(
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, color: context.cs.onSurfaceVariant),
         ),
       ),
     );
