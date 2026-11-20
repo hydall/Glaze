@@ -10,6 +10,7 @@ import '../aux_api_config_resolver.dart';
 import '../aux_llm_client.dart';
 import '../tokenizer.dart';
 import '../transport/llm_capture_context.dart';
+import 'agent_batch.dart';
 
 /// What one agent call returned.
 class AgentCallResult {
@@ -137,6 +138,77 @@ class AgentCallRunner {
         promptTokens: promptTokens,
         durationMs: elapsed(),
       );
+    }
+  }
+
+  /// Sends one shared request for [agents] (see `buildBatchMessages`) and
+  /// splits the answer. Agents whose answer is missing are left out of the
+  /// returned map, so the caller can retry them alone. Never throws.
+  Future<Map<String, AgentCallResult>> runBatch({
+    required List<AgentDefinition> agents,
+    required List<Map<String, String>> messages,
+    required AuxApiConfig config,
+    required double fallbackTemperature,
+    CancelToken? cancelToken,
+    String? sessionId,
+    String? messageId,
+  }) async {
+    final started = DateTime.now();
+    final promptJson = jsonEncode(messages);
+    final promptTokens = estimateTokens(
+      messages.map((m) => m['content'] ?? '').join('\n'),
+    );
+    final maxTokens = agents.fold<int>(
+      0,
+      (sum, agent) => sum + (agent.params.maxTokens ?? defaultMaxTokens),
+    );
+    final temperature = agents
+        .map((agent) => agent.params.temperature ?? fallbackTemperature)
+        .reduce((a, b) => a < b ? a : b);
+    final timeoutMs = agents
+        .map((agent) => agent.params.timeoutMs ?? defaultTimeoutMs)
+        .reduce((a, b) => a > b ? a : b);
+    final reasoning = agents.any((a) => a.params.requestReasoning ?? false);
+    try {
+      final outcome = await llm.callOnceWithLog(
+        config: config,
+        messages: messages,
+        maxTokens: maxTokens,
+        temperature: temperature,
+        timeoutMs: timeoutMs,
+        cancelToken: cancelToken,
+        requestReasoning: reasoning,
+        omitReasoning: !reasoning,
+        captureContext: LlmCaptureContext(
+          stage: 'agent.batch',
+          sessionId: sessionId,
+          messageId: messageId,
+          agentId: agents.map((a) => a.id).join(','),
+        ),
+      );
+      final text = outcome.text;
+      if (!outcome.isOk || text == null) return const {};
+      final answers = parseBatchAnswer(
+        stripThinkTags(text),
+        agents.map((a) => a.id),
+      );
+      final duration = DateTime.now().difference(started).inMilliseconds;
+      final share = (promptTokens / agents.length).round();
+      return {
+        for (final agent in agents)
+          if (answers[agent.id] != null)
+            agent.id: AgentCallResult(
+              agent: agent,
+              ok: true,
+              output: answers[agent.id]!,
+              promptJson: promptJson,
+              promptTokens: share,
+              completionTokens: estimateTokens(answers[agent.id]!),
+              durationMs: duration,
+            ),
+      };
+    } catch (_) {
+      return const {};
     }
   }
 }

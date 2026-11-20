@@ -4,7 +4,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/llm/agents/agent_batch.dart';
 import '../../../../core/llm/agents/agent_call_runner.dart';
+import '../../../../core/llm/aux_llm_client.dart';
 import '../../../../core/llm/agents/agent_prompt_builder.dart';
 import '../../../../core/llm/agents/agent_turn_plan.dart';
 import '../../../../core/llm/concurrency_limiter.dart';
@@ -153,43 +155,102 @@ class AgentTurnService {
     final limit = pipeline.agents.maxConcurrent < 1
         ? 1
         : pipeline.agents.maxConcurrent;
-    return ConcurrencyLimiter.settle<AgentDefinition, AgentCallResult>(
-      items: agents,
-      limit: limit,
-      run: (agent) async {
-        final AgentCallResult result;
-        try {
-          final config = resolveAgentApiConfig(
-            agent: agent,
-            apiConfigs: apiConfigs,
-            chatConfig: inputs.apiConfig,
-            settings: pipeline.agents,
-          );
-          final messages = const AgentPromptBuilder().build(
+    AuxApiConfig configFor(AgentDefinition agent) => resolveAgentApiConfig(
+      agent: agent,
+      apiConfigs: apiConfigs,
+      chatConfig: inputs.apiConfig,
+      settings: pipeline.agents,
+    );
+
+    Future<AgentCallResult> runAlone(AgentDefinition agent) async {
+      final AgentCallResult result;
+      try {
+        result = await _runner.run(
+          agent: agent,
+          messages: const AgentPromptBuilder().build(
             agent: agent,
             macroContext: macroContext,
             history: inputs.history,
-          );
-          result = await _runner.run(
-            agent: agent,
-            messages: messages,
-            config: config,
-            fallbackTemperature: inputs.apiConfig.temperature,
-            cancelToken: cancelToken,
-            sessionId: sessionId,
-            messageId: messageId,
-          );
-        } catch (error) {
-          return _record(
-            AgentCallResult(agent: agent, ok: false, error: '$error'),
-            sessionId: sessionId,
-            messageId: messageId,
-          );
-        }
-        if (cancelToken.isCancelled) return result;
-        return _record(result, sessionId: sessionId, messageId: messageId);
-      },
-    );
+          ),
+          config: configFor(agent),
+          fallbackTemperature: inputs.apiConfig.temperature,
+          cancelToken: cancelToken,
+          sessionId: sessionId,
+          messageId: messageId,
+        );
+      } catch (error) {
+        return _record(
+          AgentCallResult(agent: agent, ok: false, error: '$error'),
+          sessionId: sessionId,
+          messageId: messageId,
+        );
+      }
+      if (cancelToken.isCancelled) return result;
+      return _record(result, sessionId: sessionId, messageId: messageId);
+    }
+
+    // Agents on the same connection and model share one request; a lone agent,
+    // or one whose answer the batch lost, runs on its own.
+    final groups = groupForBatching(agents, (agent) {
+      try {
+        final config = configFor(agent);
+        return '${config.protocol}|${config.endpoint}|${config.model}';
+      } catch (_) {
+        return 'unresolved:${agent.id}';
+      }
+    });
+    final perGroup =
+        await ConcurrencyLimiter.settle<
+          List<AgentDefinition>,
+          List<AgentCallResult>
+        >(
+          items: groups,
+          limit: limit,
+          run: (group) async {
+            if (group.length == 1) return [await runAlone(group.single)];
+            Map<String, AgentCallResult> batched;
+            try {
+              batched = await _runner.runBatch(
+                agents: group,
+                messages: buildBatchMessages(
+                  agents: group,
+                  macroContext: macroContext,
+                  history: inputs.history,
+                ),
+                config: configFor(group.first),
+                fallbackTemperature: inputs.apiConfig.temperature,
+                cancelToken: cancelToken,
+                sessionId: sessionId,
+                messageId: messageId,
+              );
+            } catch (_) {
+              batched = const {};
+            }
+            final results = <AgentCallResult>[];
+            for (final agent in group) {
+              if (cancelToken.isCancelled) break;
+              final answer = batched[agent.id];
+              results.add(
+                answer == null
+                    ? await runAlone(agent)
+                    : await _record(
+                        answer,
+                        sessionId: sessionId,
+                        messageId: messageId,
+                      ),
+              );
+            }
+            return results;
+          },
+        );
+    final byId = {
+      for (final results in perGroup)
+        for (final result in results) result.agent.id: result,
+    };
+    return [
+      for (final agent in agents)
+        if (byId[agent.id] != null) byId[agent.id]!,
+    ];
   }
 
   Future<AgentCallResult> _record(

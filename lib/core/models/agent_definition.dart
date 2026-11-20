@@ -166,6 +166,10 @@ abstract class AgentDefinition with _$AgentDefinition {
 
     /// How many of the latest chat messages the agent sees.
     @Default(5) int contextSize,
+
+    /// Sends this agent on its own, never in a shared request with other
+    /// agents of the same phase and connection.
+    @Default(false) bool runAlone,
     @Default(AgentCadence()) AgentCadence cadence,
 
     /// Agents that must run this turn for this one to run.
