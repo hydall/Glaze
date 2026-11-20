@@ -13,6 +13,7 @@ import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/db/repositories/lorebook_use_manifest_repo.dart';
 import '../extensions/providers/info_blocks_provider.dart';
 import 'chat_session_service.dart';
+import 'services/variation_error_state.dart';
 
 class ChatMessageService {
   final Ref _ref;
@@ -438,7 +439,16 @@ class ChatMessageService {
     // Nested swipes: persist current agentSwipes into the outgoing green
     // swipe's meta, then load (or seed) agentSwipes for the incoming swipe.
     // Save outgoing agentSwipes.
-    if (msg.agentSwipes.isNotEmpty && msg.swipeId < swipesMeta.length) {
+    //
+    // An error variation has no sub-swipes of its own — whatever the message
+    // carries while it is on screen belongs to the variation before it (a
+    // regen that failed used to keep them). Saving them into the error swipe
+    // is what later brought that healthy text back inside the error window.
+    final outgoingIsError = variationIsError(msg, msg.swipeId);
+    if (msg.agentSwipes.isNotEmpty &&
+        !outgoingIsError &&
+        msg.swipeId >= 0 &&
+        msg.swipeId < swipesMeta.length) {
       final outgoingAgentSwipes = List<AgentSwipe>.from(msg.agentSwipes);
       if (msg.agentSwipeId >= 0 &&
           msg.agentSwipeId < outgoingAgentSwipes.length &&
@@ -453,11 +463,23 @@ class ChatMessageService {
         'agentSwipes': outgoingAgentSwipes.map((e) => e.toJson()).toList(),
         'agentSwipeId': msg.agentSwipeId,
       };
+    } else if (outgoingIsError &&
+        msg.swipeId >= 0 &&
+        msg.swipeId < swipesMeta.length) {
+      swipesMeta[msg.swipeId] = Map<String, dynamic>.from(
+        swipesMeta[msg.swipeId],
+      )..removeWhere((key, _) => key == 'agentSwipes' || key == 'agentSwipeId');
     }
     // Load incoming agentSwipes.
     List<AgentSwipe> nextAgentSwipes;
     int nextAgentSwipeId;
-    final storedAgentSwipes = _agentSwipesFromMeta(meta);
+    // An error swipe shows its own text: sub-swipes stored on it are leftovers
+    // from the variation that was active when it failed (see above), and
+    // chats saved before that was fixed still carry them.
+    final incomingIsError = meta?['isError'] == true;
+    final storedAgentSwipes = incomingIsError
+        ? null
+        : _agentSwipesFromMeta(meta);
     if (storedAgentSwipes != null && storedAgentSwipes.isNotEmpty) {
       nextAgentSwipes = storedAgentSwipes;
       nextAgentSwipeId = (meta?['agentSwipeId'] as int?) ?? 0;
@@ -900,7 +922,10 @@ class ChatMessageService {
     meta.removeAt(removed);
     final nextSwipeId = removed.clamp(0, swipes.length - 1);
     final nextMeta = meta[nextSwipeId];
-    final stored = _agentSwipesFromMeta(nextMeta);
+    // An error swipe shows its own text, never sub-swipes left on it.
+    final stored = nextMeta['isError'] == true
+        ? null
+        : _agentSwipesFromMeta(nextMeta);
     final agentSwipes = stored == null || stored.isEmpty
         ? [
             AgentSwipe(

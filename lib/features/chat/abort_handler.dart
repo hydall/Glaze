@@ -15,6 +15,7 @@ import 'state/studio_cycle_state_provider.dart';
 import 'chat_session_service.dart';
 import 'chat_state.dart';
 import 'services/continuation_message_merger.dart';
+import 'services/variation_error_state.dart';
 
 typedef AbortSessionMutation =
     Future<ChatSession?> Function(
@@ -298,23 +299,13 @@ class AbortHandler {
             target.agentSwipeId != restoration.agentSwipeId) {
           return null;
         }
-        final keptSwipes = List<String>.from(
-          restoration.swipes.isNotEmpty
-              ? restoration.swipes
-              : [restoration.content],
-        );
-        final keptSwipesMeta = List<Map<String, dynamic>>.from(
-          restoration.swipesMeta.isNotEmpty
-              ? restoration.swipesMeta
-              : [
-                  <String, dynamic>{
-                    'genTime': restoration.genTime,
-                    'reasoning': restoration.reasoning,
-                    'tokens': restoration.tokens,
-                    'time': restoration.time,
-                  },
-                ],
-        );
+        // The partial reply is the regen's result, so it builds on the same
+        // base as a finished one: an error it was regenerating is replaced,
+        // and the meta stays aligned with the swipes (a shorter list let the
+        // partial's meta — and an error marker — land on the wrong index).
+        final base = regenBaseOf(restoration);
+        final keptSwipes = [...base.swipes];
+        final keptSwipesMeta = [...base.swipesMeta];
         keptSwipes.add(partialText);
         final partialAgentSwipe = AgentSwipe(
           content: partialText,
