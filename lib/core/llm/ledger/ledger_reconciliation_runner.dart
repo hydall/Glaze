@@ -9,14 +9,12 @@ import '../../db/repositories/tracker_snapshot_repo.dart';
 import '../../models/pipeline_settings.dart';
 import '../../models/preset.dart';
 import '../../models/studio_ledger_export.dart';
-import '../../models/studio_regex.dart';
 import '../../utils/id_generator.dart';
 import '../aux_llm_client.dart';
 import '../knowledge_cleanup_parser.dart';
 import '../macro_engine.dart';
 import '../studio_ledger_export_parser.dart';
 import '../studio_ledger_reconciliation.dart';
-import '../studio_regex_applicator.dart';
 import '../transport/llm_capture_context.dart';
 import 'ledger_canon_authority.dart';
 import 'ledger_output_recovery.dart';
@@ -84,7 +82,6 @@ final class LedgerReconciliationRunner {
     required LedgerReplacementBasisResolver replacementBasisResolver,
     required LedgerRunDiagnostics runDiagnostics,
     required StudioLedgerExportParser parser,
-    List<StudioRegex> Function()? readStudioRegexes,
   }) : this._(
          llm,
          snapshotRepo,
@@ -95,7 +92,6 @@ final class LedgerReconciliationRunner {
          replacementBasisResolver,
          runDiagnostics,
          parser,
-         readStudioRegexes ?? _emptyStudioRegexes,
        );
 
   const LedgerReconciliationRunner._(
@@ -108,7 +104,6 @@ final class LedgerReconciliationRunner {
     this._replacementBasisResolver,
     this._runDiagnostics,
     this._parser,
-    this._readStudioRegexes,
   );
 
   final AuxLlmClient _llm;
@@ -120,9 +115,6 @@ final class LedgerReconciliationRunner {
   final LedgerReplacementBasisResolver _replacementBasisResolver;
   final LedgerRunDiagnostics _runDiagnostics;
   final StudioLedgerExportParser _parser;
-  final List<StudioRegex> Function() _readStudioRegexes;
-
-  static List<StudioRegex> _emptyStudioRegexes() => const [];
 
   Future<LedgerRunResult> reconcile(LedgerReconciliationRequest request) async {
     final ownerId = 'ledger-reconciliation-${generateId()}';
@@ -308,14 +300,7 @@ final class LedgerReconciliationRunner {
         knowledgeFacts: offeredFacts,
         character: canon.source,
       );
-      final prompt = request.macroCtx == null
-          ? rawPrompt
-          : applyStudioRegexesToText(
-              text: rawPrompt,
-              stage: 'ledger',
-              entries: _readStudioRegexes(),
-              macroContext: request.macroCtx!,
-            );
+      final prompt = rawPrompt;
       await _throwIfAborted(token, request.isStillCurrent);
       if (!await _renewLease(request.sessionId, leaseOwnerId)) {
         return LedgerRunResult.aborted;

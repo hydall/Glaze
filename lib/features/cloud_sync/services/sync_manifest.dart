@@ -712,9 +712,6 @@ class SyncManifestBuilder implements SyncManifestProvider {
     final globalRegexScripts = prefs.getString(
       SyncSerialization.globalRegexScriptsKey,
     );
-    final studioRegexScripts = prefs.getString(
-      SyncSerialization.studioRegexScriptsKey,
-    );
     final appSettings = AppSettingsPreferences.encode(
       AppSettingsPreferences.read(prefs),
     );
@@ -723,7 +720,6 @@ class SyncManifestBuilder implements SyncManifestProvider {
       final payload = SyncSerialization.localStoragePayload(
         pipelineSettings: pipelineSettings,
         globalRegexScripts: globalRegexScripts,
-        studioRegexScripts: studioRegexScripts,
         appSettings: appSettings,
         chatLayout: SyncSerialization.readChatLayout(prefs),
       );

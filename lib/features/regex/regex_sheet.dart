@@ -17,15 +17,12 @@ import '../../shared/shell/nav_height_provider.dart';
 import '../../core/llm/regex_passes.dart';
 import '../../core/models/folder.dart';
 import '../../core/models/preset.dart';
-import '../../core/models/studio_regex.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/folder_provider.dart';
 import '../../core/state/global_regex_provider.dart';
-import '../../core/state/studio_regex_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../presets/preset_list_provider.dart';
-import 'agent_regex_stage_label.dart';
 import 'regex_list_controls.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/folder_section.dart';
@@ -45,11 +42,8 @@ import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/selection_bar.dart';
 import '../../shared/widgets/sheet_view.dart';
 
-/// Where a newly added script lands. [agent] is the Studio list, which takes
-/// the place of [preset] while the Studio master switch is on — a chat preset
-/// and an agentic preset are mutually exclusive, so only one of the two is ever
-/// offered.
-enum _RegexScope { preset, global, agent }
+/// Where a script lives: the chat preset's own list or the global one.
+enum _RegexScope { preset, global }
 
 class RegexSheet extends ConsumerStatefulWidget {
   final bool startExpanded;
@@ -69,12 +63,10 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   bool _isForward = true;
   PresetRegex? _activeScript;
   bool _isPresetScript = false;
-  bool _isStudioScript = false;
-  Set<String> _activeStudioStages = const {};
   Timer? _saveTimer;
 
   /// The level on screen: null at the top, or the scripts of one scope — the
-  /// preset's (a folder of its own), the agents', or a global folder.
+  /// preset's (a folder of its own) or a global folder.
   _RegexScope? _area;
 
   /// Folder inside [_area]: one of the preset's own folders, or the open
@@ -115,23 +107,14 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
 
   // ── Navigation ──────────────────────────────────────────────────────────────
 
-  void _selectScript(
-    PresetRegex script, {
-    required bool isPreset,
-    bool isStudio = false,
-    Set<String> studioStages = const {},
-  }) {
+  void _selectScript(PresetRegex script, {required bool isPreset}) {
     // On desktop the script opens in a window of its own beside the list,
     // rather than in its place.
     if (isDesktopLayout(context)) {
       openRegexEditorWindow(
         context,
         script.id,
-        isStudio
-            ? RegexScope.studio
-            : isPreset
-            ? RegexScope.preset
-            : RegexScope.global,
+        isPreset ? RegexScope.preset : RegexScope.global,
         presetId: isPreset ? _effectivePresetId : null,
       );
       return;
@@ -140,8 +123,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       _isForward = true;
       _activeScript = script;
       _isPresetScript = isPreset;
-      _isStudioScript = isStudio;
-      _activeStudioStages = studioStages;
       _view = 'edit';
     });
   }
@@ -156,8 +137,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         _view = 'list';
         _activeScript = null;
         _isPresetScript = false;
-        _isStudioScript = false;
-        _activeStudioStages = const {};
       });
     }
   }
@@ -211,37 +190,17 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   Future<void> _saveActiveScript(PresetRegex script) => _writeRegexScript(
     ref,
     script,
-    _isStudioScript
-        ? RegexScope.studio
-        : _isPresetScript
-        ? RegexScope.preset
-        : RegexScope.global,
+    _isPresetScript ? RegexScope.preset : RegexScope.global,
     presetId: _effectivePresetId,
-    studioStages: _activeStudioStages,
   );
-
-  Future<void> _setStudioStages(Set<String> stages) async {
-    final script = _activeScript;
-    if (script == null) return;
-    setState(() => _activeStudioStages = stages);
-    await ref
-        .read(studioRegexProvider.notifier)
-        .updateRegex(StudioRegex(script: script, stages: stages));
-  }
 
   Future<void> _toggleScript(
     PresetRegex script,
     bool enabled, {
     required bool isPreset,
-    bool isStudio = false,
-    Set<String> studioStages = const {},
   }) async {
     final updated = script.copyWith(disabled: !enabled);
-    if (isStudio) {
-      await ref
-          .read(studioRegexProvider.notifier)
-          .updateRegex(StudioRegex(script: updated, stages: studioStages));
-    } else if (isPreset) {
+    if (isPreset) {
       final pid = _effectivePresetId;
       if (pid == null) return;
       final presets = ref.read(presetListProvider).value ?? [];
@@ -258,14 +217,8 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     }
   }
 
-  Future<void> _deleteScript(
-    PresetRegex script,
-    bool isPreset, {
-    bool isStudio = false,
-  }) async {
-    if (isStudio) {
-      await ref.read(studioRegexProvider.notifier).removeRegex(script.id);
-    } else if (isPreset) {
+  Future<void> _deleteScript(PresetRegex script, bool isPreset) async {
+    if (isPreset) {
       final pid = _effectivePresetId;
       if (pid == null) return;
       final presets = ref.read(presetListProvider).value ?? [];
@@ -313,28 +266,13 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     return newScript;
   }
 
-  PresetRegex _addStudioRegex() {
-    final script = PresetRegex(
-      id: generateId(),
-      name: 'New Studio Script',
-      regex: '',
-      placement: const [1, 2],
-      ephemerality: const [2],
-    );
-    ref
-        .read(studioRegexProvider.notifier)
-        .addRegex(StudioRegex(script: script, stages: const {'final'}));
-    return script;
-  }
-
   // ── Menus ────────────────────────────────────────────────────────────────────
 
   void _showScriptMenu(
     BuildContext context,
     PresetRegex script,
-    bool isPreset, {
-    bool isStudio = false,
-  }) {
+    bool isPreset,
+  ) {
     GlazeBottomSheet.show<void>(
       context,
       title: script.name,
@@ -346,11 +284,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
             Navigator.of(context, rootNavigator: true).pop();
             _startSelection(
               _selectionKey(
-                isStudio
-                    ? _RegexScope.agent
-                    : isPreset
-                    ? _RegexScope.preset
-                    : _RegexScope.global,
+                isPreset ? _RegexScope.preset : _RegexScope.global,
                 script.id,
               ),
             );
@@ -365,7 +299,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
               _showMovePresetScripts(context, {script.id});
             },
           ),
-        if (!isPreset && !isStudio)
+        if (!isPreset)
           BottomSheetItem(
             icon: Icons.create_new_folder_outlined,
             label: 'action_add_to_folder'.tr(),
@@ -393,7 +327,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
           isDestructive: true,
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _deleteScript(script, isPreset, isStudio: isStudio);
+            _deleteScript(script, isPreset);
           },
         ),
       ],
@@ -450,7 +384,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       _area == _RegexScope.preset ? _folderId : null;
 
   String _destinationTitle(_RegexScope scope) => switch (scope) {
-    _RegexScope.agent => 'regex_studio_scripts'.tr(),
     _RegexScope.global => 'regex_global_scripts'.tr(),
     _RegexScope.preset => _targetPresetName(),
   };
@@ -466,14 +399,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
 
   void _createInScope(_RegexScope scope) {
     switch (scope) {
-      case _RegexScope.agent:
-        _selectScript(
-          _addStudioRegex(),
-          isPreset: false,
-          isStudio: true,
-          studioStages: const {'final'},
-        );
-        break;
       case _RegexScope.global:
         final created = _addGlobalRegex();
         final folderId = _openGlobalFolder;
@@ -623,17 +548,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
             if (!before.contains(r.id)) await repo.addMember(folderId, r.id);
           }
         }
-        if (context.mounted) GlazeToast.show(context, 'import_success'.tr());
-      } else if (scope == _RegexScope.agent) {
-        // An imported file carries no Studio stages — an ST script has no such
-        // notion. Land them on the Main Writer, the stage a new agent script
-        // already defaults to, and let the user re-aim them from the editor.
-        final imported = _normalizeRawRegexList(combinedRaw)
-            .map(
-              (script) => StudioRegex(script: script, stages: const {'final'}),
-            )
-            .toList();
-        await ref.read(studioRegexProvider.notifier).addRegexes(imported);
         if (context.mounted) GlazeToast.show(context, 'import_success'.tr());
       } else {
         final pid = _effectivePresetId;
@@ -791,10 +705,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
                 key: ValueKey(_activeScript!.id),
                 script: _activeScript!,
                 onChanged: _onScriptChanged,
-                studioStages: _isStudioScript ? _activeStudioStages : null,
-                onStudioStagesChanged: _isStudioScript
-                    ? _setStudioStages
-                    : null,
               )
             : _buildListView(
                 context,
@@ -817,8 +727,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     switch (_area) {
       case null:
         return 'menu_regex'.tr();
-      case _RegexScope.agent:
-        return 'regex_studio_scripts'.tr();
       case _RegexScope.preset:
         final folder = activePreset?.regexFolders
             .where((f) => f.id == folderId)
@@ -929,11 +837,9 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     // Folder rows above the scripts, then the scripts of this level.
     final folders = <Widget>[];
     Widget? lead;
-    String? description;
     _RegexScope scope;
     List<PresetRegex> scripts;
     List<String> runOrder;
-    var stagesById = const <String, Set<String>>{};
 
     switch (area) {
       case null:
@@ -976,14 +882,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
             if (ids.contains(r.id)) r,
         ];
         runOrder = [for (final r in globalRegexes) r.id];
-      case _RegexScope.agent:
-        final studioRegexes =
-            ref.watch(studioRegexProvider).value ?? const <StudioRegex>[];
-        scope = _RegexScope.agent;
-        description = 'regex_studio_description'.tr();
-        scripts = [for (final e in studioRegexes) e.script];
-        runOrder = [for (final e in studioRegexes) e.script.id];
-        stagesById = {for (final e in studioRegexes) e.script.id: e.stages};
       case _RegexScope.preset:
         scope = _RegexScope.preset;
         final preset = activePreset;
@@ -1046,9 +944,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
                     ),
                   ...folders,
                   if (folders.isNotEmpty) const SizedBox(height: 8),
-                  // Folders hold one kind of script each, so the rows need no
-                  // label of their own; only the agent list explains itself.
-                  if (description != null) _ListHint(text: description),
                   if (visible.isEmpty)
                     _EmptyState(
                       label: scripts.isEmpty && folderId != null
@@ -1076,7 +971,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
                     scope,
                     index: i,
                     draggable: draggable,
-                    stages: stagesById[visible[i].id] ?? const {},
                   ),
                 ),
               ),
@@ -1142,11 +1036,9 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
     _RegexScope scope, {
     required int index,
     required bool draggable,
-    required Set<String> stages,
   }) {
     final key = _selectionKey(scope, script.id);
     final isPreset = scope == _RegexScope.preset;
-    final isStudio = scope == _RegexScope.agent;
     final selecting = _selected.isNotEmpty;
     final picked = _selected.contains(key);
     final muted = context.cs.onSurfaceVariant.withValues(alpha: 0.5);
@@ -1161,12 +1053,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       selected: picked,
       onTap: selecting
           ? () => _toggleSelected(key)
-          : () => _selectScript(
-              script,
-              isPreset: isPreset,
-              isStudio: isStudio,
-              studioStages: stages,
-            ),
+          : () => _selectScript(script, isPreset: isPreset),
       onLongPress: selecting ? null : () => _startSelection(key),
       trailing: selecting
           ? Padding(
@@ -1184,21 +1071,11 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
               children: [
                 GlazeSwitch(
                   value: !script.disabled,
-                  onChanged: (v) => _toggleScript(
-                    script,
-                    v,
-                    isPreset: isPreset,
-                    isStudio: isStudio,
-                    studioStages: stages,
-                  ),
+                  onChanged: (v) =>
+                      _toggleScript(script, v, isPreset: isPreset),
                 ),
                 GlazeListMenuButton(
-                  onTap: () => _showScriptMenu(
-                    context,
-                    script,
-                    isPreset,
-                    isStudio: isStudio,
-                  ),
+                  onTap: () => _showScriptMenu(context, script, isPreset),
                 ),
                 if (draggable)
                   ReorderableDragStartListener(
@@ -1233,11 +1110,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         await ref
             .read(globalRegexProvider.notifier)
             .replaceAll(arrange(current, (r) => r.id));
-      case _RegexScope.agent:
-        final current = ref.read(studioRegexProvider).value ?? const [];
-        await ref
-            .read(studioRegexProvider.notifier)
-            .replaceAll(arrange(current, (e) => e.script.id));
       case _RegexScope.preset:
         await _updatePreset(
           (p) => p.copyWith(regexes: arrange(p.regexes, (r) => r.id)),
@@ -1397,8 +1269,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
 
   /// The selected scripts, grouped by where they live. Keys whose script went
   /// away while the list was open are skipped.
-  ({List<PresetRegex> global, List<PresetRegex> preset, List<String> studio})
-  _selectedScripts() {
+  ({List<PresetRegex> global, List<PresetRegex> preset}) _selectedScripts() {
     final global = [
       for (final r
           in ref.read(globalRegexProvider).value ?? const <PresetRegex>[])
@@ -1408,13 +1279,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       for (final r in _effectivePreset()?.regexes ?? const <PresetRegex>[])
         if (_selected.contains(_selectionKey(_RegexScope.preset, r.id))) r,
     ];
-    final studio = [
-      for (final e
-          in ref.read(studioRegexProvider).value ?? const <StudioRegex>[])
-        if (_selected.contains(_selectionKey(_RegexScope.agent, e.script.id)))
-          e.script.id,
-    ];
-    return (global: global, preset: preset, studio: studio);
+    return (global: global, preset: preset);
   }
 
   void _showSelectionActions(BuildContext context) {
@@ -1513,15 +1378,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
         for (final r in global) picked(_RegexScope.global, r.id) ? apply(r) : r,
       ]);
     }
-    final studio = ref.read(studioRegexProvider).value ?? const <StudioRegex>[];
-    if (studio.any((e) => picked(_RegexScope.agent, e.script.id))) {
-      await ref.read(studioRegexProvider.notifier).replaceAll([
-        for (final e in studio)
-          picked(_RegexScope.agent, e.script.id)
-              ? StudioRegex(script: apply(e.script), stages: e.stages)
-              : e,
-      ]);
-    }
     final preset = _effectivePreset();
     if (preset != null &&
         preset.regexes.any((r) => picked(_RegexScope.preset, r.id))) {
@@ -1541,13 +1397,7 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
   /// already reads back.
   Future<void> _exportSelected(BuildContext context) async {
     final picked = _selectedScripts();
-    final studio = ref.read(studioRegexProvider).value ?? const <StudioRegex>[];
-    final scripts = [
-      ...picked.preset,
-      for (final e in studio)
-        if (picked.studio.contains(e.script.id)) e.script,
-      ...picked.global,
-    ];
+    final scripts = [...picked.preset, ...picked.global];
     if (scripts.isEmpty) return;
     try {
       final path = await FileExportService.export(
@@ -1615,14 +1465,6 @@ class _RegexSheetState extends ConsumerState<RegexSheet> {
       for (final id in gone) {
         await repo.deleteMembersForMember(FolderDomain.regex, id);
       }
-    }
-    if (picked.studio.isNotEmpty) {
-      final studio =
-          ref.read(studioRegexProvider).value ?? const <StudioRegex>[];
-      await ref.read(studioRegexProvider.notifier).replaceAll([
-        for (final e in studio)
-          if (!picked.studio.contains(e.script.id)) e,
-      ]);
     }
     if (picked.preset.isNotEmpty) {
       final gone = {for (final r in picked.preset) r.id};
@@ -1719,42 +1561,21 @@ class _EmptyState extends StatelessWidget {
 }
 
 /// A muted line above the rows, for a list that needs a word of explanation.
-class _ListHint extends StatelessWidget {
-  final String text;
-
-  const _ListHint({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 8),
-      child: Text(
-        text,
-        style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
-      ),
-    );
-  }
-}
 
 // ── Where a script lives ───────────────────────────────────────────────────────
 
 /// Where a regex script lives, which decides where its edits are written.
-enum RegexScope { global, preset, studio }
+enum RegexScope { global, preset }
 
 /// Writes [script] back where it lives: the global list, preset [presetId]'s
-/// scripts, or Studio's (with its [studioStages]).
+/// scripts.
 Future<void> _writeRegexScript(
   WidgetRef ref,
   PresetRegex script,
   RegexScope scope, {
   String? presetId,
-  Set<String> studioStages = const {},
 }) async {
   switch (scope) {
-    case RegexScope.studio:
-      await ref
-          .read(studioRegexProvider.notifier)
-          .updateRegex(StudioRegex(script: script, stages: studioStages));
     case RegexScope.preset:
       if (presetId == null) return;
       final presets = ref.read(presetListProvider).value ?? [];
@@ -1816,12 +1637,11 @@ class RegexEditorWindow extends ConsumerStatefulWidget {
 class _RegexEditorWindowState extends ConsumerState<RegexEditorWindow> {
   /// The script as last edited here; null until it has been found.
   PresetRegex? _script;
-  Set<String> _stages = const {};
   Timer? _saveTimer;
 
   /// The script where it lives, watched until it shows up — a script created a
   /// moment ago may not be in its list yet when the window opens.
-  ({PresetRegex script, Set<String> stages})? _find() {
+  PresetRegex? _find() {
     final id = widget.scriptId;
     switch (widget.scope) {
       case RegexScope.global:
@@ -1830,7 +1650,7 @@ class _RegexEditorWindowState extends ConsumerState<RegexEditorWindow> {
             .value
             ?.where((r) => r.id == id)
             .firstOrNull;
-        return script == null ? null : (script: script, stages: const {});
+        return script;
       case RegexScope.preset:
         final preset = ref
             .watch(presetListProvider)
@@ -1838,16 +1658,7 @@ class _RegexEditorWindowState extends ConsumerState<RegexEditorWindow> {
             ?.where((p) => p.id == widget.presetId)
             .firstOrNull;
         final script = preset?.regexes.where((r) => r.id == id).firstOrNull;
-        return script == null ? null : (script: script, stages: const {});
-      case RegexScope.studio:
-        final entry = ref
-            .watch(studioRegexProvider)
-            .value
-            ?.where((r) => r.script.id == id)
-            .firstOrNull;
-        return entry == null
-            ? null
-            : (script: entry.script, stages: entry.stages);
+        return script;
     }
   }
 
@@ -1860,22 +1671,7 @@ class _RegexEditorWindowState extends ConsumerState<RegexEditorWindow> {
   void _save() {
     final script = _script;
     if (script == null || !mounted) return;
-    _writeRegexScript(
-      ref,
-      script,
-      widget.scope,
-      presetId: widget.presetId,
-      studioStages: _stages,
-    );
-  }
-
-  Future<void> _setStages(Set<String> stages) async {
-    setState(() => _stages = stages);
-    final script = _script;
-    if (script == null) return;
-    await ref
-        .read(studioRegexProvider.notifier)
-        .updateRegex(StudioRegex(script: script, stages: stages));
+    _writeRegexScript(ref, script, widget.scope, presetId: widget.presetId);
   }
 
   @override
@@ -1900,10 +1696,8 @@ class _RegexEditorWindowState extends ConsumerState<RegexEditorWindow> {
     if (_script == null) {
       final found = _find();
       if (found == null) return const Center(child: GlazeSpinner());
-      _script = found.script;
-      _stages = found.stages;
+      _script = found;
     }
-    final studio = widget.scope == RegexScope.studio;
     return SheetView(
       title: 'regex_editor'.tr(),
       showRouteBackground: false,
@@ -1911,8 +1705,6 @@ class _RegexEditorWindowState extends ConsumerState<RegexEditorWindow> {
         key: ValueKey(widget.scriptId),
         script: _script!,
         onChanged: _onChanged,
-        studioStages: studio ? _stages : null,
-        onStudioStagesChanged: studio ? _setStages : null,
       ),
     );
   }
@@ -1923,15 +1715,11 @@ class _RegexEditorWindowState extends ConsumerState<RegexEditorWindow> {
 class _RegexEditView extends StatefulWidget {
   final PresetRegex script;
   final ValueChanged<PresetRegex> onChanged;
-  final Set<String>? studioStages;
-  final ValueChanged<Set<String>>? onStudioStagesChanged;
 
   const _RegexEditView({
     super.key,
     required this.script,
     required this.onChanged,
-    this.studioStages,
-    this.onStudioStagesChanged,
   });
 
   @override
@@ -2006,23 +1794,6 @@ class _RegexEditViewState extends State<_RegexEditView> {
             ),
           ),
       children: [
-        if (widget.studioStages != null)
-          MenuGroup(
-            header: 'regex_studio_stages'.tr(),
-            description: 'regex_studio_stages_description'.tr(),
-            items: studioRegexStages.map((stage) {
-              return _CheckboxOption(
-                key: ValueKey('studio-regex-stage-$stage'),
-                label: agentRegexStageLabel(stage),
-                value: widget.studioStages!.contains(stage),
-                onChanged: (enabled) {
-                  final stages = Set<String>.from(widget.studioStages!);
-                  enabled ? stages.add(stage) : stages.remove(stage);
-                  widget.onStudioStagesChanged?.call(stages);
-                },
-              );
-            }).toList(),
-          ),
         MenuGroup(
           header: 'regex_script_settings'.tr(),
           items: [

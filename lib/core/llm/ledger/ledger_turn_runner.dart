@@ -11,13 +11,11 @@ import '../../models/memory_book.dart';
 import '../../models/pipeline_settings.dart';
 import '../../models/preset.dart';
 import '../../models/studio_ledger_export.dart';
-import '../../models/studio_regex.dart';
 import '../../utils/id_generator.dart';
 import '../aux_llm_client.dart';
 import '../knowledge_cleanup_parser.dart';
 import '../macro_engine.dart';
 import '../studio_ledger_export_parser.dart';
-import '../studio_regex_applicator.dart';
 import '../transport/llm_capture_context.dart';
 import 'ledger_canon_authority.dart';
 import 'ledger_output_recovery.dart';
@@ -81,7 +79,6 @@ class LedgerTurnRunner {
     LedgerPromptFactory promptFactory = const LedgerPromptFactory(),
     LedgerOutputRecovery outputRecovery = const LedgerOutputRecovery(),
     StudioLedgerExportParser parser = const StudioLedgerExportParser(),
-    List<StudioRegex> Function()? readStudioRegexes,
   }) => LedgerTurnRunner._(
     llm,
     bookRepo,
@@ -92,7 +89,6 @@ class LedgerTurnRunner {
     promptFactory,
     outputRecovery,
     parser,
-    readStudioRegexes ?? _emptyStudioRegexes,
   );
 
   const LedgerTurnRunner._(
@@ -105,7 +101,6 @@ class LedgerTurnRunner {
     this._promptFactory,
     this._outputRecovery,
     this._parser,
-    this._readStudioRegexes,
   );
 
   final AuxLlmClient _llm;
@@ -117,9 +112,6 @@ class LedgerTurnRunner {
   final LedgerPromptFactory _promptFactory;
   final LedgerOutputRecovery _outputRecovery;
   final StudioLedgerExportParser _parser;
-  final List<StudioRegex> Function() _readStudioRegexes;
-
-  static List<StudioRegex> _emptyStudioRegexes() => const [];
 
   Future<LedgerRunResult> run(LedgerTurnRequest request) async {
     final trace = LedgerRunTrace(
@@ -201,14 +193,7 @@ class LedgerTurnRunner {
         engine: request.engine,
         gameClockHistory: gameClockHistory,
       );
-      final prompt = request.macroCtx == null
-          ? rawPrompt
-          : applyStudioRegexesToText(
-              text: rawPrompt,
-              stage: 'ledger',
-              entries: _readStudioRegexes(),
-              macroContext: request.macroCtx!,
-            );
+      final prompt = rawPrompt;
 
       debugPrint(
         '[StudioLedger] prompt session=${request.sessionId} '

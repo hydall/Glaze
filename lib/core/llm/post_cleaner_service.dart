@@ -22,8 +22,6 @@ import 'shared/message_range_formatter.dart';
 import 'aux_prompt_assembler.dart';
 import 'transport/llm_capture_context.dart';
 import '../models/preset.dart';
-import '../models/studio_regex.dart';
-import 'studio_regex_applicator.dart';
 
 // Re-export extracted specialists for backward compat (tests import these
 // symbols from post_cleaner_service.dart).
@@ -48,7 +46,6 @@ class PostCleanerService {
   final TrackerSnapshotRepo _snapshotRepo;
   final void Function(ChatSession) onSessionUpdated;
   final void Function() _invalidateChatHistory;
-  final List<StudioRegex> Function() _readStudioRegexes;
 
   PostCleanerService({
     required this._llm,
@@ -56,10 +53,7 @@ class PostCleanerService {
     required this._snapshotRepo,
     required this.onSessionUpdated,
     required this._invalidateChatHistory,
-    List<StudioRegex> Function()? readStudioRegexes,
-  }) : _readStudioRegexes = readStudioRegexes ?? _emptyStudioRegexes;
-
-  static List<StudioRegex> _emptyStudioRegexes() => const [];
+  });
 
   /// Run the POST-cleaner on the last assistant message.
   ///
@@ -321,14 +315,7 @@ class PostCleanerService {
       cleanerBlocks: cleanerBlocks,
       macroCtx: macroCtx,
     );
-    final prompt = macroCtx == null
-        ? rawPrompt
-        : applyStudioRegexesToText(
-            text: rawPrompt,
-            stage: 'cleaner',
-            entries: _readStudioRegexes(),
-            macroContext: macroCtx,
-          );
+    final prompt = rawPrompt;
 
     final effectiveMaxTokens = settings.cleaner.postCleanerMaxTokens > 0
         ? settings.cleaner.postCleanerMaxTokens

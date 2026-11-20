@@ -12,7 +12,6 @@ import '../../../core/state/lorebook_provider.dart';
 import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/global_regex_provider.dart';
 import '../../../core/state/shared_prefs_provider.dart';
-import '../../../core/state/studio_regex_provider.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../personas/persona_list_provider.dart';
 import '../../presets/preset_list_provider.dart';
@@ -396,7 +395,6 @@ class SyncController {
     // to the path the preset already points at.
     _ref.invalidate(presetListProvider);
     _ref.invalidate(globalRegexProvider);
-    _ref.invalidate(studioRegexProvider);
     // The chat layout lives in preferences read once into these notifiers.
     _ref.invalidate(composerPinsProvider);
     _ref.invalidate(hiddenComposerActionsProvider);

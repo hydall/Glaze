@@ -15,7 +15,6 @@ import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
 import '../models/pipeline_settings.dart';
 import '../models/preset.dart';
-import '../models/studio_regex.dart';
 import '../services/card_rewriter/effective_canon_context_loader.dart';
 import 'aux_llm_client.dart';
 import 'ledger/ledger_canon_authority.dart';
@@ -122,7 +121,6 @@ class StudioLedgerService {
     LedgerReconciliationCommitter? reconciliationCommitter,
     LedgerReconciliationRunner? reconciliationRunner,
     LedgerTurnRunner? turnRunner,
-    List<StudioRegex> Function()? readStudioRegexes,
   }) : _inFlightRegistry = inFlightRegistry ?? const LedgerInFlightRegistry(),
        _outputRecovery = outputRecovery ?? const LedgerOutputRecovery(),
        _runDiagnostics =
@@ -179,7 +177,6 @@ class StudioLedgerService {
           replacementBasisResolver: _replacementBasisResolver,
           runDiagnostics: _runDiagnostics,
           parser: const StudioLedgerExportParser(),
-          readStudioRegexes: readStudioRegexes,
         );
     _turnRunner =
         turnRunner ??
@@ -197,7 +194,6 @@ class StudioLedgerService {
           runDiagnostics: _runDiagnostics,
           promptFactory: promptFactory ?? const LedgerPromptFactory(),
           outputRecovery: _outputRecovery,
-          readStudioRegexes: readStudioRegexes,
         );
   }
 

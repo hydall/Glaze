@@ -1872,19 +1872,13 @@ void main() {
     expect(prefs.getString('pipelineSettings'), settingsJson);
   });
 
-  test('Cloud round-trip restores both global regex collections', () async {
+  test('Cloud round-trip restores the global regex collection', () async {
     const globalRegex = '[{"id":"global-regex","regex":"foo"}]';
-    const studioRegex =
-        '[{"script":{"id":"studio-regex","regex":"bar"},"stages":["final"]}]';
     final source = SyncWorld();
     final sourcePrefs = await SharedPreferences.getInstance();
     await sourcePrefs.setString(
       SyncSerialization.globalRegexScriptsKey,
       globalRegex,
-    );
-    await sourcePrefs.setString(
-      SyncSerialization.studioRegexScriptsKey,
-      studioRegex,
     );
 
     await source.engine.pushEntities(onProgress: (_) {});
@@ -1895,7 +1889,6 @@ void main() {
             )
             as Map<String, dynamic>;
     expect(cloudPayload[SyncSerialization.globalRegexScriptsKey], globalRegex);
-    expect(cloudPayload[SyncSerialization.studioRegexScriptsKey], studioRegex);
 
     SharedPreferences.setMockInitialValues({});
     final target = SyncWorld();
@@ -1906,10 +1899,6 @@ void main() {
     expect(
       targetPrefs.getString(SyncSerialization.globalRegexScriptsKey),
       globalRegex,
-    );
-    expect(
-      targetPrefs.getString(SyncSerialization.studioRegexScriptsKey),
-      studioRegex,
     );
   });
 
@@ -1981,16 +1970,11 @@ void main() {
     'Legacy local_storage payload preserves local regex collections',
     () async {
       const globalRegex = '[{"id":"local-global"}]';
-      const studioRegex = '[{"script":{"id":"local-studio"}}]';
       final world = SyncWorld();
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
         SyncSerialization.globalRegexScriptsKey,
         globalRegex,
-      );
-      await prefs.setString(
-        SyncSerialization.studioRegexScriptsKey,
-        studioRegex,
       );
       const payload = {
         '__localStorage': true,
@@ -2018,10 +2002,6 @@ void main() {
       expect(
         prefs.getString(SyncSerialization.globalRegexScriptsKey),
         globalRegex,
-      );
-      expect(
-        prefs.getString(SyncSerialization.studioRegexScriptsKey),
-        studioRegex,
       );
     },
   );

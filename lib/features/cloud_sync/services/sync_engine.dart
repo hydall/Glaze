@@ -1534,16 +1534,12 @@ class SyncEngine {
     final globalRegexScripts = prefs.getString(
       SyncSerialization.globalRegexScriptsKey,
     );
-    final studioRegexScripts = prefs.getString(
-      SyncSerialization.studioRegexScriptsKey,
-    );
     final appSettings = AppSettingsPreferences.encode(
       AppSettingsPreferences.read(prefs),
     );
     return SyncSerialization.localStoragePayload(
       pipelineSettings: pipelineSettings,
       globalRegexScripts: globalRegexScripts,
-      studioRegexScripts: studioRegexScripts,
       appSettings: appSettings,
       chatLayout: SyncSerialization.readChatLayout(prefs),
     );
@@ -1566,11 +1562,6 @@ class SyncEngine {
       prefs,
       data,
       SyncSerialization.globalRegexScriptsKey,
-    );
-    await _applyLocalStorageString(
-      prefs,
-      data,
-      SyncSerialization.studioRegexScriptsKey,
     );
     final rawAppSettings = data[SyncSerialization.appSettingsKey];
     if (rawAppSettings is Map) {
@@ -1608,7 +1599,6 @@ class SyncEngine {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(SyncSerialization.pipelineSettingsKey);
     await prefs.remove(SyncSerialization.globalRegexScriptsKey);
-    await prefs.remove(SyncSerialization.studioRegexScriptsKey);
     await AppSettingsPreferences.removeAll(prefs);
   }
 }

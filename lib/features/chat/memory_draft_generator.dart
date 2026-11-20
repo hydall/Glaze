@@ -23,7 +23,6 @@ import '../../core/state/memory_settings_provider.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/state/global_regex_provider.dart';
-import '../../core/state/studio_regex_provider.dart';
 import '../settings/api_list_provider.dart';
 
 /// Why [draft] cannot be retold from [chat] as the reader should hear it,
@@ -107,16 +106,11 @@ class MemoryDraftGenerator {
       _read(personaConnectionsProvider),
     );
     final globalRegexes = await _read(globalRegexProvider.future);
-    final studioRegexes = await _read(studioRegexProvider.future);
     final globalVars = _read(globalVarsProvider);
     final ledgerRange = MemoryDraftTranscriptBuilder.ledgerRange(messages);
     final historyText = MemoryDraftTranscriptBuilder.build(
       messages: messages,
-      scripts: [
-        ...?preset?.regexes,
-        ...globalRegexes,
-        ...studioRegexes.map((entry) => entry.script),
-      ],
+      scripts: [...?preset?.regexes, ...globalRegexes],
       context: RegexApplyContext(
         char: character,
         persona: persona,

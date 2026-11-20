@@ -19,7 +19,6 @@ import '../sync_models.dart';
 class SyncSerialization {
   static const pipelineSettingsKey = 'pipelineSettings';
   static const globalRegexScriptsKey = 'gz_global_regex_scripts';
-  static const studioRegexScriptsKey = 'gz_studio_regex_scripts';
   static const appSettingsKey = 'appSettings';
   static const chatLayoutKey = 'chatLayout';
   static const includeApiKeysPrefKey = 'gz_sync_include_api_keys';
@@ -211,7 +210,6 @@ class SyncSerialization {
   static Map<String, dynamic> localStoragePayload({
     String? pipelineSettings,
     String? globalRegexScripts,
-    String? studioRegexScripts,
     Map<String, dynamic>? appSettings,
     Map<String, dynamic>? chatLayout,
   }) {
@@ -219,7 +217,6 @@ class SyncSerialization {
       '__localStorage': true,
       pipelineSettingsKey: ?pipelineSettings,
       globalRegexScriptsKey: ?globalRegexScripts,
-      studioRegexScriptsKey: ?studioRegexScripts,
       appSettingsKey: ?appSettings,
       chatLayoutKey: ?chatLayout,
     };

@@ -10,14 +10,12 @@ void main() {
       SyncSerialization.localStoragePayload(
         pipelineSettings: '{"cleaner":true}',
         globalRegexScripts: '[{"id":"global"}]',
-        studioRegexScripts: '[{"script":{"id":"studio"}}]',
         appSettings: const {'enterToSend': false},
       ),
       {
         '__localStorage': true,
         'pipelineSettings': '{"cleaner":true}',
         'gz_global_regex_scripts': '[{"id":"global"}]',
-        'gz_studio_regex_scripts': '[{"script":{"id":"studio"}}]',
         'appSettings': {'enterToSend': false},
       },
     );
