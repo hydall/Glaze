@@ -66,6 +66,7 @@ class SyncEngine {
   final int _operationDelayMs;
   final Duration _wipePollInterval;
   final SyncPluginStore? _pluginStore;
+  final SyncAgentStore? _agentStore;
   final SyncQueue _queue = SyncQueue();
   late final SyncBinaryAssetSyncer _binarySyncer;
   bool _includeApiKeys = false;
@@ -102,6 +103,7 @@ class SyncEngine {
     this._operationDelayMs = 300,
     this._wipePollInterval = const Duration(seconds: 2),
     this._pluginStore,
+    this._agentStore,
   ]) {
     _binarySyncer = SyncBinaryAssetSyncer(
       _adapter,
@@ -1004,6 +1006,9 @@ class SyncEngine {
         case 'plugins':
           if (_pluginStore == null) return null;
           return {'__singleton': true, ...await _pluginStore.read()};
+        case 'agents':
+          if (_agentStore == null) return null;
+          return {'__singleton': true, ...await _agentStore.read()};
         case 'info_block':
           // id == sessionId for info_block entries
           final blocks = await _infoBlockStore.getBySessionId(id);
@@ -1102,6 +1107,9 @@ class SyncEngine {
             );
           }
           break;
+        case 'agents':
+          if (_agentStore != null) await _agentStore.apply(data);
+          break;
         case 'info_block':
           await _applyCloudInfoBlocks(id, data);
           break;
@@ -1152,6 +1160,7 @@ class SyncEngine {
           type == 'lorebooks' ||
           type == 'extension_preset' ||
           type == 'plugins' ||
+          type == 'agents' ||
           type == 'tracker_snapshot' ||
           type == 'tracker_value' ||
           type == 'reconciliation_state' ||

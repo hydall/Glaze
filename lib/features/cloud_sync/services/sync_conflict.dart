@@ -69,6 +69,8 @@ class SyncConflictDetector {
         return 'Local Settings';
       case 'plugins':
         return 'Plugins';
+      case 'agents':
+        return 'Agents';
       case 'session_lorebook_overlays':
         return 'Session lorebook changes — Chat $id';
       default:

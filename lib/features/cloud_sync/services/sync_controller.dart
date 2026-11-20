@@ -5,6 +5,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/state/agent_providers.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/chat_session_ops_provider.dart';
 import '../../../core/state/db_provider.dart';
@@ -382,6 +383,7 @@ class SyncController {
     _ref.invalidate(cardRewriterRecoveryViewsProvider, asReload: true);
 
     _ref.invalidate(charactersProvider);
+    _ref.invalidate(agentLibraryProvider);
     _ref.invalidate(personaListProvider);
     _ref.invalidate(apiListProvider);
     _ref.invalidate(lorebooksProvider);

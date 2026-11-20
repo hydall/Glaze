@@ -15,6 +15,8 @@ import '../../../shared/theme/theme_preset_storage.dart';
 import 'adapters/ext_blocks_sync_stores.dart';
 import '../plugins/providers/plugin_library_provider.dart'
     show pluginStoreProvider;
+import '../../../core/state/agent_providers.dart';
+import 'adapters/agent_sync_store.dart';
 import 'adapters/folder_sync_store.dart';
 import 'adapters/plugin_sync_store.dart';
 import 'services/sync_conflict.dart';
@@ -70,6 +72,10 @@ final syncServiceProvider = FutureProvider<SyncService>((ref) async {
       ref.watch(appDbProvider),
     ),
     pluginStore: PluginSyncStore(pluginStore),
+    agentStore: AgentSyncStore(
+      ref.watch(agentRepoProvider),
+      ref.watch(agentBindingRepoProvider),
+    ),
     sessionDeletionStore: ref.watch(sessionDeletionRepoProvider),
     characterDeletionStore: ref.watch(characterDeletionRepoProvider),
     saveLorebookActivations: saveLorebookActivations,

@@ -177,7 +177,7 @@ Roleplay presets live in the `presets` table, behind
 The table declarations live in `lib/core/db/tables/studio_and_presets.dart`.
 
 Studio (agentic presets) is removed. Agents replace it: helpers around the
-ordinary reply, with built-in Post Clean, Tracker and Card Rewriter agents —
+ordinary reply; Post Clean, Tracker and Card Rewriter are agent templates —
 see `docs/ARCHITECTURE.md` § Agents. Their default prompts live in
 `lib/core/llm/default_aux_prompt_blocks.dart`.
 

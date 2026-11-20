@@ -45,6 +45,16 @@ abstract class SyncPluginStore {
   );
 }
 
+/// The agent library and its character/chat bindings as one sync entity.
+abstract class SyncAgentStore {
+  /// `{"agents": [...], "bindings": [...]}` in a stable order, so an
+  /// unchanged library hashes the same on every read.
+  Future<Map<String, dynamic>> read();
+
+  /// Makes this device's agents and bindings those of [data].
+  Future<void> apply(Map<String, dynamic> data);
+}
+
 abstract class SyncManifestProvider {
   Future<SyncManifest> buildLocalManifest({
     SyncManifest? cloudManifest,

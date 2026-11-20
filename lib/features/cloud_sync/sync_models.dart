@@ -111,7 +111,8 @@ class SyncManifest {
   ///  13 — added immutable reconciliation effects to reconciliation state.
   ///  14 — added current session-local lorebook overlay projections.
   ///  15 — added the `plugins` singleton (installed plugins and their data).
-  static const int currentVersion = 15;
+  ///  16 — added the `agents` singleton (agent library and bindings).
+  static const int currentVersion = 16;
 
   final int version;
   final String deviceId;
@@ -265,6 +266,8 @@ String cloudPath(String type, String id) {
       return '$cloudBase/local_storage.json';
     case 'plugins':
       return '$cloudBase/plugins.json';
+    case 'agents':
+      return '$cloudBase/agents.json';
     case 'manifest':
       return '$cloudBase/manifest.json';
     default:

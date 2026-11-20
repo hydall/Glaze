@@ -635,17 +635,19 @@ agent's `enabledGlobally`. The chat's `glaze_agents_off` session variable turns
 every agent off there without touching bindings. Bindings and runs are removed
 with their chat or character; deleting an agent removes its bindings.
 
-### INV-AG6: Built-in agents keep their engine ✅ ENFORCED
+### INV-AG6: One engine per result type ✅ ENFORCED
 
-Only the agent whose `builtinKind` is `tracker` may run `ledger_update`, only
-`card_rewriter` may run `card_update_proposal`; `AgentTurnPlan` drops any other
-shape. Seeding never overwrites a stored built-in, and built-ins cannot be
-deleted.
+There are no built-in agents; any agent may take any result type its phase
+allows (`AgentResultType.allowedFor`), and `AgentTurnPlan` drops any other
+shape. Each post engine runs once per turn, for the first enabled agent of its
+result type in library order (`AgentTurnPlan.firstOfType`); further agents of
+that type are skipped. In a shared batch request, an agent whose `<result>` is
+missing is run again on its own, never left without an answer.
 
 ## 4b. Post-generation Engine Invariants
 
 Studio is removed. These cover the engines it left behind — Post Clean, the
-Tracker (Ledger) and Card Rewriter — which run as built-in agents (§4a). INV-ST1, ST2, ST3, ST5, ST6 and ST7 described the
+Tracker (Ledger) and Card Rewriter — which run for the post agents of the matching result type (§4a). INV-ST1, ST2, ST3, ST5, ST6 and ST7 described the
 Studio tracker / final-writer pipeline and are retired with it; their ids are
 not reused.
 

@@ -612,14 +612,20 @@ name, phase (`pre_generation` / `parallel` / `post_processing`), result type
 chat's, the shared helper connection in `PipelineSettings.agents`, or a saved
 one, with a model override), parameters (null = connection default), context
 size, cadence (every N-th reply, keywords in the last messages), `dependsOn`,
-`seesOutputsOf`, and where a context result goes. Stored in
-`agent_definitions` (`AgentRepo`, `agentLibraryProvider`); the built-in Post
-Clean, Tracker and Card Rewriter are seeded once (`builtin_agents.dart`) and
-never overwritten. `agent_bindings` switch an agent per character or per chat;
+`seesOutputsOf`, `runAlone`, and where a context result goes. Stored in
+`agent_definitions` (`AgentRepo`, `agentLibraryProvider`). There are no
+built-in agents: Post Clean, Tracker, Card Rewriter, Continuity and Director
+are templates (`core/llm/agents/agent_templates.dart`) that create an ordinary,
+editable agent. The engine is chosen by result type alone — the first enabled
+`text_rewrite` agent drives Post Clean, the first `ledger_update` the Tracker,
+the first `card_update_proposal` Card Rewriter. Agents have no regex scripts
+of their own; the preset and global scripts are the only ones. `agent_bindings` switch an agent per character or per chat;
 `resolveAgentState` picks chat → character → the agent's global flag, like
 preset bindings. A session variable (`glaze_agents_off`) switches every agent
 off in one chat. `agent_runs` is the run log (display and debugging only, 300
-rows per chat).
+rows per chat). The library and its bindings sync to the cloud as one
+`agents` singleton (`AgentSyncStore`); a pull replaces both, and an empty
+library never wins over the cloud's.
 
 **Turn.** `StreamGenerationService` asks `AgentTurnService.planFor` for one
 immutable `AgentTurnPlan` per turn (bindings, the chat switch, cadence,
@@ -629,7 +635,11 @@ continuation runs no agents.
 
 1. *Before the reply:* pre-generation agents run wave by wave
    (`AgentPromptBuilder` → `AgentCallRunner` → `AuxLlmClient`, capped by
-   `AgentsSettings.maxConcurrent`). Each result becomes runtime prompt blocks
+   `AgentsSettings.maxConcurrent`). Agents of one wave on the same protocol,
+   endpoint and model share one request (`agent_batch.dart`): each task goes in
+   an `<agent_task agent="id">` section and each answer comes back in a
+   `<result agent="id">` tag; an agent whose answer is missing runs again on
+   its own. `runAlone` keeps an agent out of shared requests. Each result becomes runtime prompt blocks
    (`injectionBlocksFor`): a `{{agent::id}}` macro value and, unless the agent
    is macro-only, a block placed at its depth or around the main prompt. The
    ordinary payload gets them through `withExtraRuntimePromptBlocks`. Parallel
@@ -643,20 +653,23 @@ continuation runs no agents.
 A failed agent is recorded and skipped; it never blocks the reply. Stop cancels
 every agent of the turn through the turn's `CancelToken`.
 
-**Agent prompt.** Enabled blocks in order, macros resolved against the turn
+**Agent prompt.** Enabled blocks in order (stashed blocks and blocks in a
+disabled folder left out — `AgentDefinition.activeBlocks`), macros resolved against the turn
 (character, persona, memory, tracker state, `{{agent::id}}` of results so far).
 `{{history}}` stands for the last `contextSize` messages as a `Name: text`
 transcript; without it the transcript is sent as a closing user message.
 
-**UI.** Tools → Agents (`features/agents/agents_screen.dart`): library, editor,
-bindings, import/export (`.glazeagent.json`). Chat drawer → Agents
+**UI.** Tools → Agents (`features/agents/agents_screen.dart`): library,
+templates, editor, bindings, import/export (`.glazeagent.json`). The editor's
+prompt card (`agent_prompt_card.dart`) reuses the preset block list: drag
+order, checklist and pick-one folders, stash. Chat drawer → Agents
 (`chat_agents_sheet.dart`): the chat switch, per-agent state with its source,
 the requests a reply costs, the run log. API sheet → Agents tab: the helper
 connection.
 
 ### Post-generation engines (Post Clean, Tracker, Card Rewriter)
 
-The built-in post agents run on engines kept from the former Studio:
+Post agents run on engines kept from the former Studio:
 
 - **Inputs.** One immutable `PostGenEngineConfig`
   (`core/llm/post_gen_engine_config.dart`) per turn, built from the post agents

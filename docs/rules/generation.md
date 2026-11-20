@@ -345,7 +345,8 @@ Agents (`docs/ARCHITECTURE.md` § Agents, INV-AG1–6):
 - Results reach the prompt only as runtime prompt blocks; the preset is never
   changed.
 
-Post-generation engines (Post Clean, Tracker), driven by the built-in agents:
+Post-generation engines (Post Clean, Tracker), driven by the post agents of
+the matching result type:
 - They run on one immutable `PostGenEngineConfig` per turn; mid-turn settings
   or API changes affect the next turn only (INV-ST8).
 - POST-cleaner runs after the full reply and writes a blue `'cleaned'` agent
