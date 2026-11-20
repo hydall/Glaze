@@ -469,7 +469,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   /// shortcut nor the selection toolbar can see it. The engine hands the bytes
   /// over here instead.
   void _handleInsertedContent(KeyboardInsertedContent content) {
-    if (!mounted || widget.isEditingMessage) return;
+    if (!mounted) return;
     final bytes = content.data;
     if (bytes == null || bytes.isEmpty) {
       // The engine could not read the content:// URI it was given. Nothing in
@@ -530,7 +530,6 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   void didUpdateWidget(ChatInputBar old) {
     super.didUpdateWidget(old);
     if (old.enterToSend != widget.enterToSend ||
-        old.isEditingMessage != widget.isEditingMessage ||
         old.focusNode != widget.focusNode) {
       // A swapped-in host node leaves the old one holding a handler that
       // closes over this State.
@@ -540,19 +539,13 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   }
 
   void _updateFocusNodeHandler() {
-    final effective = _effectiveFocusNode;
-    effective.canRequestFocus = !widget.isEditingMessage;
-    if (widget.isEditingMessage && effective.hasFocus) {
-      effective.unfocus();
-    }
-    effective.onKeyEvent = _handleComposerKey;
+    _effectiveFocusNode.onKeyEvent = _handleComposerKey;
   }
 
   /// Hardware-keyboard handling for the composer: Enter sends (host node only,
   /// and only when the host asked for it), and Ctrl/Cmd+V pastes an image off
   /// the clipboard when there is one.
   KeyEventResult _handleComposerKey(FocusNode node, KeyEvent event) {
-    if (widget.isEditingMessage) return KeyEventResult.ignored;
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (_isPasteShortcut(event)) {
       // The clipboard can only be read asynchronously, so the paste is taken
@@ -629,7 +622,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
         items.add(item);
       }
     }
-    if (!rewired && !widget.isEditingMessage) {
+    if (!rewired) {
       items.add(
         ContextMenuButtonItem(
           type: ContextMenuButtonType.paste,
@@ -749,10 +742,19 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     });
   }
 
+  void _showSendBlockedWhileEditing() {
+    GlazeToast.show(context, 'send_blocked_while_editing'.tr());
+  }
+
   Future<bool> _handleSend() async {
-    if (widget.isEditingMessage || _isDispatchingSend) return false;
+    if (_isDispatchingSend) return false;
     final text = _controller.text;
     if (text.trim().isEmpty && _attachments.isEmpty) return false;
+    // Typing is allowed while a message is being edited; only sending waits.
+    if (widget.isEditingMessage) {
+      _showSendBlockedWhileEditing();
+      return false;
+    }
     // Prerequisites (e.g. a selected provider) failed: keep the composed text
     // and attachments so nothing is lost while the host shows its modal.
     if (widget.canSend != null && !widget.canSend!()) return false;
@@ -1059,7 +1061,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
               if (isGenerating) {
                 widget.onStop?.call();
               } else if (widget.isEditingMessage) {
-                return;
+                if (hasContent) _showSendBlockedWhileEditing();
               } else if (guidanceOnly) {
                 impersonate();
               } else if (hasContent) {
@@ -1264,7 +1266,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                 // opened it — a composer action that may be pinned anywhere,
                 // or the drawer.
                 MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-                  onTap: widget.isEditingMessage ? null : _toggleGuidance,
+                  onTap: _toggleGuidance,
                   behavior: HitTestBehavior.opaque,
                   child: Padding(
                     padding: const EdgeInsets.all(6),
@@ -1280,10 +1282,6 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
           ),
           TextField(
             controller: _guidanceController,
-            readOnly: widget.isEditingMessage,
-            canRequestFocus: !widget.isEditingMessage,
-            enableInteractiveSelection: !widget.isEditingMessage,
-            showCursor: !widget.isEditingMessage,
             maxLines: 3,
             minLines: 1,
             textCapitalization: TextCapitalization.sentences,
@@ -1637,13 +1635,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
                                   onContentInserted: _handleInsertedContent,
                                 ),
                             readOnly:
-                                widget.isEditingMessage ||
-                                _isImpersonating ||
-                                _draftTranslator.busy,
-                            canRequestFocus: !widget.isEditingMessage,
-                            enableInteractiveSelection:
-                                !widget.isEditingMessage,
-                            showCursor: !widget.isEditingMessage,
+                                _isImpersonating || _draftTranslator.busy,
                             maxLines: 5,
                             minLines: 1,
                             textCapitalization: TextCapitalization.sentences,

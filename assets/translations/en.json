@@ -485,6 +485,7 @@
   "translation_not_configured": "Set up a translation engine in the API settings.",
   "translation_failed": "Translation failed: {}",
   "translation_input_empty": "Type a message to translate first.",
+  "send_blocked_while_editing": "Can't send a new message while editing an old one.",
   "translation_provider": "Translation engine",
   "translation_provider_desc": "The chat model, or a dedicated translation service.",
   "translation_provider_llm": "Chat model (LLM)",

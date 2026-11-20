@@ -138,7 +138,7 @@ Pieces: `attachments`, `pill` (the whole input surface), `guidance`,
 
 | Field | |
 |---|---|
-| `placeholder`, `hasText`, `locked`, `readOnly` | the field |
+| `placeholder`, `hasText`, `readOnly` | the field |
 | `guidance`, `attachments` | presence, and the attachment count |
 | `pins` | `[{ key, icon }]` — the pinned buttons |
 | `send.icon`, `send.enabled` | the send button |
