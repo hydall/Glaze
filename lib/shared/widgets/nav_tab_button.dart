@@ -81,6 +81,9 @@ void handleNavTabTap(
   onTap(index);
 }
 
+/// Largest text scale a tab label follows from the system font size.
+const double _kMaxLabelTextScale = 1.3;
+
 /// One tab: its icon over its label, tinted towards the accent when active.
 class NavTabButton extends StatelessWidget {
   final NavTabItem item;
@@ -132,20 +135,30 @@ class NavTabButton extends StatelessWidget {
                     colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.fade,
-                    softWrap: false,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                      // The Inter variable font is loaded at runtime via
-                      // loadFontFromList, which ignores `fontWeight` — the
-                      // weight axis must be driven explicitly via
-                      // `fontVariations`.
-                      fontVariations: const [FontVariation('wght', 500)],
-                      color: color,
+                  // Large system font sizes are clamped like Material's
+                  // NavigationBar, and a label still too wide for its tab
+                  // (a long translation) shrinks to fit instead of pushing the
+                  // other tabs off the bar.
+                  MediaQuery.withClampedTextScaling(
+                    maxScaleFactor: _kMaxLabelTextScale,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        softWrap: false,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                          // The Inter variable font is loaded at runtime via
+                          // loadFontFromList, which ignores `fontWeight` — the
+                          // weight axis must be driven explicitly via
+                          // `fontVariations`.
+                          fontVariations: const [FontVariation('wght', 500)],
+                          color: color,
+                        ),
+                      ),
                     ),
                   ),
                 ],
