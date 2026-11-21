@@ -44,6 +44,13 @@ class ChatSessionBranchRepo {
   /// the next rewrite would edit in place — a variant shared by two sessions
   /// would let one branch rewrite the other's card.
   ///
+  /// A variant is session-owned only when the session carries a canon
+  /// timeline: the Card Rewriter and a forked branch both root one on the
+  /// card they create. A variation the user made by hand has none, and its
+  /// branch stays a plain extra session on it — forking there moved the branch
+  /// onto a new "Branch from …" card, so it looked like the branch had taken
+  /// the original chat's place instead of sitting next to it.
+  ///
   /// Otherwise the branch is just another session on the same card: the first
   /// rewrite in either session forks the root card on its own
   /// (`ManualRewriteApplyRepo._forkSessionCharacter`), so forking here only
@@ -52,8 +59,10 @@ class ChatSessionBranchRepo {
     required Character sourceCharacter,
     required String sourceSessionId,
   }) async {
-    if (sourceCharacter.variantOrder != 0) return true;
     final checkpoints = await _checkpointRepo.getForSession(sourceSessionId);
+    if (sourceCharacter.variantOrder != 0 && checkpoints.isNotEmpty) {
+      return true;
+    }
     if (checkpoints.any((checkpoint) => checkpoint.sequence > 0)) return true;
     final overlay =
         await (db.select(db.sessionLorebookEvolutionRows)

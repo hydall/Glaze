@@ -570,18 +570,15 @@ void main() {
   });
 
   test('branch forks the card for a session-owned variant', () async {
-    await container
-        .read(characterRepoProvider)
-        .put(
-          const Character(
-            id: 'c1',
-            name: 'Character',
-            currentSessionIndex: 0,
-            variantGroupId: 'group',
-            variantName: 'Session 1',
-            variantOrder: 1,
-          ),
-        );
+    const variant = Character(
+      id: 'c1',
+      name: 'Character',
+      currentSessionIndex: 0,
+      variantGroupId: 'group',
+      variantName: 'Session 1',
+      variantOrder: 1,
+    );
+    await container.read(characterRepoProvider).put(variant);
     final current = ChatSession(
       id: 'c1_0',
       characterId: 'c1',
@@ -589,6 +586,27 @@ void main() {
       messages: [_message('m0'), _message('m1')],
     );
     await container.read(chatRepoProvider).put(current);
+    // The Card Rewriter and a forked branch both root a canon timeline on the
+    // variant they create; that timeline is what marks it session-owned.
+    final variantHash = CardCanonicalizer.sha256(variant);
+    await db
+        .into(db.characterRevisionRows)
+        .insert(
+          CharacterRevisionRowsCompanion.insert(
+            characterId: 'c1',
+            revision: 1,
+            revisionHash: variantHash,
+            snapshotJson: jsonEncode(variant.toJson()),
+          ),
+        );
+    await container
+        .read(sessionCanonCheckpointRepoProvider)
+        .appendRootInTransaction(
+          sessionId: current.id,
+          characterId: 'c1',
+          characterRevision: 1,
+          characterRevisionHash: variantHash,
+        );
 
     final branch = await container
         .read(_serviceProvider)
@@ -611,6 +629,41 @@ void main() {
           .sequence,
       0,
     );
+  });
+
+  test('branch of a hand-made variation stays on that variation', () async {
+    await container
+        .read(characterRepoProvider)
+        .put(
+          const Character(
+            id: 'c1',
+            name: 'Character',
+            currentSessionIndex: 0,
+            variantGroupId: 'group',
+            variantName: 'Alt',
+            variantOrder: 1,
+          ),
+        );
+    final current = ChatSession(
+      id: 'c1_0',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: [_message('m0'), _message('m1')],
+    );
+    await container.read(chatRepoProvider).put(current);
+
+    final branch = await container
+        .read(_serviceProvider)
+        .branchSession('c1', current, 0);
+
+    // No rewrite has touched the variation, so the branch is another session
+    // next to the source one, not a new "Branch from …" card.
+    expect(branch.characterId, 'c1');
+    expect(branch.id, 'c1_1');
+    expect(await container.read(chatRepoProvider).getById('c1_0'), isNotNull);
+    final group = (await container.read(characterRepoProvider).getAll())
+        .where((c) => c.variantGroupId == 'group');
+    expect(group, hasLength(1));
   });
 
   test('branch forks the card for an evolved lorebook entry', () async {
