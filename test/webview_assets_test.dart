@@ -966,24 +966,6 @@ void main() {
       }
     });
 
-    // The Dart mapper sends `avatarFallback` for a message whose stored persona
-    // no longer resolves (deleted, or never given a picture). The renderer must
-    // draw the initial letter for it instead of falling through to the active
-    // persona's avatar.
-    test('message renderer pins the avatar of a stored persona', () {
-      expect(
-        rendererMessageJs,
-        contains('const pinnedAvatar = !!(m.avatarUrl || m.avatarFallback)'),
-      );
-      expect(
-        rendererMessageJs,
-        contains(
-          'if (messageData.avatarUrl || messageData.avatarFallback) '
-          "section.dataset.avatarPinned = '1'",
-        ),
-      );
-    });
-
     test('legacy renderer shim points at active module entrypoint', () {
       expect(_asset('renderer.js'), contains('renderer/index.js'));
     });

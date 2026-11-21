@@ -332,27 +332,16 @@ Covered by `specs/variant_swap_targets.spec.js`.
 
 ---
 
-## A user message wears the persona it was sent as, not the active one
+## Every user message wears the active persona
 
-Every user message stores the persona it was sent under — `personaId` and
-`personaName` (`ChatNotifier._sendMessage`). By the time the map reaches the
-page that id is already resolved against the live roster
-(`ChatBridgeController.setPersonaRoster`):
-
-* the persona still exists → the map carries its `avatarUrl` and its *current*
-  name, so renaming a persona renames the messages it sent;
-* it was deleted, or has no picture → `avatarFallback: true`, and the message
-  keeps the name stored on it while the avatar drops to the initial letter.
-
-Either way the renderer stamps `data-avatar-pinned` on the section, and
-`setIdentity` — which repaints every avatar in the DOM — skips the pinned ones.
-Without that skip, switching persona re-faces the whole history, and a message
-from a deleted persona borrows the picture of whoever is active now.
-`specs/message_persona.spec.js` holds this.
-
-A message written before personas were stamped carries neither field: it is
-unpinned and keeps following the active identity, which is all there is to go
-on for it.
+A user message still stores the persona it was sent under — `personaId` and
+`personaName` (`ChatNotifier._sendMessage`) — because the pipeline reads it
+(the Ledger names who said what). The chat does not render it: the mapper
+names every user message after the persona the chat speaks as now, and sends
+no `personaName` / avatar of its own, so the page draws the active identity
+(`setIdentity`) on every user section. Switching persona therefore re-faces
+the whole chat at once, without a re-render. `specs/message_persona.spec.js`
+holds this.
 
 ---
 
