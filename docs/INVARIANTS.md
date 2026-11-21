@@ -1325,6 +1325,24 @@ normal-looking bubble whose text is an error message, and re-opened the
 post-gen chain gated on `isError` (INV-EG4). Partial text is a new, healthy
 swipe and stays `isError: false`.
 
+### INV-A2c: A regenerate over an error replaces it
+
+`regenBaseOf` (`variation_error_state.dart`) is the base every regen result
+builds on — the optimistic pending slot and `writeAssistant` in
+`ChatNotifier.regenerateLastAssistant`, `SavedMessageWriter.writeRegenError`,
+and the partial-text branch of `AbortHandler`. When the active variation is an
+error it is left out, so the new reply (or a new error) takes its place instead
+of piling up beside it. The restoration snapshot still holds the full message,
+so a cancel with nothing streamed puts the error back (INV-A2b). The base's
+meta is always aligned 1:1 with its swipes, so an `isError` marker can never
+land on another variation's index.
+
+An error variation has no blue sub-swipes of its own: `writeRegenError` clears
+`agentSwipes`, `ChatMessageService.setSwipe` neither saves sub-swipes into an
+error swipe's meta nor loads them from one, and the mapper never shows the blue
+switcher on an error. Sub-swipes left on an error swipe used to bring the
+previous healthy text back inside the error window.
+
 ### INV-A3: Regen during active generation aborts first
 
 `ChatNotifier.regenerateLastAssistant()` does not simply reject when generation is active.

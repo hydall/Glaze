@@ -146,6 +146,22 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       groupKey: 'settings_group_chat',
     ),
     row(
+      'follow_composer_resize',
+      'menu_follow_composer_resize',
+      'desc_follow_composer_resize',
+      Icons.unfold_more_rounded,
+      const [
+        'scroll',
+        'input',
+        'composer',
+        'keyboard',
+        'прокрутка',
+        'поле ввода',
+        'композер',
+      ],
+      groupKey: 'settings_group_chat',
+    ),
+    row(
       'show_msg_id',
       'menu_show_msg_id',
       'desc_show_msg_id',
@@ -291,14 +307,23 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       const ['desktop', 'mobile', 'мобильный', 'десктоп'],
       groupKey: 'settings_group_desktop',
     ),
+    row(
+      'reveal_hidden_hotkey',
+      'menu_reveal_hidden_hotkey',
+      'desc_reveal_hidden_hotkey',
+      Icons.keyboard_outlined,
+      const ['hotkey', 'shortcut', 'hidden', 'хоткей', 'сочетание', 'скрытые'],
+      groupKey: 'settings_group_desktop',
+    ),
     // ── General ─────────────────────────────────────────────────────────────
-    row('language', 'menu_language', null, Icons.language_outlined, const [
+    row(
       'language',
-      'english',
-      'русский',
-      'язык',
-      'локаль',
-    ], groupKey: 'settings_group_general'),
+      'menu_language',
+      null,
+      Icons.language_outlined,
+      const ['language', 'english', 'русский', 'язык', 'локаль'],
+      groupKey: 'settings_group_general',
+    ),
     if (SystemSettings.canOpenNotificationSettings)
       row(
         'notifications',

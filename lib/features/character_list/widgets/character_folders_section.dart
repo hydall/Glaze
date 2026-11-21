@@ -33,6 +33,10 @@ class CharacterFoldersSection extends ConsumerWidget {
   final bool showFavorites;
   final VoidCallback? onOpenFavorites;
 
+  /// False in the binding pickers: folders only open there, a long press does
+  /// not offer rename/delete.
+  final bool editable;
+
   const CharacterFoldersSection({
     super.key,
     required this.onOpenFolder,
@@ -41,6 +45,7 @@ class CharacterFoldersSection extends ConsumerWidget {
     this.onHidePicks,
     this.showFavorites = false,
     this.onOpenFavorites,
+    this.editable = true,
   });
 
   @override
@@ -75,7 +80,9 @@ class CharacterFoldersSection extends ConsumerWidget {
           folder: folder,
           members: membersOf(folder.id),
           onTap: () => onOpenFolder(folder.id),
-          onLongPress: () => _folderActions(context, ref, folder),
+          onLongPress: editable
+              ? () => _folderActions(context, ref, folder)
+              : () {},
         ),
     ];
 

@@ -148,6 +148,10 @@ export class Bridge {
     // embedder already removed by shrinking the WebView's own viewport.
     this._bottomInsetPx = 0;
     this._viewportFullH = 0;
+    // The part of `_bottomInsetPx` whose changes must not move the reading
+    // position — the composer's height while the "follow the composer" setting
+    // is off, otherwise 0. See setBottomPadding().
+    this._nonScrollingInsetPx = 0;
     // Re-pin glide state (see _glideScrollTo). `_atBottom` is the live
     // parked-at-bottom flag kept by the scroll listener; the very first inset
     // application lands instantly so the chat doesn't slide into place on open.
@@ -1567,11 +1571,31 @@ export class Bridge {
   // The keyboard moves the content by exactly [px]'s delta either way; only how
   // much of it has to be *padding* differs, so the scroll compensation below is
   // driven by the inset and stays independent of the split.
-  setBottomPadding(px, viewportHeight) {
+  //
+  // [nonScrollingInset] is the part of [px] whose changes leave the reading
+  // position alone: the composer's height when the reader turned off following
+  // it as it grows, otherwise 0. A push in which only that part moved (a long
+  // message wrapping onto another line) re-pads the list without scrolling it;
+  // the keyboard and drawer keep the usual follow.
+  setBottomPadding(px, viewportHeight, nonScrollingInset) {
     const next = Number(px) || 0;
     const insetDiff = next - this._bottomInsetPx;
     this._bottomInsetPx = next;
     if (viewportHeight != null) this._viewportFullH = Number(viewportHeight) || 0;
+    const hold = Number(nonScrollingInset) || 0;
+    const holdDiff = hold - this._nonScrollingInsetPx;
+    this._nonScrollingInsetPx = hold;
+    // Only a push the held part fully accounts for skips the follow. One that
+    // also carries a keyboard move — or a settings toggle, where the held part
+    // jumps while the inset stays put — takes the ordinary path.
+    if (
+      this._bottomInsetApplied &&
+      Math.abs(insetDiff) >= 0.1 &&
+      Math.abs(insetDiff - holdDiff) < 0.1
+    ) {
+      this._repadWithoutScroll();
+      return;
+    }
     // A moving inset is the keyboard (or drawer) on its way: the one window in
     // which the browser pans the page, even when the keyboard overlays the
     // WebView and the visual viewport never reports a resize.
@@ -1656,6 +1680,27 @@ export class Bridge {
     }
 
     this._glideScrollTo(container, targetScrollTop);
+  }
+
+  // Applies the target padding and leaves scrollTop where it is: the list stays
+  // put while the composer grows over it. A reduction under a list parked at the
+  // bottom still lets the engine clamp scrollTop, which is the list following a
+  // composer that shrank back — nothing is left to reveal below it.
+  _repadWithoutScroll() {
+    const container = document.getElementById('chat-container') || document.body;
+    const target = this._targetBottomPadding();
+    const prevPadding = parseFloat(container.style.paddingBottom) || 0;
+    if (Math.abs(target - prevPadding) < 0.1) return;
+    // Mid-glide a reduction could clamp the glide's own target; let it wait
+    // for the transition to settle like any other reduction.
+    if (target < prevPadding && this._repinAnimating) {
+      this._scheduleShrink(container);
+      return;
+    }
+    this._applyBottomPadding(container, target);
+    // No scroll event fires when only the padding moves, so refresh the
+    // parked-at-bottom flag and the scroll-down button here.
+    this._emitScrollToBottomVisibility?.();
   }
 
   // A padding REDUCTION waits until both sides of the transition have stopped

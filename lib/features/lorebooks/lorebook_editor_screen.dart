@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/llm/embedding_error_labels.dart';
 import '../../core/llm/glaze_matcher.dart';
 import '../../core/llm/lorebook_embedding_service.dart';
 import '../../core/llm/lorebook_embedding_text.dart';
@@ -21,11 +20,10 @@ import '../../shared/shell/desktop/desktop_floating_provider.dart';
 import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
-import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_fab.dart';
-import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_text_field.dart';
 import '../../shared/widgets/glaze_toast.dart';
@@ -39,39 +37,89 @@ import 'widgets/vector_setup_gate.dart';
 
 enum _View { entries, editEntry }
 
-class _IndexResult {
-  final int indexed;
-  final int skipped;
-  final int failed;
-  const _IndexResult(this.indexed, this.skipped, this.failed);
-}
-
-/// Opens lorebook [lorebookId]'s editor: on desktop in a floating window of its
-/// own (opening one already open brings it to the front), elsewhere as a page.
+/// Opens lorebook [lorebookId]'s editor from outside the Lorebooks list: on
+/// desktop in a floating window of its own (opening one already open brings it
+/// to the front), elsewhere as a sheet.
 Future<void> openLorebookEditor(BuildContext context, String lorebookId) async {
   final view = Uri(
     path: 'lorebook-editor',
     queryParameters: {'id': lorebookId},
   ).toString();
   if (floatOnDesktop(context, view)) return;
-  await Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => LorebookEditorScreen(lorebookId: lorebookId),
-    ),
+  await showGlazeSheet<void>(
+    context: context,
+    useRootNavigator: true,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    barrierColor: Colors.black54,
+    builder: (_) => LorebookEditorScreen(lorebookId: lorebookId),
   );
+}
+
+/// The header, actions and floating button the editor wants while it is
+/// hosted inside another sheet (the Lorebooks list), which draws them.
+class LorebookEditorChrome {
+  final String? title;
+  final Widget? titleWidget;
+  final List<SheetViewAction> actions;
+  final Widget? headerBottom;
+  final Widget? fab;
+
+  /// A step back inside the editor (an entry back to the entries), while it
+  /// has one to take.
+  final VoidCallback? innerBack;
+
+  const LorebookEditorChrome({
+    this.title,
+    this.titleWidget,
+    this.actions = const [],
+    this.headerBottom,
+    this.fab,
+    this.innerBack,
+  });
 }
 
 class LorebookEditorScreen extends ConsumerStatefulWidget {
   final String lorebookId;
 
-  const LorebookEditorScreen({super.key, required this.lorebookId});
+  /// Set when the editor is hosted inside another sheet, the way the Presets
+  /// list hosts its editor: the editor then builds only its body and hands
+  /// its chrome here, for the host's [SheetView] to draw.
+  final ValueChanged<LorebookEditorChrome>? onChrome;
+
+  /// Leaves the hosted editor (its back from the entries list).
+  final VoidCallback? onClose;
+
+  const LorebookEditorScreen({
+    super.key,
+    required this.lorebookId,
+    this.onChrome,
+    this.onClose,
+  });
 
   @override
   ConsumerState<LorebookEditorScreen> createState() =>
-      _LorebookEditorScreenState();
+      LorebookEditorScreenState();
 }
 
-class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
+class LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
+  /// The chrome last handed to [LorebookEditorScreen.onChrome], as a
+  /// signature of what it depends on, so it is sent once per change.
+  String? _publishedChrome;
+
+  bool get _hosted => widget.onChrome != null;
+
+  /// One step back inside the editor. Returns false when there is none left
+  /// and the host should close the editor.
+  bool handleBack() {
+    if (_view == _View.editEntry) {
+      _closeEdit();
+      return true;
+    }
+    _flushSave();
+    return false;
+  }
+
   // Persisted lorebook state (local source of truth once loaded).
   String _name = '';
   List<LorebookEntry> _entries = [];
@@ -80,13 +128,9 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
 
   final TextEditingController _searchController = TextEditingController();
 
-  // Embedding / indexing state.
+  // Per-entry vector status, shown on the rows. Indexes themselves are
+  // built and cleared in the Vectors screen, not here.
   Map<String, String> _embeddingStatuses = {};
-  Map<String, String> _embeddingErrorLabels = {};
-  bool _isIndexing = false;
-  String _indexStatus = '';
-  int _rateLimitCooldown = 0;
-  _IndexResult? _indexResult;
 
   // View navigation.
   _View _view = _View.entries;
@@ -120,7 +164,14 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
   bool? _eMatchWholeWords;
   int _eSelectiveLogic = 4;
   String _ePosition = 'matchGlobal';
-  bool _eIndexing = false;
+
+  @override
+  void deactivate() {
+    // A sheet dismissed by a swipe never routes through a back handler, so a
+    // debounced edit would be lost to dispose(); flush while ref is valid.
+    _flushSave();
+    super.deactivate();
+  }
 
   @override
   void dispose() {
@@ -156,7 +207,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
       for (final record in records) record.entryId: record,
     };
     final statuses = <String, String>{};
-    final errorLabels = <String, String>{};
     for (final entry in _entries) {
       if (!isLorebookEntryIndexable(entry, vectorizeAll: _vectorizeAll)) {
         continue;
@@ -177,8 +227,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         statuses[entry.id] = 'none';
       } else if (record.errorJson != null) {
         statuses[entry.id] = 'error';
-        final error = repo.decodeError(record);
-        errorLabels[entry.id] = EmbeddingErrorLabel.classify(error).label;
       } else if (record.textHash == expectedHash &&
           repo.hasUsableVectors(record)) {
         statuses[entry.id] = 'indexed';
@@ -187,10 +235,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
       }
     }
     if (mounted) {
-      setState(() {
-        _embeddingStatuses = statuses;
-        _embeddingErrorLabels = errorLabels;
-      });
+      setState(() => _embeddingStatuses = statuses);
     }
   }
 
@@ -240,22 +285,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
   /// The book's opt-in to embedding every entry, not just the ones that ask
   /// for vector search (SillyTavern's `enabled_for_all`).
   bool get _vectorizeAll => _settings?.vectorizeAllEntries ?? false;
-
-  /// The entries the indexer would embed — both pools, so a book made only of
-  /// keyless entries still counts as having something to index.
-  List<LorebookEntry> get _indexableEntries => _entries
-      .where((e) => isLorebookEntryIndexable(e, vectorizeAll: _vectorizeAll))
-      .toList();
-
-  bool get _needsReindex =>
-      _indexableEntries.any((e) => _embeddingStatuses[e.id] != 'indexed');
-
-  int get _missingVectorCount => _indexableEntries
-      .where((e) => _embeddingStatuses[e.id] != 'indexed')
-      .length;
-
-  List<LorebookEntry> get _failedEntries =>
-      _entries.where((e) => _embeddingStatuses[e.id] == 'error').toList();
 
   void _toggleEntry(int index) {
     setState(() {
@@ -474,7 +503,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     _eMatchWholeWords = e.matchWholeWords;
     _eSelectiveLogic = e.selectiveLogic;
     _ePosition = e.position;
-    _eIndexing = false;
     setState(() {
       _editIndex = index;
       _view = _View.editEntry;
@@ -568,266 +596,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     _commitEdit(immediate: true);
   }
 
-  // ── Indexing actions (kept ~verbatim from the previous editor) ────────────
-
-  Future<void> _indexEntries() async {
-    if (!await ensureVectorsReady(context, ref) || !mounted) return;
-    final config = ref.read(embeddingConfigProvider);
-    final vectorEntries = _indexableEntries;
-    if (vectorEntries.isEmpty) {
-      GlazeToast.show(context, 'no_entries_found'.tr());
-      return;
-    }
-
-    setState(() {
-      _isIndexing = true;
-      _indexResult = null;
-      _indexStatus = 'index_progress'.tr(
-        namedArgs: {'done': '0', 'total': '${vectorEntries.length}'},
-      );
-    });
-
-    try {
-      final service = ref.read(lorebookEmbeddingServiceProvider);
-      final result = await service.indexLorebookEntries(
-        widget.lorebookId,
-        _entries,
-        config,
-        embeddingTarget:
-            _settings?.embeddingTarget ?? LorebookEmbeddingTarget.content,
-        vectorizeAll: _vectorizeAll,
-        onProgress: (current, total, name) {
-          if (!mounted) return;
-          setState(
-            () => _indexStatus = 'index_progress'.tr(
-              namedArgs: {'done': '$current', 'total': '$total'},
-            ),
-          );
-        },
-      );
-      if (mounted) {
-        setState(() {
-          _isIndexing = false;
-          _indexStatus = '';
-          _indexResult = _IndexResult(
-            result.indexed,
-            result.skipped,
-            result.failed,
-          );
-          if (result.rateLimited && result.retryAfter > 0) {
-            _rateLimitCooldown = result.retryAfter;
-            _startCooldownTimer();
-          }
-        });
-        await _loadEmbeddingStatuses();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isIndexing = false;
-          _indexStatus = '';
-        });
-        await _loadEmbeddingStatuses();
-        if (!mounted) return;
-        GlazeErrorDialog.show(
-          context,
-          e,
-          prefix: '${'settings_err_failed'.tr()} ',
-        );
-      }
-    }
-  }
-
-  Future<void> _retryFailed() async {
-    if (!await ensureVectorsReady(context, ref) || !mounted) return;
-    final config = ref.read(embeddingConfigProvider);
-
-    setState(() {
-      _isIndexing = true;
-      _indexResult = null;
-      _indexStatus = 'btn_retry_failed'.tr();
-    });
-
-    try {
-      final service = ref.read(lorebookEmbeddingServiceProvider);
-      final result = await service.indexLorebookEntries(
-        widget.lorebookId,
-        _entries,
-        config,
-        retryFailedOnly: true,
-        embeddingTarget:
-            _settings?.embeddingTarget ?? LorebookEmbeddingTarget.content,
-        vectorizeAll: _vectorizeAll,
-        onProgress: (current, total, name) {
-          if (!mounted) return;
-          setState(
-            () => _indexStatus = 'index_progress'.tr(
-              namedArgs: {'done': '$current', 'total': '$total'},
-            ),
-          );
-        },
-      );
-      if (mounted) {
-        setState(() {
-          _isIndexing = false;
-          _indexStatus = '';
-          _indexResult = _IndexResult(
-            result.indexed,
-            result.skipped,
-            result.failed,
-          );
-          if (result.rateLimited && result.retryAfter > 0) {
-            _rateLimitCooldown = result.retryAfter;
-            _startCooldownTimer();
-          }
-        });
-        await _loadEmbeddingStatuses();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isIndexing = false;
-          _indexStatus = '';
-        });
-        await _loadEmbeddingStatuses();
-        if (!mounted) return;
-        GlazeErrorDialog.show(
-          context,
-          e,
-          prefix: '${'settings_err_failed'.tr()} ',
-        );
-      }
-    }
-  }
-
-  Future<void> _clearAndReindex() async {
-    final confirmed = await GlazeBottomSheet.show<bool>(
-      context,
-      title: 'action_delete_indexes'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.delete_sweep,
-        description: 'action_delete_indexes'.tr(),
-      ),
-      items: [
-        BottomSheetItem(
-          label: 'memory_books_btn_reindex'.tr(),
-          isDestructive: true,
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
-        ),
-        BottomSheetItem(
-          label: 'btn_cancel'.tr(),
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
-        ),
-      ],
-    );
-    if (confirmed != true || !mounted) return;
-
-    if (!await ensureVectorsReady(context, ref) || !mounted) return;
-    final config = ref.read(embeddingConfigProvider);
-    final vectorEntries = _indexableEntries;
-    if (vectorEntries.isEmpty) {
-      GlazeToast.show(context, 'no_entries_found'.tr());
-      return;
-    }
-
-    setState(() {
-      _isIndexing = true;
-      _indexResult = null;
-      _indexStatus = '${'action_delete_indexes'.tr()}...';
-    });
-
-    try {
-      final service = ref.read(lorebookEmbeddingServiceProvider);
-      await service.clearLorebookEmbeddings(widget.lorebookId);
-      final result = await service.indexLorebookEntries(
-        widget.lorebookId,
-        _entries,
-        config,
-        forceReindex: true,
-        embeddingTarget:
-            _settings?.embeddingTarget ?? LorebookEmbeddingTarget.content,
-        vectorizeAll: _vectorizeAll,
-        onProgress: (current, total, name) {
-          if (!mounted) return;
-          setState(
-            () => _indexStatus = 'index_progress'.tr(
-              namedArgs: {'done': '$current', 'total': '$total'},
-            ),
-          );
-        },
-      );
-      if (mounted) {
-        setState(() {
-          _isIndexing = false;
-          _indexStatus = '';
-          _indexResult = _IndexResult(result.indexed, 0, result.failed);
-          if (result.rateLimited && result.retryAfter > 0) {
-            _rateLimitCooldown = result.retryAfter;
-            _startCooldownTimer();
-          }
-        });
-        await _loadEmbeddingStatuses();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isIndexing = false;
-          _indexStatus = '';
-        });
-        await _loadEmbeddingStatuses();
-        if (!mounted) return;
-        GlazeErrorDialog.show(
-          context,
-          e,
-          prefix: '${'settings_err_failed'.tr()} ',
-        );
-      }
-    }
-  }
-
-  void _startCooldownTimer() {
-    Future.doWhile(() async {
-      await Future<void>.delayed(const Duration(seconds: 1));
-      if (!mounted) return false;
-      setState(() {
-        _rateLimitCooldown--;
-        if (_rateLimitCooldown <= 0) _rateLimitCooldown = 0;
-      });
-      return _rateLimitCooldown > 0;
-    });
-  }
-
-  Future<void> _deleteAllIndexes() async {
-    final confirmed = await GlazeBottomSheet.show<bool>(
-      context,
-      title: 'action_delete_indexes'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.delete_outline,
-        description: 'action_delete_indexes'.tr(),
-      ),
-      items: [
-        BottomSheetItem(
-          label: 'btn_delete'.tr(),
-          isDestructive: true,
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
-        ),
-        BottomSheetItem(
-          label: 'btn_cancel'.tr(),
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
-        ),
-      ],
-    );
-    if (confirmed != true) return;
-
-    await ref.read(embeddingRepoProvider).deleteBySourceId(widget.lorebookId);
-    await _loadEmbeddingStatuses();
-    if (mounted) GlazeToast.show(context, 'action_delete_indexes'.tr());
-  }
-
   void _resetEntriesToGlobal() {
     setState(() {
       for (int i = 0; i < _entries.length; i++) {
@@ -861,43 +629,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
           ? 'action_disable_vector_all'.tr()
           : 'action_enable_vector_all'.tr(),
     );
-  }
-
-  Future<void> _indexSingleEntry() async {
-    final entry = _entries[_editIndex];
-    if (!await ensureVectorsReady(context, ref) || !mounted) return;
-    final config = ref.read(embeddingConfigProvider);
-    setState(() => _eIndexing = true);
-    try {
-      final service = ref.read(lorebookEmbeddingServiceProvider);
-      final result = await service.indexLorebookEntries(
-        widget.lorebookId,
-        [entry],
-        config,
-        embeddingTarget:
-            _settings?.embeddingTarget ?? LorebookEmbeddingTarget.content,
-        vectorizeAll: _vectorizeAll,
-      );
-      if (mounted) {
-        setState(() {
-          _eIndexing = false;
-          _embeddingStatuses[entry.id] = result.indexed > 0
-              ? 'indexed'
-              : 'error';
-        });
-        GlazeToast.show(
-          context,
-          result.indexed > 0 ? 'entry_indexed'.tr() : 'entry_index_error'.tr(),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _eIndexing = false;
-          _embeddingStatuses[entry.id] = 'error';
-        });
-      }
-    }
   }
 
   void _renameLorebook() {
@@ -962,15 +693,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             _showTestDialog();
           },
         ),
-        BottomSheetItem(
-          label: 'action_delete_indexes'.tr(),
-          icon: Icons.delete_outline,
-          isDestructive: true,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _deleteAllIndexes();
-          },
-        ),
       ],
     );
   }
@@ -1016,10 +738,14 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     if (!_loaded) {
       final list = ref.watch(lorebooksProvider).value;
       if (list == null) {
+        if (_hosted) return const Center(child: GlazeSpinner());
         return const Scaffold(body: Center(child: GlazeSpinner()));
       }
       final lb = _findLorebook(list);
       if (lb == null) {
+        if (_hosted) {
+          return Center(child: Text('no_lorebooks'.tr()));
+        }
         return GlazeScaffold(
           title: 'no_results'.tr(),
           body: Center(child: Text('no_lorebooks'.tr())),
@@ -1039,6 +765,58 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
       }
     });
 
+    final entryTitle = isEntries
+        ? null
+        : (_entries[_editIndex].comment.isNotEmpty
+              ? _entries[_editIndex].comment
+              : 'unnamed_entry'.tr());
+    final actions = isEntries
+        ? [
+            SheetViewAction(
+              icon: const Icon(Icons.more_vert, size: 20),
+              onPressed: _entriesMenu,
+            ),
+          ]
+        : [
+            SheetViewAction(
+              icon: Icon(
+                _eEnabled ? Icons.toggle_on : Icons.toggle_off,
+                size: 28,
+              ),
+              color: _eEnabled
+                  ? context.cs.primary
+                  : context.cs.onSurfaceVariant,
+              tooltip: 'label_enabled'.tr(),
+              onPressed: () {
+                setState(() => _eEnabled = !_eEnabled);
+                _commitEdit(immediate: true);
+              },
+            ),
+          ];
+    final fab = isEntries
+        ? GlazeFab(
+            label: 'lorebook_new_entry'.tr(),
+            tooltip: 'lorebook_new_entry'.tr(),
+            onTap: _addEntryMenu,
+          )
+        : null;
+    final body = isEntries ? _entriesBody() : _editBody();
+
+    if (_hosted) {
+      _publishChrome(
+        LorebookEditorChrome(
+          title: entryTitle,
+          titleWidget: isEntries ? _entriesTitle() : null,
+          actions: actions,
+          headerBottom: isEntries ? _searchBar() : null,
+          fab: fab,
+          innerBack: isEntries ? null : _closeEdit,
+        ),
+        '$_view|$_editIndex|$_name|$entryTitle|$_eEnabled',
+      );
+      return body;
+    }
+
     return SheetView(
       showRouteBackground: false,
       shellBranchIndex: 2,
@@ -1052,45 +830,24 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
       },
       // In a desktop window its title bar steps back from an entry.
       innerBack: _view == _View.editEntry ? _closeEdit : null,
-      title: isEntries
-          ? null
-          : (_entries[_editIndex].comment.isNotEmpty
-                ? _entries[_editIndex].comment
-                : 'unnamed_entry'.tr()),
+      title: entryTitle,
       titleWidget: isEntries ? _entriesTitle() : null,
       headerBottom: isEntries ? _searchBar() : null,
-      actions: isEntries
-          ? [
-              SheetViewAction(
-                icon: const Icon(Icons.more_vert, size: 20),
-                onPressed: _entriesMenu,
-              ),
-            ]
-          : [
-              SheetViewAction(
-                icon: Icon(
-                  _eEnabled ? Icons.toggle_on : Icons.toggle_off,
-                  size: 28,
-                ),
-                color: _eEnabled
-                    ? context.cs.primary
-                    : context.cs.onSurfaceVariant,
-                tooltip: 'label_enabled'.tr(),
-                onPressed: () {
-                  setState(() => _eEnabled = !_eEnabled);
-                  _commitEdit(immediate: true);
-                },
-              ),
-            ],
-      floatingActionButton: isEntries
-          ? GlazeFab(
-              label: 'lorebook_new_entry'.tr(),
-              tooltip: 'lorebook_new_entry'.tr(),
-              onTap: _addEntryMenu,
-            )
-          : null,
-      body: isEntries ? _entriesBody() : _editBody(),
+      actions: actions,
+      floatingActionButton: fab,
+      body: body,
     );
+  }
+
+  /// Hands [chrome] to the host after this frame when what it shows changed
+  /// ([signature]); the host rebuilds with it, and this build then finds the
+  /// same signature and sends nothing.
+  void _publishChrome(LorebookEditorChrome chrome, String signature) {
+    if (_publishedChrome == signature) return;
+    _publishedChrome = signature;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onChrome?.call(chrome);
+    });
   }
 
   Widget _entriesTitle() {
@@ -1156,10 +913,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             settings: _settings,
             onChanged: _onSettingsChanged,
           ),
-          if (configured && _needsReindex) _reindexBanner(),
           if (_entries.isNotEmpty) _toolbar(),
-          if (!_isIndexing && _indexResult != null) _indexResultBlock(),
-          if (_failedEntries.isNotEmpty) _failedEntriesBlock(),
           if (filtered.isEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 48, 16, 16),
@@ -1204,61 +958,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     );
   }
 
-  Widget _reindexBanner() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.amber.withValues(alpha: 0.08),
-        border: Border.all(color: Colors.amber.withValues(alpha: 0.28)),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'vector_reindex_title'.tr(),
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'vector_reindex_desc'.tr(
-                    namedArgs: {'count': '$_missingVectorCount'},
-                  ),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: context.cs.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          GlazeActionButton(
-            icon: Icons.auto_fix_high,
-            label: 'btn_index_all'.tr(),
-            tone: GlazeActionTone.neutral,
-            busy:
-                _isIndexing ||
-                ref.watch(
-                  lorebookAutoIndexerProvider.select(
-                    (ids) => ids.contains(widget.lorebookId),
-                  ),
-                ),
-            onTap: _indexEntries,
-          ),
-        ],
-      ),
-    );
-  }
-
   /// The vector actions here check the embedding connection when tapped and
   /// send the user to its setup when it is missing or failing.
   Widget _toolbar() {
@@ -1281,126 +980,6 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
             label: 'match_global'.tr(),
             secondary: true,
             onTap: _resetEntriesToGlobal,
-          ),
-          const SizedBox(width: 8),
-          _ToolbarButton(
-            icon: Icons.auto_fix_high,
-            label: _rateLimitCooldown > 0
-                ? 'btn_rate_limited'.tr(
-                    namedArgs: {'seconds': '$_rateLimitCooldown'},
-                  )
-                : _isIndexing
-                ? (_indexStatus.isNotEmpty ? _indexStatus : 'btn_indexing'.tr())
-                : 'btn_index_all'.tr(),
-            onTap: (_isIndexing || _rateLimitCooldown > 0)
-                ? null
-                : _indexEntries,
-          ),
-          if (_failedEntries.isNotEmpty) ...[
-            const SizedBox(width: 8),
-            _ToolbarButton(
-              icon: Icons.refresh,
-              label: 'btn_retry_failed'.tr(),
-              secondary: true,
-              onTap: (_isIndexing || _rateLimitCooldown > 0)
-                  ? null
-                  : _retryFailed,
-            ),
-          ],
-          const SizedBox(width: 8),
-          _ToolbarButton(
-            icon: Icons.delete_sweep_outlined,
-            label: 'action_delete_indexes'.tr(),
-            secondary: true,
-            onTap: _isIndexing ? null : _clearAndReindex,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _indexResultBlock() {
-    final r = _indexResult!;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'index_done'.tr(namedArgs: {'count': '${r.indexed}'}),
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: Colors.green,
-            ),
-          ),
-          if (r.skipped > 0)
-            Text(
-              'index_skipped'.tr(namedArgs: {'skipped': '${r.skipped}'}),
-              style: const TextStyle(fontSize: 12, color: Colors.green),
-            ),
-          if (r.failed > 0)
-            Text(
-              'index_failed'.tr(namedArgs: {'failed': '${r.failed}'}),
-              style: const TextStyle(fontSize: 12, color: Colors.redAccent),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _failedEntriesBlock() {
-    final failed = _failedEntries;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.08),
-        border: Border.all(color: Colors.orange.withValues(alpha: 0.18)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'vector_failed_entries_title'.tr(
-              namedArgs: {'count': '${failed.length}'},
-            ),
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: Colors.orange,
-            ),
-          ),
-          const SizedBox(height: 6),
-          for (final e in failed)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    e.comment.isNotEmpty ? e.comment : e.keys.join(', '),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: context.cs.onSurface,
-                    ),
-                  ),
-                  Text(
-                    _embeddingErrorLabels[e.id] ?? 'entry_index_error'.tr(),
-                    style: const TextStyle(fontSize: 12, color: Colors.orange),
-                  ),
-                ],
-              ),
-            ),
-          // Most failures are the connection's, not the entry's.
-          const SizedBox(height: 10),
-          GlazeActionButton(
-            icon: Icons.hub_outlined,
-            label: 'vectors_setup_open'.tr(),
-            tone: GlazeActionTone.neutral,
-            onTap: () => unawaited(openEmbeddingSetup(context)),
           ),
         ],
       ),
@@ -1620,45 +1199,27 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
                     _commitEdit(immediate: true);
                   },
                 ),
-              if (_eVectorSearch && !_eConstant)
+              // The entry's index status; indexes are built in Vectors.
+              if (_eVectorSearch &&
+                  !_eConstant &&
+                  _embeddingStatuses[_entries[_editIndex].id] != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      GlazeActionButton(
-                        icon: Icons.auto_fix_high,
-                        label: _eIndexing
-                            ? 'btn_indexing'.tr()
-                            : 'btn_index_entry'.tr(),
-                        tone: GlazeActionTone.primary,
-                        expand: true,
-                        busy: _eIndexing,
-                        onTap: _indexSingleEntry,
-                      ),
-                      if (_embeddingStatuses[_entries[_editIndex].id] != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            switch (_embeddingStatuses[_entries[_editIndex]
-                                .id]) {
-                              'indexed' => 'entry_indexed'.tr(),
-                              'error' => 'entry_index_error'.tr(),
-                              _ => 'entry_not_indexed'.tr(),
-                            },
-                            style: TextStyle(
-                              fontSize: 12,
-                              color:
-                                  switch (_embeddingStatuses[_entries[_editIndex]
-                                      .id]) {
-                                    'indexed' => Colors.green,
-                                    'error' => Colors.orange,
-                                    _ => context.cs.onSurfaceVariant,
-                                  },
-                            ),
-                          ),
-                        ),
-                    ],
+                  child: Text(
+                    switch (_embeddingStatuses[_entries[_editIndex].id]) {
+                      'indexed' => 'entry_indexed'.tr(),
+                      'error' => 'entry_index_error'.tr(),
+                      _ => 'entry_not_indexed'.tr(),
+                    },
+                    style: TextStyle(
+                      fontSize: 12,
+                      color:
+                          switch (_embeddingStatuses[_entries[_editIndex].id]) {
+                            'indexed' => Colors.green,
+                            'error' => Colors.orange,
+                            _ => context.cs.onSurfaceVariant,
+                          },
+                    ),
                   ),
                 ),
             ],
@@ -1941,18 +1502,21 @@ class _EntryRow extends StatelessWidget {
                 activeThumbColor: context.cs.primary,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onMore,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 8, 0, 8),
-                  child: Icon(
-                    Icons.more_vert,
-                    size: 20,
-                    color: context.cs.onSurfaceVariant.withValues(alpha: 0.6),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onMore,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 8, 0, 8),
+                    child: Icon(
+                      Icons.more_vert,
+                      size: 20,
+                      color: context.cs.onSurfaceVariant.withValues(alpha: 0.6),
+                    ),
                   ),
                 ),
-              )),
+              ),
             ],
           ),
         ),

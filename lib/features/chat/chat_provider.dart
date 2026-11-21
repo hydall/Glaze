@@ -28,6 +28,7 @@ import 'controllers/chat_session_controller.dart';
 import 'controllers/chat_draft_controller.dart';
 import 'services/generation_pipeline.dart';
 import 'services/impersonation_service.dart';
+import 'services/variation_error_state.dart';
 import 'state/chat_session_write_queue.dart';
 import 'state/generation_phase_provider.dart';
 import '../extensions/services/extension_post_gen_service.dart';
@@ -1100,16 +1101,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // session, so nothing extra is persisted. Cancelling puts it back: the
     // abort path reloads the durable row when nothing streamed, and rebuilds
     // `swipes[]` from `restorationMessage` + the partial text when it did.
-    final pendingSwipes = [
-      ...(prevAssistant.swipes.isNotEmpty
-          ? prevAssistant.swipes
-          : [prevAssistant.content]),
-      '',
-    ];
-    final pendingSwipesMeta = [
-      ...?_previousSwipesMetaForRegen(prevAssistant),
-      <String, dynamic>{},
-    ];
+    //
+    // A regenerate over an error replaces it rather than adding beside it:
+    // `regenBaseOf` leaves the failed variation out of what the run builds on
+    // (the restoration snapshot above still holds it, for a cancel).
+    final base = regenBaseOf(prevAssistant);
+    final pendingSwipes = [...base.swipes, ''];
+    final pendingSwipesMeta = [...base.swipesMeta, <String, dynamic>{}];
 
     final clearedMsg = prevAssistant.copyWith(
       content: '',
@@ -1159,14 +1157,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       guidanceText: guidanceText,
       guidanceType: guidanceType,
       regenTargetId: regenTargetId,
-      previousSwipes: prevAssistant.swipes.isNotEmpty
-          ? prevAssistant.swipes
-          : [prevAssistant.content],
-      previousSwipeId: prevAssistant.swipeId,
+      previousSwipes: base.swipes,
+      previousSwipeId: base.droppedActiveError ? 0 : base.activeIndex,
       previousReasoning: prevAssistant.reasoning,
       previousGenTime: prevAssistant.genTime,
       previousTokens: prevAssistant.tokens,
-      previousSwipesMeta: _previousSwipesMetaForRegen(prevAssistant),
+      previousSwipesMeta: base.swipesMeta,
     );
   }
 
@@ -1259,39 +1255,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         }
       }
     }
-  }
-
-  List<Map<String, dynamic>>? _previousSwipesMetaForRegen(ChatMessage message) {
-    final swipes = message.swipes.isNotEmpty
-        ? message.swipes
-        : [message.content];
-    final meta = List<Map<String, dynamic>>.generate(
-      swipes.length,
-      (i) => i < message.swipesMeta.length
-          ? Map<String, dynamic>.from(message.swipesMeta[i])
-          : <String, dynamic>{},
-    );
-    if (message.swipeId >= 0 && message.swipeId < meta.length) {
-      final active = meta[message.swipeId];
-      final nested = message.agentSwipes
-          .map((swipe) => swipe.toJson())
-          .toList();
-      if (message.agentSwipeId >= 0 &&
-          message.agentSwipeId < nested.length &&
-          nested[message.agentSwipeId]['time'] == null) {
-        nested[message.agentSwipeId]['time'] = message.time;
-      }
-      meta[message.swipeId] = <String, dynamic>{
-        ...active,
-        if (!active.containsKey('genTime')) 'genTime': message.genTime,
-        if (!active.containsKey('reasoning')) 'reasoning': message.reasoning,
-        if (!active.containsKey('tokens')) 'tokens': message.tokens,
-        if (!active.containsKey('time')) 'time': message.time,
-        if (nested.isNotEmpty) 'agentSwipes': nested,
-        if (nested.isNotEmpty) 'agentSwipeId': message.agentSwipeId,
-      };
-    }
-    return meta;
   }
 
   /// Extend the trailing assistant message with a fresh generation, then fold

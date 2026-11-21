@@ -286,6 +286,7 @@ class _PersistentHeader extends ConsumerWidget {
               child: GlazeAppBar(
                 title: entry.config.title,
                 titleWidget: entry.config.titleWidget,
+                onTitleTap: entry.config.onTitleTap,
                 actions: entry.config.actions,
                 showBack: entry.config.showBack,
                 onBack: entry.config.onBack,

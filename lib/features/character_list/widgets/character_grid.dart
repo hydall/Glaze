@@ -59,6 +59,11 @@ class CharacterGrid extends StatelessWidget {
   /// grid while [characters] is empty.
   final Widget? emptyState;
 
+  /// Picker mode: cards hand the tapped character here instead of opening it
+  /// (see [CharacterCard.onPick]), and the dice is gone — a random pick has no
+  /// place in choosing a specific character.
+  final ValueChanged<Character>? onPick;
+
   const CharacterGrid({
     super.key,
     required this.characters,
@@ -78,6 +83,7 @@ class CharacterGrid extends StatelessWidget {
     this.folderId,
     this.randomPool,
     this.emptyState,
+    this.onPick,
   });
 
   /// The pool the shuffle button draws from — always the currently matching set
@@ -142,7 +148,7 @@ class CharacterGrid extends StatelessWidget {
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        if (characters.isNotEmpty)
+        if (characters.isNotEmpty && onPick == null)
           Consumer(
             builder: (context, ref, _) {
               final standard = ref.watch(
@@ -246,6 +252,7 @@ class CharacterGrid extends StatelessWidget {
                     child: CharacterCard(
                       character: characters[i],
                       folderId: folderId,
+                      onPick: onPick,
                     ),
                   ),
                   childCount: characters.length,

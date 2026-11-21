@@ -4,6 +4,7 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,6 +24,7 @@ import 'core/state/db_provider.dart';
 import 'core/state/lorebook_provider.dart';
 import 'core/state/lorebook_embedding_provider.dart';
 import 'core/services/preset_seeder.dart';
+import 'features/character_list/reveal_hidden_hotkey.dart';
 import 'features/chat_history/chat_history_provider.dart';
 import 'features/settings/api_list_provider.dart';
 import 'features/settings/app_settings_provider.dart';
@@ -95,6 +97,7 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
         widget.skipStartup || const bool.fromEnvironment('FLUTTER_TEST');
     GlazeApp._restart = widget.restart;
     WidgetsBinding.instance.addObserver(this);
+    HardwareKeyboard.instance.addHandler(_handleGlobalKey);
     ref.read(llmRequestCaptureInstallationProvider);
     _initInBackground(loadActiveSelections(ref), 'active selections');
     _initInBackground(loadLorebookActivations(ref), 'lorebook activations');
@@ -156,8 +159,12 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
     _warmSubs.add(ref.listenManual(apiListProvider, (_, _) {}));
   }
 
+  /// App-wide keyboard shortcuts that work regardless of focus.
+  bool _handleGlobalKey(KeyEvent event) => handleRevealHiddenHotkey(ref, event);
+
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleGlobalKey);
     WidgetsBinding.instance.removeObserver(this);
     _navSub?.cancel();
     _updateChecks?.dispose();

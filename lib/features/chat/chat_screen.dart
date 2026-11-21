@@ -859,6 +859,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// [didChangeAppLifecycleState].
   double _lastMessageListBottom = 0;
 
+  /// The part of [_lastMessageListBottom] that must not scroll the chat when
+  /// it changes: the composer's height unless the reader asked the chat to
+  /// follow the composer as it grows. Cached alongside it for the resume
+  /// re-assert.
+  double _lastNonScrollingInset = 0;
+
   /// The [ContextCoverageCard]'s *collapsed* height, as the page that draws
   /// it reports it (0 when it is not shown), so the message list reserves room
   /// at the *top* for it — otherwise the card floats under the header and
@@ -1563,6 +1569,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         _webViewStateKey.currentState?.applyBottomInset(
               _lastMessageListBottom,
               viewportHeight: _webViewBoxHeight,
+              nonScrollingInset: _lastNonScrollingInset,
             ) ??
             Future<void>.value(),
       );
@@ -1847,6 +1854,13 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             targetPanelHeight +
             (safeBottom * (1 - targetFactor));
         _lastMessageListBottom = webViewBottomInset;
+        // A long message wrapping onto another line grows the composer; unless
+        // the reader opted in, that leaves the list where it is instead of
+        // pushing it up. The keyboard and the drawer still move it.
+        final nonScrollingInset = (appSettings?.followComposerResize ?? false)
+            ? 0.0
+            : _inputBarHeight;
+        _lastNonScrollingInset = nonScrollingInset;
         final showScrollBtn =
             _showScrollToBottom &&
             !widget.search.showSearch &&
@@ -1961,6 +1975,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         continuationTargetId: widget.state.continuationTargetId,
                         bottomInset: webViewBottomInset,
                         viewportHeight: _webViewBoxHeight,
+                        nonScrollingInset: nonScrollingInset,
                         topInset: effectiveTopInset,
                         chromeChannel: widget.chrome,
                         charName: character?.name,

@@ -228,7 +228,10 @@ class ChatMessageMapper {
         'agentSwipeKinds': m.agentSwipes.map((s) => s.kind).toList(),
       // Show the blue switcher when there are ≥2 agent swipes (any kind).
       // This includes final+cleaned (POST-cleaner) and 2+ finals (regen).
-      if (m.agentSwipes.length > 1)
+      // Never on an error variation: sub-swipes there belong to the variation
+      // that failed over, and flipping them changed the text under the error
+      // window without clearing it.
+      if (m.agentSwipes.length > 1 && !m.isError)
         'agentSwipeFinalCount': m.agentSwipes.length,
       if (m.genTime != null) 'genTime': m.genTime,
       if (m.time != null && m.time!.isNotEmpty) 'gameTime': m.time,

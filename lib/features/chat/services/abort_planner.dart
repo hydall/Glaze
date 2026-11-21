@@ -3,6 +3,7 @@ import '../../../core/utils/id_generator.dart';
 import '../abort_handler.dart' show AbortSessionMutation;
 import '../chat_state.dart';
 import 'continuation_message_merger.dart';
+import 'variation_error_state.dart';
 
 /// Works out what a stop leaves in the chat, so the UI can show it on the tap
 /// and the database can be brought to the same result afterwards.
@@ -193,23 +194,13 @@ class AbortPlanner {
     final String partialText = partialStreaming.text;
     if (partialText.isEmpty) return reload(withTarget(restoration));
 
-    final keptSwipes = List<String>.from(
-      restoration.swipes.isNotEmpty
-          ? restoration.swipes
-          : [restoration.content],
-    );
-    final keptSwipesMeta = List<Map<String, dynamic>>.from(
-      restoration.swipesMeta.isNotEmpty
-          ? restoration.swipesMeta
-          : [
-              <String, dynamic>{
-                'genTime': restoration.genTime,
-                'reasoning': restoration.reasoning,
-                'tokens': restoration.tokens,
-                'time': restoration.time,
-              },
-            ],
-    );
+    // The partial reply is the regen's result, so it builds on the same
+    // base as a finished one: an error it was regenerating is replaced,
+    // and the meta stays aligned with the swipes (a shorter list let the
+    // partial's meta — and an error marker — land on the wrong index).
+    final base = regenBaseOf(restoration);
+    final keptSwipes = [...base.swipes];
+    final keptSwipesMeta = [...base.swipesMeta];
     keptSwipes.add(partialText);
     final partialAgentSwipe = AgentSwipe(
       content: partialText,

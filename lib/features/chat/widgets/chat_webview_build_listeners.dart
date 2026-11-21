@@ -452,7 +452,9 @@ class ChatWebViewBuildListeners {
 bool displayRegexListsDiffer(List<PresetRegex> a, List<PresetRegex> b) {
   if (a.length != b.length) return true;
   for (int i = 0; i < a.length; i++) {
-    if (a[i].id != b[i].id || a[i].disabled != b[i].disabled) return true;
+    // The whole script, not only its id and switch: an edited pattern or
+    // replacement changes what the chat shows just as much.
+    if (a[i] != b[i]) return true;
   }
   return false;
 }

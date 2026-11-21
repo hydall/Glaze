@@ -49,23 +49,35 @@ class CharacterVariationsSheet extends ConsumerWidget {
   /// "add variation" on a variation silently duplicated a different character.
   final String sourceId;
 
+  /// Picker mode: tapping a variation pops the sheet with it as the result,
+  /// instead of opening its character sheet. "Add variation" is hidden.
+  final bool picking;
+
+  /// Variations already taken in picker mode — they are left out of the grid.
+  final Set<String> excludedIds;
+
   const CharacterVariationsSheet({
     super.key,
     required this.groupId,
     required this.sourceId,
+    this.picking = false,
+    this.excludedIds = const {},
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final variants =
+    final allVariants =
         ref.watch(characterVariantsProvider(groupId)).value ??
         const <Character>[];
+    final variants = picking
+        ? allVariants.where((v) => !excludedIds.contains(v.id)).toList()
+        : allVariants;
 
     return SheetView(
       title: 'variations_title'.tr(),
       showHandle: true,
       bodyPadding: const EdgeInsets.symmetric(horizontal: 16),
-      floatingActionButton: variants.isEmpty
+      floatingActionButton: variants.isEmpty || picking
           ? null
           : _AddVariationFab(
               onTap: () => _promptAdd(context, ref, _source(variants), variants),
@@ -96,6 +108,9 @@ class CharacterVariationsSheet extends ConsumerWidget {
                     key: ValueKey(variant.id),
                     character: variant,
                     inVariationsGrid: true,
+                    onPick: picking
+                        ? (c) => Navigator.of(context, rootNavigator: true).pop(c)
+                        : null,
                   );
                 }, childCount: variants.length),
               ),

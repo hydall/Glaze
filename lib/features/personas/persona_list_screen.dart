@@ -1,38 +1,36 @@
+import 'dart:async';
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:easy_localization/easy_localization.dart';
 
-import '../../shared/shell/desktop/desktop_floating_provider.dart';
-import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
 import '../../core/models/folder.dart';
 import '../../core/models/persona.dart';
 import '../../core/services/persona_character_converter.dart';
-import '../../core/utils/platform_paths.dart';
 import '../../core/state/active_selection_provider.dart';
-import '../../core/state/db_provider.dart';
 import '../../core/state/folder_provider.dart';
-import '../../core/state/shared_prefs_provider.dart';
-import '../../shared/widgets/folder_section.dart';
-import '../../shared/widgets/glaze_spinner.dart';
-import 'persona_connections_sheet.dart';
-import 'persona_list_provider.dart';
-import '../../core/utils/id_generator.dart';
-import '../../core/utils/time_helpers.dart';
+import '../../core/utils/platform_paths.dart';
+import '../../shared/shell/desktop/sidebar_sheet_provider.dart';
+import '../../shared/state/preset_sort.dart';
 import '../../shared/theme/app_colors.dart';
-import '../../shared/widgets/generic_editor.dart';
+import '../../shared/widgets/folder_section.dart';
 import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../shared/widgets/glaze_scaffold.dart';
+import '../../shared/widgets/glaze_list_item.dart';
+import '../../shared/widgets/glaze_list_screen.dart';
+import '../../shared/widgets/glaze_sheet.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
-import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/help_tip.dart';
-import '../../shared/widgets/menu_group.dart';
-import '../../shared/widgets/sheet_view.dart';
 import '../guides/guide_anchor.dart';
 import '../guides/guide_service.dart';
+import 'persona_connections_sheet.dart';
+import 'persona_editor.dart';
+import 'persona_list_controls.dart';
+import 'persona_list_provider.dart';
+
+export 'persona_editor.dart' show PersonaEditorWindow, openPersonaEditor;
 
 class PersonaListScreen extends ConsumerStatefulWidget {
   final bool startExpanded;
@@ -53,9 +51,26 @@ class PersonaListScreen extends ConsumerStatefulWidget {
   ConsumerState<PersonaListScreen> createState() => _PersonaListScreenState();
 }
 
+/// The persona open in the list's place: an existing one, or a new one.
+class _EditTarget {
+  final Persona? persona;
+  const _EditTarget(this.persona);
+}
+
 class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
   /// Folder currently being browsed, or null at the top level.
   String? _currentFolderId;
+
+  /// The editor open in the list's place, as the Presets list opens its
+  /// editor: inside the same sheet, never as a page over it.
+  _EditTarget? _editing;
+  Key _editorKey = UniqueKey();
+
+  PersonaListFilters _filters = const PersonaListFilters();
+  bool _reorderArmed = false;
+
+  /// Selected persona ids while multi-selecting. Empty = not selecting.
+  final Set<String> _selected = {};
 
   @override
   void initState() {
@@ -65,11 +80,37 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
     });
   }
 
-  void _openFolder(String id) => setState(() => _currentFolderId = id);
+  // ── Navigation ─────────────────────────────────────────────────────────────
 
-  void _leaveFolder() => setState(() => _currentFolderId = null);
+  void _openFolder(String id) => setState(() {
+    _selected.clear();
+    _currentFolderId = id;
+  });
 
+  void _leaveFolder() => setState(() {
+    _selected.clear();
+    _currentFolderId = null;
+  });
+
+  void _openEditor([Persona? persona]) => setState(() {
+    _selected.clear();
+    _editing = _EditTarget(persona);
+    _editorKey = UniqueKey();
+  });
+
+  void _closeEditor() => setState(() => _editing = null);
+
+  /// Unwinds one level per press — the editor, the selection, the folder —
+  /// and only then leaves the screen.
   void _handleBack() {
+    if (_editing != null) {
+      _closeEditor();
+      return;
+    }
+    if (_selected.isNotEmpty) {
+      setState(_selected.clear);
+      return;
+    }
     if (_currentFolderId != null) {
       _leaveFolder();
       return;
@@ -86,158 +127,229 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
     return folders?.where((f) => f.id == id).firstOrNull?.name;
   }
 
+  // ── Selection / reorder ────────────────────────────────────────────────────
+
+  void _startSelection(String id) => setState(() {
+    _reorderArmed = false;
+    _selected.add(id);
+  });
+
+  void _toggleSelected(String id) => setState(() {
+    if (!_selected.remove(id)) _selected.add(id);
+  });
+
+  void _toggleReorderArmed() {
+    final armed = !_reorderArmed;
+    setState(() {
+      _reorderArmed = armed;
+      if (armed) _selected.clear();
+    });
+    if (armed) showGlazeDragHint(context);
+  }
+
+  void _onManualReorder(
+    List<Persona> visible,
+    List<Persona> all,
+    int oldIndex,
+    int newIndex,
+  ) {
+    if (oldIndex == newIndex) return;
+    final sort = ref.read(personaSortProvider).value ?? const PresetSortState();
+    final order = manualOrderAfterDrag(
+      all: all,
+      visible: visible,
+      oldIndex: oldIndex,
+      newIndex: newIndex,
+      state: sort,
+      idOf: (p) => p.id,
+      nameOf: personaListName,
+      createdAtOf: (p) => p.createdAt,
+    );
+    unawaited(ref.read(personaSortProvider.notifier).setManualOrder(order));
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
+
+  Widget _titleText(String text, {bool help = false}) => Row(
+    children: [
+      Flexible(
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: context.cs.onSurface,
+          ),
+        ),
+      ),
+      if (help) const HelpTip(term: 'persona'),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
-    final personas = ref.watch(personaListProvider);
+    final editing = _editing;
     final folderId = _currentFolderId;
+    final sort =
+        ref.watch(personaSortProvider).value ?? const PresetSortState();
 
-    return SheetView(
+    return GlazeListScreen(
       startExpanded: widget.startExpanded,
-      showRouteBackground: false,
-      titleWidget: folderId == null
-          ? Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'menu_personas'.tr(),
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: context.cs.onSurface,
+      title: editing != null ? personaEditorTitle(editing.persona) : null,
+      titleWidget: editing != null
+          ? null
+          : folderId != null
+          ? _titleText(_folderName(folderId) ?? 'menu_personas'.tr())
+          : _titleText('menu_personas'.tr(), help: true),
+      canPop: editing == null && _selected.isEmpty && folderId == null,
+      onBack: _handleBack,
+      addLabel: "${'create_new'.tr()} ${'tab_personas'.tr()}",
+      onAdd: () => _showAddMenu(context),
+      decorateAdd: (child) =>
+          GuideAnchor(id: GuideIds.personasAdd, child: child),
+      controls: GlazeListControls(
+        filterCount: _filters.activeCount,
+        onFilter: () => _showFilterSheet(context),
+        sort: GlazeListSort(
+          mode: sort.mode,
+          armed: _reorderArmed,
+          onToggleReorder: _toggleReorderArmed,
+          onSelect: (mode) =>
+              unawaited(ref.read(personaSortProvider.notifier).setMode(mode)),
+          onDisarm: () {
+            if (_reorderArmed) setState(() => _reorderArmed = false);
+          },
+        ),
+      ),
+      selection: _selected.isEmpty
+          ? null
+          : GlazeListSelection(
+              count: _selected.length,
+              onCancel: () => setState(_selected.clear),
+              onMore: () => _showSelectionActions(context),
+            ),
+      editing: editing != null,
+      body: editing != null
+          ? PersonaEditorBody(key: _editorKey, existing: editing.persona)
+          : ref
+                .watch(personaListProvider)
+                .when(
+                  skipLoadingOnReload: true,
+                  loading: () => const Center(child: GlazeSpinner()),
+                  error: (e, _) =>
+                      Center(child: Text("${'title_error'.tr()}: $e")),
+                  data: (all) => Builder(
+                    builder: (context) => _buildList(context, all, sort),
                   ),
                 ),
-                const HelpTip(term: 'persona'),
-              ],
-            )
-          : Text(
-              _folderName(folderId) ?? 'menu_personas'.tr(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
-              ),
-            ),
-      showBack: true,
-      canPop: folderId == null,
-      onBack: _handleBack,
-      actions: [
-        if (folderId == null)
-          SheetViewAction(
-            icon: const GuideAnchor(
-              id: GuideIds.personasFolder,
-              child: Icon(Icons.create_new_folder_outlined, size: 20),
-            ),
-            tooltip: 'folder_new'.tr(),
-            onPressed: () =>
-                showCreateFolderDialog(context, ref, FolderDomain.persona),
-          ),
-        SheetViewAction(
-          icon: const GuideAnchor(
-            id: GuideIds.personasAdd,
-            child: Icon(Icons.add, size: 20),
-          ),
-          tooltip: "${'create_new'.tr()} ${'tab_personas'.tr()}",
-          onPressed: () => _showEditor(context),
+    );
+  }
+
+  Widget _buildList(
+    BuildContext context,
+    List<Persona> all,
+    PresetSortState sort,
+  ) {
+    final folderId = _currentFolderId;
+    final memberships =
+        ref.watch(folderMembershipsProvider(FolderDomain.persona)).value ??
+        FolderMemberships.empty;
+    final hasFolders =
+        (ref.watch(foldersProvider(FolderDomain.persona)).value ?? const [])
+            .isNotEmpty;
+    final connections = ref.watch(personaConnectionsProvider);
+    final boundIds = {
+      ...connections.character.values,
+      ...connections.chat.values,
+    };
+
+    var list = folderId != null
+        ? all
+              .where((p) => memberships.membersIn(folderId).contains(p.id))
+              .toList()
+        // A persona filed into a folder lives there, not twice.
+        : all.where((p) => memberships.foldersOf(p.id).isEmpty).toList();
+    list = list
+        .where((p) => _filters.matches(isBound: boundIds.contains(p.id)))
+        .toList();
+    list = sortPersonas(list, sort);
+
+    final chatKey = widget.forChat ? ref.watch(lastOpenChatProvider) : null;
+    final activeId = _activePersonaId(all, chatKey);
+    final reordering = sort.mode == PresetSortMode.manual && _reorderArmed;
+    final selecting = _selected.isNotEmpty;
+
+    final header = <Widget>[
+      if (folderId == null)
+        FolderSection(
+          domain: FolderDomain.persona,
+          onOpenFolder: _openFolder,
+          icon: Icons.person_outline,
         ),
-      ],
-      body: personas.when(
-        loading: () => const Center(child: GlazeSpinner()),
-        error: (e, _) => Center(child: Text("${'title_error'.tr()}: $e")),
-        data: (all) {
-          final memberships =
-              ref.watch(folderMembershipsProvider(FolderDomain.persona)).value ??
-              FolderMemberships.empty;
-          final hasFolders =
-              (ref.watch(foldersProvider(FolderDomain.persona)).value ??
-                      const [])
-                  .isNotEmpty;
+      if (list.isEmpty)
+        if (_filters.isActive)
+          GlazeListEmptyNote(label: 'search_no_results'.tr())
+        else if (folderId != null)
+          const FolderEmptyState()
+        else if (!hasFolders)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Column(
+              children: [
+                Text(
+                  'no_results'.tr(),
+                  style: TextStyle(color: context.cs.onSurfaceVariant),
+                ),
+                const SizedBox(height: 12),
+                GlazeActionButton(
+                  icon: Icons.add_rounded,
+                  label: "${'create_new'.tr()} ${'tab_personas'.tr()}",
+                  tone: GlazeActionTone.primary,
+                  onTap: _openEditor,
+                ),
+              ],
+            ),
+          ),
+    ];
 
-          final List<Persona> list;
-          if (folderId != null) {
-            final ids = memberships.membersIn(folderId);
-            list = all.where((p) => ids.contains(p.id)).toList();
-          } else {
-            list = all
-                .where((p) => memberships.foldersOf(p.id).isEmpty)
-                .toList();
-          }
-
-          if (all.isEmpty && !hasFolders) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('no_results'.tr()),
-                  const SizedBox(height: 8),
-                  GuideAnchor(
-                    id: GuideIds.personasAdd,
-                    child: GlazeActionButton(
-                      icon: Icons.add_rounded,
-                      label: "${'create_new'.tr()} ${'tab_personas'.tr()}",
-                      tone: GlazeActionTone.primary,
-                      onTap: () => _showEditor(context),
-                    ),
+    return GlazeListBody(
+      levelKey: 'personas_${folderId ?? '#root'}',
+      header: header,
+      itemCount: list.length,
+      itemKey: (i) => list[i].id,
+      onReorder: reordering
+          ? (oldIndex, newIndex) =>
+                _onManualReorder(list, all, oldIndex, newIndex)
+          : null,
+      dragByLongPress: true,
+      itemBuilder: (context, i) {
+        final persona = list[i];
+        final isActive = persona.id == activeId;
+        return GuideAnchor(
+          id: i == 0 ? GuideIds.personasRow : null,
+          child: _PersonaRow(
+            persona: persona,
+            isActive: isActive,
+            selecting: selecting,
+            selected: _selected.contains(persona.id),
+            onTap: selecting
+                ? () => _toggleSelected(persona.id)
+                : () => selectPersonaFor(
+                    ref,
+                    chatKey,
+                    isActive ? null : persona.id,
                   ),
-                ],
-              ),
-            );
-          }
-
-          return Builder(
-            builder: (context) {
-              final mediaPad = EdgeInsets.only(
-                top: MediaQuery.paddingOf(context).top,
-                bottom: MediaQuery.paddingOf(context).bottom,
-              );
-              final header = <Widget>[
-                if (folderId == null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                    child: FolderSection(
-                      domain: FolderDomain.persona,
-                      onOpenFolder: _openFolder,
-                      icon: Icons.person_outline,
-                    ),
-                  ),
-              ];
-              final chatKey = widget.forChat
-                  ? ref.watch(lastOpenChatProvider)
-                  : null;
-              final activeId = _activePersonaId(all, chatKey);
-              final rows = <Widget>[
-                for (final (i, persona) in list.indexed)
-                  GuideAnchor(
-                    id: i == 0 ? GuideIds.personasRow : null,
-                    child: _PersonaTile(
-                      persona: persona,
-                      isActive: persona.id == activeId,
-                      onSelect: (id) => selectPersonaFor(ref, chatKey, id),
-                      openEditor: (persona) => _showEditor(context, persona),
-                    ),
-                  ),
-              ];
-              final flat = inSidebarPanel(context);
-              return ListView(
-                padding: EdgeInsets.fromLTRB(
-                  flat ? 0 : 16,
-                  widget.startExpanded && !flat ? 16 : 0,
-                  flat ? 0 : 16,
-                  16,
-                ).add(mediaPad),
-                children: [
-                  ...header,
-                  if (list.isEmpty)
-                    const FolderEmptyState()
-                  else
-                    ...rows,
-                ],
-              );
-            },
-          );
-        },
-      ),
+            onLongPress: reordering || selecting
+                ? null
+                : () => _startSelection(persona.id),
+            onEdit: () => _openEditor(persona),
+            onMore: () => _showPersonaMenu(context, persona),
+            onConnections: () => showPersonaConnections(context, persona.id),
+          ),
+        );
+      },
     );
   }
 
@@ -260,356 +372,268 @@ class _PersonaListScreenState extends ConsumerState<PersonaListScreen> {
     )?.id;
   }
 
-  void _showEditor(BuildContext context, [Persona? existing]) {
-    openPersonaEditor(
-      context,
-      existing: existing,
-      rootNavigator: !widget.startExpanded,
+  // ── Sheets ─────────────────────────────────────────────────────────────────
+
+  void _showFilterSheet(BuildContext context) {
+    showGlazeSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => PersonaFilterSheet(
+        filters: _filters,
+        onApply: (f) {
+          if (mounted) setState(() => _filters = f);
+        },
+      ),
     );
   }
-}
 
-/// Opens the editor for [existing], or for a new persona: on desktop in a
-/// floating window of its own beside the list (opening one already open brings
-/// it to the front), elsewhere as a page pushed on [rootNavigator] or the
-/// nearest one.
-void openPersonaEditor(
-  BuildContext context, {
-  Persona? existing,
-  bool rootNavigator = true,
-}) {
-  final view = Uri(
-    path: 'persona-editor',
-    queryParameters: existing == null
-        ? {'new': generateId()}
-        : {'id': existing.id},
-  ).toString();
-  if (floatOnDesktop(context, view)) return;
-  Navigator.of(context, rootNavigator: rootNavigator).push(
-    MaterialPageRoute<void>(
-      builder: (_) => _PersonaEditorScreen(existing: existing),
-    ),
-  );
-}
+  void _showAddMenu(BuildContext context) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'menu_personas'.tr(),
+      items: [
+        BottomSheetItem(
+          label: "${'create_new'.tr()} ${'tab_personas'.tr()}",
+          icon: Icons.add,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _openEditor();
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.create_new_folder_rounded,
+          label: 'folder_new'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            showCreateFolderDialog(context, ref, FolderDomain.persona);
+          },
+        ),
+      ],
+    );
+  }
 
-/// The persona editor in a desktop floating window (`persona-editor`): the
-/// persona [personaId] names, or a new one when it is null.
-class PersonaEditorWindow extends ConsumerWidget {
-  final String? personaId;
+  void _showPersonaMenu(BuildContext context, Persona persona) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: personaListName(persona),
+      items: [
+        BottomSheetItem(
+          label: 'action_add_to_folder'.tr(),
+          icon: Icons.create_new_folder_outlined,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            showAddToFolderSheet(
+              context,
+              domain: FolderDomain.persona,
+              targets: [persona.id],
+            );
+          },
+        ),
+        BottomSheetItem(
+          label: 'action_clone_persona'.tr(),
+          icon: Icons.copy_outlined,
+          onTap: () async {
+            Navigator.of(context, rootNavigator: true).pop();
+            await ref.read(personaListProvider.notifier).clone(persona);
+          },
+        ),
+        BottomSheetItem(
+          label: 'action_convert_to_character'.tr(),
+          icon: Icons.person_outline,
+          onTap: () async {
+            Navigator.of(context, rootNavigator: true).pop();
+            await convertPersonaToCharacter(ref, persona);
+            if (!context.mounted) return;
+            GlazeToast.show(context, 'convert_to_character_done'.tr());
+          },
+        ),
+        BottomSheetItem(
+          label: 'action_delete'.tr(),
+          icon: Icons.delete,
+          isDestructive: true,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _deletePersonas([persona.id]);
+          },
+        ),
+      ],
+    );
+  }
 
-  const PersonaEditorWindow({super.key, this.personaId});
+  void _showSelectionActions(BuildContext context) {
+    final folderId = _currentFolderId;
+    final ids = _selected.toList();
+    GlazeBottomSheet.show<void>(
+      context,
+      title: '${ids.length} ${'selected_count'.tr()}',
+      items: [
+        BottomSheetItem(
+          icon: Icons.create_new_folder_outlined,
+          label: 'action_add_to_folder'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            showAddToFolderSheet(
+              context,
+              domain: FolderDomain.persona,
+              targets: ids,
+              onDone: () {
+                if (mounted) setState(_selected.clear);
+              },
+            );
+          },
+        ),
+        if (folderId != null)
+          BottomSheetItem(
+            icon: Icons.folder_off_outlined,
+            label: 'action_remove_from_folder'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              final repo = ref.read(folderRepoProvider);
+              for (final id in ids) {
+                unawaited(repo.removeMember(folderId, id));
+              }
+              setState(_selected.clear);
+            },
+          ),
+        BottomSheetItem(
+          icon: Icons.delete_rounded,
+          label: 'action_delete'.tr(),
+          isDestructive: true,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _confirmDeleteSelected(context, ids);
+          },
+        ),
+      ],
+    );
+  }
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final id = personaId;
-    if (id == null) return const _PersonaEditorScreen();
-    final personas = ref.watch(personaListProvider).value;
-    if (personas == null) return const Center(child: GlazeSpinner());
-    final persona = personas.where((p) => p.id == id).firstOrNull;
-    if (persona == null) return const SizedBox.shrink();
-    return _PersonaEditorScreen(existing: persona);
+  void _confirmDeleteSelected(BuildContext context, List<String> ids) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'action_delete'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.delete_outline,
+        description: 'persona_delete_selected_confirm'.tr(
+          args: ['${ids.length}'],
+        ),
+      ),
+      items: [
+        BottomSheetItem(
+          label: 'btn_delete'.tr(),
+          isDestructive: true,
+          centered: true,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            setState(_selected.clear);
+            _deletePersonas(ids);
+          },
+        ),
+        BottomSheetItem(
+          label: 'btn_cancel'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(),
+        ),
+      ],
+    );
+  }
+
+  void _deletePersonas(List<String> ids) {
+    final notifier = ref.read(personaListProvider.notifier);
+    final folders = ref.read(folderRepoProvider);
+    for (final id in ids) {
+      unawaited(notifier.remove(id));
+      unawaited(folders.deleteMembersForMember(FolderDomain.persona, id));
+    }
   }
 }
 
-class _PersonaTile extends ConsumerWidget {
+class _PersonaRow extends StatelessWidget {
   final Persona persona;
   final bool isActive;
-  final void Function(String? personaId) onSelect;
-  final void Function(Persona persona) openEditor;
+  final bool selecting;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final VoidCallback onEdit;
+  final VoidCallback onMore;
+  final VoidCallback onConnections;
 
-  const _PersonaTile({
+  const _PersonaRow({
     required this.persona,
     required this.isActive,
-    required this.onSelect,
-    required this.openEditor,
+    required this.selecting,
+    required this.selected,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onEdit,
+    required this.onMore,
+    required this.onConnections,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final displayName = (persona.displayName?.trim().isNotEmpty ?? false)
-        ? persona.displayName!.trim()
-        : persona.name;
+  Widget build(BuildContext context) {
+    final displayName = personaListName(persona);
     final rawAvatarPath = persona.avatarPath?.trim();
-    final resolvedAvatarPath =
-        (rawAvatarPath != null && rawAvatarPath.isNotEmpty)
+    final avatarPath = (rawAvatarPath != null && rawAvatarPath.isNotEmpty)
         ? resolveGlazeFilePath(rawAvatarPath)
         : null;
-    final flat = inSidebarPanel(context);
-    final tile = ListTile(
-      contentPadding: EdgeInsets.symmetric(
-        horizontal: flat ? 16 : 12,
-        vertical: 4,
-      ),
-      shape: flat
-          ? null
-          : RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      onTap: () => onSelect(isActive ? null : persona.id),
+    final hasAvatar = avatarPath != null && avatarPath.isNotEmpty;
+    final prompt = persona.prompt;
+
+    return GlazeListItem(
+      isActive: isActive,
+      selected: selected,
+      onTap: onTap,
+      onLongPress: onLongPress,
       leading: CircleAvatar(
-        radius: 24,
+        radius: 20,
         backgroundColor: context.cs.primary.withValues(alpha: 0.18),
-        backgroundImage:
-            resolvedAvatarPath != null && resolvedAvatarPath.isNotEmpty
-            ? FileImage(File(resolvedAvatarPath))
-            : null,
-        child: resolvedAvatarPath == null || resolvedAvatarPath.isEmpty
-            ? Text(
+        backgroundImage: hasAvatar ? FileImage(File(avatarPath)) : null,
+        child: hasAvatar
+            ? null
+            : Text(
                 displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
                 style: TextStyle(
-                  fontSize: 18,
+                  fontSize: 16,
                   fontWeight: FontWeight.w700,
                   color: context.cs.onSurface,
                 ),
-              )
-            : null,
+              ),
       ),
-      title: Text(displayName),
-      subtitle: persona.prompt != null && persona.prompt!.isNotEmpty
-          ? Text(persona.prompt!, maxLines: 1, overflow: TextOverflow.ellipsis)
-          : Text(
-              'no_prompt'.tr(),
-              style: TextStyle(color: context.cs.onSurfaceVariant),
+      title: displayName,
+      subtitle: prompt != null && prompt.isNotEmpty
+          ? prompt.replaceAll('\n', ' ')
+          : 'no_prompt'.tr(),
+      trailing: selecting
+          ? GlazeSelectionCheck(selected: selected)
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: Icon(
+                    Icons.link,
+                    size: 18,
+                    color: context.cs.onSurfaceVariant,
+                  ),
+                  tooltip: 'header_connections'.tr(),
+                  onPressed: onConnections,
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.edit_outlined,
+                    size: 18,
+                    color: context.cs.onSurfaceVariant,
+                  ),
+                  tooltip: 'action_edit'.tr(),
+                  onPressed: onEdit,
+                ),
+                GlazeListMenuButton(onTap: onMore),
+              ],
             ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.link, size: 18),
-            tooltip: 'header_connections'.tr(),
-            onPressed: () => showPersonaConnections(context, persona.id),
-          ),
-          IconButton(
-            icon: const Icon(Icons.more_vert, size: 20),
-            tooltip: 'header_more'.tr(),
-            onPressed: () {
-              GlazeBottomSheet.show<void>(
-                context,
-                title: "${'tab_personas'.tr()} ${'header_more'.tr()}",
-                items: [
-                  BottomSheetItem(
-                    label: 'action_edit'.tr(),
-                    icon: Icons.edit,
-                    onTap: () {
-                      Navigator.of(context, rootNavigator: true).pop();
-                      openEditor(persona);
-                    },
-                  ),
-                  BottomSheetItem(
-                    label: 'action_add_to_folder'.tr(),
-                    icon: Icons.create_new_folder_outlined,
-                    onTap: () {
-                      Navigator.of(context, rootNavigator: true).pop();
-                      showAddToFolderSheet(
-                        context,
-                        domain: FolderDomain.persona,
-                        targets: [persona.id],
-                      );
-                    },
-                  ),
-                  BottomSheetItem(
-                    label: 'action_clone_persona'.tr(),
-                    icon: Icons.copy_outlined,
-                    onTap: () async {
-                      Navigator.of(context, rootNavigator: true).pop();
-                      await ref
-                          .read(personaListProvider.notifier)
-                          .clone(persona);
-                    },
-                  ),
-                  BottomSheetItem(
-                    label: 'action_convert_to_character'.tr(),
-                    icon: Icons.person_outline,
-                    onTap: () async {
-                      Navigator.of(context, rootNavigator: true).pop();
-                      await convertPersonaToCharacter(ref, persona);
-                      if (!context.mounted) return;
-                      GlazeToast.show(
-                        context,
-                        'convert_to_character_done'.tr(),
-                      );
-                    },
-                  ),
-                  BottomSheetItem(
-                    label: 'action_delete'.tr(),
-                    icon: Icons.delete,
-                    isDestructive: true,
-                    onTap: () {
-                      Navigator.of(context, rootNavigator: true).pop();
-                      ref.read(personaListProvider.notifier).remove(persona.id);
-                    },
-                  ),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    );
-    // In a sidebar panel the persona is a row of the list, edge to edge, and
-    // the active one is marked by its fill and a bar down its edge.
-    if (flat) {
-      return FlatGroupSurface(
-        color: isActive ? context.cs.primary.withValues(alpha: 0.12) : null,
-        accent: isActive ? context.cs.primary : null,
-        child: tile,
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: GlassSurface(
-        enableRipple: true,
-        tint: isActive
-            ? Color.alphaBlend(
-                context.cs.primary.withValues(alpha: 0.12),
-                context.cs.surfaceContainerHighest,
-              )
-            : null,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isActive
-              ? context.cs.primary.withValues(alpha: 0.5)
-              : context.cs.outline,
-        ),
-        child: tile,
-      ),
-    );
-  }
-}
-
-class _PersonaEditorScreen extends ConsumerStatefulWidget {
-  final Persona? existing;
-  const _PersonaEditorScreen({this.existing});
-
-  @override
-  ConsumerState<_PersonaEditorScreen> createState() =>
-      _PersonaEditorScreenState();
-}
-
-class _PersonaEditorScreenState extends ConsumerState<_PersonaEditorScreen> {
-  late Map<String, dynamic> _item;
-  late final String _personaId;
-  late final int _createdAt;
-  late ProviderContainer _container;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // GenericEditor flushes pending changes from dispose(), after this element
-    // has been deactivated. Keep a container captured while it is still active.
-    _container = ProviderScope.containerOf(context);
-  }
-
-  List<GenericEditorSection> get _config => [
-    GenericEditorSection(
-      title: 'section_basic_info'.tr(),
-      fields: [
-        GenericEditorField(
-          key: 'name',
-          label: 'label_name'.tr(),
-          placeholder: 'placeholder_enter_name'.tr(),
-        ),
-        GenericEditorField(
-          key: 'display_name',
-          label: 'Display Name',
-          placeholder: 'Name shown in lists',
-        ),
-        GenericEditorField(
-          key: 'prompt',
-          label:
-              "${'tab_personas'.tr()} ${'label_char_prompt'.tr().replaceAll(RegExp(r'Character |Персонажа ', caseSensitive: false), '')}",
-          type: 'textarea',
-          rows: 12,
-          placeholder: 'placeholder_prompt_text'.tr(),
-        ),
-      ],
-    ),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _personaId = widget.existing?.id ?? generateId();
-    _createdAt = widget.existing?.createdAt ?? currentTimestampSeconds();
-    _item = {
-      'name': widget.existing?.name ?? '',
-      'display_name': widget.existing?.displayName ?? '',
-      'prompt': widget.existing?.prompt ?? '',
-      'avatarPath': widget.existing?.avatarPath,
-    };
-  }
-
-  Future<void> _pickAvatar() async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.image,
-      allowMultiple: false,
-      withData: true,
-    );
-    if (result == null || result.files.isEmpty) return;
-
-    final filePath = result.files.first.path;
-    if (filePath == null) return;
-
-    final imageStorage = await ref.read(imageStorageProvider.future);
-    final bytes = await File(filePath).readAsBytes();
-    // Reusing persona_<id>.png leaves the WebView on its cached image and the
-    // persona roster cannot observe a change because avatarPath stays equal.
-    final savedPath = await imageStorage.saveAvatar(
-      'persona_${_personaId}_${DateTime.now().microsecondsSinceEpoch}',
-      bytes,
-    );
-    await FileImage(File(savedPath)).evict();
-    final thumbPath = imageStorage.thumbnailPath(savedPath);
-    if (thumbPath != null) await FileImage(File(thumbPath)).evict();
-
-    setState(() {
-      _item['avatarPath'] = savedPath;
-    });
-    _save(_item);
-  }
-
-  void _save(Map<String, dynamic> values) {
-    final name = (values['name'] as String?)?.trim() ?? '';
-    final displayName = (values['display_name'] as String?)?.trim() ?? '';
-    final promptStr = (values['prompt'] as String?)?.trim() ?? '';
-
-    final persona = Persona(
-      id: _personaId,
-      name: name.isEmpty ? 'unnamed_entry'.tr().split(' ')[0] : name,
-      displayName: displayName.isEmpty ? null : displayName,
-      prompt: promptStr.isEmpty ? null : promptStr,
-      avatarPath: values['avatarPath'] as String?,
-      createdAt: _createdAt,
-    );
-
-    _container.read(personaListProvider.notifier).updatePersona(persona);
-
-    if (widget.existing == null) {
-      _container.read(activePersonaIdProvider.notifier).state = _personaId;
-      _container.read(sharedPreferencesProvider.future).then((prefs) {
-        prefs.setString('activePersonaId', _personaId);
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GlazeScaffold(
-      title: widget.existing != null
-          ? "${'action_edit'.tr()} ${'tab_personas'.tr()}"
-          : "${'create_new'.tr()} ${'tab_personas'.tr()}",
-      onBack: () => Navigator.of(context).pop(),
-      body: GenericEditor(
-        item: _item,
-        config: _config,
-        showAvatar: true,
-        avatarHint: 'hint_change_avatar'.tr(),
-        onAvatarTap: _pickAvatar,
-        onChanged: (values) {
-          _item = values;
-        },
-        onSave: (values) {
-          _save(values);
-        },
-      ),
     );
   }
 }

@@ -237,6 +237,67 @@ void main() {
     },
   );
 
+  group('Stop during a regenerate over an error', () {
+    const restoration = ChatMessage(
+      id: 'assistant-1',
+      role: 'assistant',
+      content: 'boom',
+      isError: true,
+      swipes: ['good', 'boom'],
+      swipeId: 1,
+      // Shorter than the swipes, as legacy rows can be: the partial's meta
+      // must still land on the partial's own index.
+      swipesMeta: [
+        {'genTime': '1s'},
+      ],
+    );
+
+    Future<_AbortHarness> stop(String partial) async {
+      final harnessProvider = _abortHarnessProvider(
+        ChatState(
+          session: _session([restoration]),
+          isGenerating: true,
+          regenTargetId: restoration.id,
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          extensionPostGenServiceProvider.overrideWith(
+            (ref) => _RecordingExtensionPostGenService(ref),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      final harness = container.read(harnessProvider);
+      harness.handler.restorationMessage = restoration;
+      container.read(streamingStateProvider('char-1').notifier).state =
+          StreamingState(text: partial);
+      await harness.handler.abortGeneration();
+      return harness;
+    }
+
+    test('the partial reply replaces the error', () async {
+      final harness = await stop('Partial');
+      final message = harness.durableSession!.messages.single;
+      expect(message.swipes, ['good', 'Partial']);
+      expect(message.swipeId, 1);
+      expect(message.isError, isFalse);
+      expect(message.swipesMeta, hasLength(2));
+      expect(message.swipesMeta.map((m) => m['isError'] == true), [
+        false,
+        false,
+      ]);
+      expect(message.swipesMeta[0]['genTime'], '1s');
+    });
+
+    test('with nothing streamed the error comes back untouched', () async {
+      final harness = await stop('');
+      final message = harness.durableSession!.messages.single;
+      expect(message.swipes, ['good', 'boom']);
+      expect(message.isError, isTrue);
+    });
+  });
+
   test(
     'Stop on a regenerate with nothing streamed puts the old variation back '
     'before the save',

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:easy_localization/easy_localization.dart';
@@ -15,21 +16,22 @@ import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/folder_provider.dart';
 import '../../core/state/lorebook_provider.dart';
+import '../../shared/state/preset_sort.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/folder_section.dart';
-import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_action_button.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../shared/widgets/glaze_fab.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
+import '../../shared/widgets/glaze_list_item.dart';
+import '../../shared/widgets/glaze_list_screen.dart';
+import '../../shared/widgets/glaze_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/help_tip.dart';
-import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
-import '../embeddings/embeddings_screen.dart';
 import 'lorebook_connections_sheet.dart';
 import 'lorebook_editor_screen.dart';
+import 'lorebook_list_controls.dart';
 import 'widgets/lorebook_global_settings_section.dart';
 
 class LorebookListScreen extends ConsumerStatefulWidget {
@@ -48,9 +50,20 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
   /// Folder currently being browsed, or null at the top level.
   String? _currentFolderId;
 
-  void _openFolder(String id) => setState(() => _currentFolderId = id);
+  /// The lorebook whose editor is open in the list's place, as the Presets
+  /// list opens its editor: inside the same sheet, never as a page over it.
+  String? _editingId;
+  GlobalKey<LorebookEditorScreenState> _editorKey = GlobalKey();
+  LorebookEditorChrome _editorChrome = const LorebookEditorChrome();
 
-  void _leaveFolder() => setState(() => _currentFolderId = null);
+  LorebookListFilters _filters = const LorebookListFilters();
+
+  /// Dragging is armed from the toggle next to the sort chip, not by the
+  /// manual mode alone: while it is off a long press still selects.
+  bool _reorderArmed = false;
+
+  /// Selected lorebook ids while multi-selecting. Empty = not selecting.
+  final Set<String> _selected = {};
 
   /// Search by name: the magnifier swaps the title for a field, the way the
   /// Chats and Characters tabs search. A query looks through every lorebook,
@@ -67,6 +80,31 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
     super.dispose();
   }
 
+  // ── Navigation ─────────────────────────────────────────────────────────────
+
+  void _openFolder(String id) => setState(() {
+    _selected.clear();
+    _currentFolderId = id;
+  });
+
+  void _leaveFolder() => setState(() {
+    _selected.clear();
+    _currentFolderId = null;
+  });
+
+  void _openEditor(String id) {
+    setState(() {
+      _selected.clear();
+      _editingId = id;
+      _editorChrome = const LorebookEditorChrome();
+      // A fresh key, so the editor loads this lorebook instead of keeping the
+      // last one's state.
+      _editorKey = GlobalKey<LorebookEditorScreenState>();
+    });
+  }
+
+  void _closeEditor() => setState(() => _editingId = null);
+
   void _openSearch() {
     setState(() => _searchExpanded = true);
     WidgetsBinding.instance.addPostFrameCallback(
@@ -82,28 +120,18 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
     });
   }
 
-  Widget _buildSearchField() {
-    return TextField(
-      controller: _searchCtrl,
-      focusNode: _searchFocus,
-      autofocus: true,
-      onChanged: (v) => setState(() => _searchQuery = v),
-      textInputAction: TextInputAction.search,
-      cursorColor: context.cs.primary,
-      style: TextStyle(color: context.cs.onSurface, fontSize: 16),
-      decoration: InputDecoration(
-        isDense: true,
-        border: InputBorder.none,
-        hintText: 'lorebook_search_hint'.tr(),
-        hintStyle: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 16),
-      ),
-    );
-  }
-
-  /// Opens the Embeddings screen, which also walks through a missing setup.
-  Future<void> _openEmbeddingSettings() => showEmbeddingsSheet(context);
-
+  /// Unwinds one level per press — the editor, the selection, the search, the
+  /// folder — and only then leaves the screen.
   void _handleBack() {
+    if (_editingId != null) {
+      final handled = _editorKey.currentState?.handleBack() ?? false;
+      if (!handled) _closeEditor();
+      return;
+    }
+    if (_selected.isNotEmpty) {
+      setState(_selected.clear);
+      return;
+    }
     if (_searchExpanded) {
       _closeSearch();
       return;
@@ -124,56 +152,128 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
     return folders?.where((f) => f.id == id).firstOrNull?.name;
   }
 
+  // ── Selection / reorder ────────────────────────────────────────────────────
+
+  /// Enters multi-select, disarming a drag so a long press cannot mean both.
+  void _startSelection(String id) => setState(() {
+    _reorderArmed = false;
+    _selected.add(id);
+  });
+
+  void _toggleSelected(String id) => setState(() {
+    if (!_selected.remove(id)) _selected.add(id);
+  });
+
+  void _toggleReorderArmed() {
+    final armed = !_reorderArmed;
+    setState(() {
+      _reorderArmed = armed;
+      if (armed) _selected.clear();
+    });
+    if (armed) showGlazeDragHint(context);
+  }
+
+  void _onManualReorder(
+    List<Lorebook> visible,
+    List<Lorebook> all,
+    int oldIndex,
+    int newIndex,
+  ) {
+    if (oldIndex == newIndex) return;
+    final sort =
+        ref.read(lorebookSortProvider).value ?? const PresetSortState();
+    final order = manualOrderAfterDrag(
+      all: all,
+      visible: visible,
+      oldIndex: oldIndex,
+      newIndex: newIndex,
+      state: sort,
+      idOf: (lb) => lb.id,
+      nameOf: (lb) => lb.name,
+      createdAtOf: (lb) => lb.updatedAt,
+    );
+    unawaited(ref.read(lorebookSortProvider.notifier).setManualOrder(order));
+  }
+
+  LorebookUse _useOf(Lorebook lb, LorebookActivations activations) =>
+      LorebookUse(
+        global: lb.enabled,
+        characters: activations.character.values
+            .where((list) => list.contains(lb.id))
+            .length,
+        chats: activations.chat.values
+            .where((list) => list.contains(lb.id))
+            .length,
+      );
+
+  // ── Build ──────────────────────────────────────────────────────────────────
+
+  Widget _titleText(String text, {bool help = false}) => Row(
+    children: [
+      Flexible(
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: context.cs.onSurface,
+          ),
+        ),
+      ),
+      if (help) const HelpTip(term: 'lorebook'),
+    ],
+  );
+
+  Widget _buildSearchField() {
+    return TextField(
+      controller: _searchCtrl,
+      focusNode: _searchFocus,
+      autofocus: true,
+      onChanged: (v) => setState(() => _searchQuery = v),
+      textInputAction: TextInputAction.search,
+      cursorColor: context.cs.primary,
+      style: TextStyle(color: context.cs.onSurface, fontSize: 16),
+      decoration: InputDecoration(
+        isDense: true,
+        border: InputBorder.none,
+        hintText: 'lorebook_search_hint'.tr(),
+        hintStyle: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 16),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final lorebooksAsync = ref.watch(lorebooksProvider);
+    final editingId = _editingId;
+    final editing = editingId != null;
     final folderId = _currentFolderId;
+    final sort =
+        ref.watch(lorebookSortProvider).value ?? const PresetSortState();
 
-    return SheetView(
+    final Widget? titleWidget;
+    if (editing) {
+      titleWidget = _editorChrome.titleWidget;
+    } else if (_searchExpanded) {
+      titleWidget = _buildSearchField();
+    } else if (folderId != null) {
+      titleWidget = _titleText(_folderName(folderId) ?? 'menu_lorebooks'.tr());
+    } else {
+      titleWidget = _titleText('menu_lorebooks'.tr(), help: true);
+    }
+
+    return GlazeListScreen(
       startExpanded: widget.startExpanded,
-      showRouteBackground: false,
       shellBranchIndex: 2,
-      titleWidget: _searchExpanded
-          ? _buildSearchField()
-          : folderId == null
-          ? Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    'menu_lorebooks'.tr(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: context.cs.onSurface,
-                    ),
-                  ),
-                ),
-                const HelpTip(term: 'lorebook'),
-              ],
-            )
-          : Text(
-              _folderName(folderId) ?? 'menu_lorebooks'.tr(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
-              ),
-            ),
-      showBack: true,
-      canPop: folderId == null,
+      title: editing ? _editorChrome.title : null,
+      titleWidget: titleWidget,
+      canPop:
+          !editing && _selected.isEmpty && !_searchExpanded && folderId == null,
       onBack: _handleBack,
-      floatingActionButton: GlazeFab(
-        label: 'action_add'.tr(),
-        tooltip: 'action_create_new'.tr(),
-        onTap: () => _openLorebookMenu(context),
-      ),
+      addLabel: 'action_add'.tr(),
+      onAdd: () => _openLorebookMenu(context),
       actions: [
-        // The magnifier searches, as it does everywhere else in the app; the
-        // vector settings it used to open sit behind the gear next to it.
         SheetViewAction(
           icon: Icon(
             _searchExpanded ? Icons.close_rounded : Icons.search,
@@ -183,110 +283,252 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
               .tr(),
           onPressed: _searchExpanded ? _closeSearch : _openSearch,
         ),
-        SheetViewAction(
-          icon: const Icon(Icons.settings_outlined, size: 20),
-          tooltip: 'lorebook_embedding_settings_tooltip'.tr(),
-          onPressed: _openEmbeddingSettings,
+      ],
+      controls: GlazeListControls(
+        filterCount: _filters.activeCount,
+        onFilter: () => _showFilterSheet(context),
+        sort: GlazeListSort(
+          mode: sort.mode,
+          armed: _reorderArmed,
+          onToggleReorder: _toggleReorderArmed,
+          onSelect: (mode) =>
+              unawaited(ref.read(lorebookSortProvider.notifier).setMode(mode)),
+          onDisarm: () {
+            if (_reorderArmed) setState(() => _reorderArmed = false);
+          },
+        ),
+      ),
+      selection: _selected.isEmpty
+          ? null
+          : GlazeListSelection(
+              count: _selected.length,
+              onCancel: () => setState(_selected.clear),
+              onMore: () => _showSelectionActions(context),
+            ),
+      editing: editing,
+      editorActions: _editorChrome.actions,
+      editorHeaderBottom: _editorChrome.headerBottom,
+      editorFab: _editorChrome.fab,
+      innerBack: editing ? _editorChrome.innerBack : null,
+      body: editing
+          ? LorebookEditorScreen(
+              key: _editorKey,
+              lorebookId: editingId,
+              onChrome: (chrome) => setState(() => _editorChrome = chrome),
+              onClose: _closeEditor,
+            )
+          : ref
+                .watch(lorebooksProvider)
+                .when(
+                  skipLoadingOnReload: true,
+                  data: (all) => Builder(
+                    builder: (context) => _buildList(context, all, sort),
+                  ),
+                  loading: () => const Center(child: GlazeSpinner()),
+                  error: (e, _) =>
+                      Center(child: Text('${'title_error'.tr()}: $e')),
+                ),
+    );
+  }
+
+  Widget _buildList(
+    BuildContext context,
+    List<Lorebook> all,
+    PresetSortState sort,
+  ) {
+    final folderId = _currentFolderId;
+    final memberships =
+        ref.watch(folderMembershipsProvider(FolderDomain.lorebook)).value ??
+        FolderMemberships.empty;
+    final hasFolders =
+        (ref.watch(foldersProvider(FolderDomain.lorebook)).value ?? const [])
+            .isNotEmpty;
+    final activations = ref.watch(lorebookActivationsProvider);
+
+    final query = _searchQuery.trim().toLowerCase();
+    final searching = query.isNotEmpty;
+    var lorebooks = all;
+    if (searching) {
+      lorebooks = all
+          .where((lb) => lb.name.toLowerCase().contains(query))
+          .toList();
+    } else if (folderId != null) {
+      final ids = memberships.membersIn(folderId);
+      lorebooks = all.where((lb) => ids.contains(lb.id)).toList();
+    } else {
+      // A lorebook filed into a folder lives there, not twice.
+      lorebooks = all
+          .where((lb) => memberships.foldersOf(lb.id).isEmpty)
+          .toList();
+    }
+    final uses = {for (final lb in all) lb.id: _useOf(lb, activations)};
+    lorebooks = lorebooks
+        .where((lb) => _filters.matches(uses[lb.id]!))
+        .toList();
+    lorebooks = sortLorebooks(lorebooks, sort);
+
+    final reordering = sort.mode == PresetSortMode.manual && _reorderArmed;
+    final selecting = _selected.isNotEmpty;
+
+    final header = <Widget>[
+      // A search shows only its hits: no settings or folders above.
+      if (folderId == null && !searching) ...[
+        const LorebookGlobalSettingsSection(),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: FolderSection(
+            domain: FolderDomain.lorebook,
+            onOpenFolder: _openFolder,
+            icon: Icons.menu_book_outlined,
+          ),
         ),
       ],
-      body: lorebooksAsync.when(
-        data: (all) {
-          final memberships =
-              ref
-                  .watch(folderMembershipsProvider(FolderDomain.lorebook))
-                  .value ??
-              FolderMemberships.empty;
-          final hasFolders =
-              (ref.watch(foldersProvider(FolderDomain.lorebook)).value ??
-                      const [])
-                  .isNotEmpty;
+      if (lorebooks.isEmpty)
+        if (searching || _filters.isActive)
+          GlazeListEmptyNote(label: 'search_no_results'.tr())
+        else if (folderId != null)
+          const FolderEmptyState()
+        else if (!hasFolders)
+          _EmptyState(
+            onCreate: () => _createLorebook(context),
+            onImport: () => _importSTLorebook(context),
+          ),
+    ];
 
-          final query = _searchQuery.trim().toLowerCase();
-          final searching = query.isNotEmpty;
-          final List<Lorebook> lorebooks;
-          if (searching) {
-            lorebooks = all
-                .where((lb) => lb.name.toLowerCase().contains(query))
-                .toList();
-          } else if (folderId != null) {
-            final ids = memberships.membersIn(folderId);
-            lorebooks = all.where((lb) => ids.contains(lb.id)).toList();
-          } else {
-            lorebooks = all
-                .where((lb) => memberships.foldersOf(lb.id).isEmpty)
-                .toList();
-          }
+    return GlazeListBody(
+      levelKey: 'lorebooks_${folderId ?? '#root'}_$searching',
+      headerPadding: 0,
+      header: header,
+      itemCount: lorebooks.length,
+      itemKey: (i) => lorebooks[i].id,
+      onReorder: reordering
+          ? (oldIndex, newIndex) =>
+                _onManualReorder(lorebooks, all, oldIndex, newIndex)
+          : null,
+      dragByLongPress: true,
+      itemBuilder: (context, i) {
+        final lb = lorebooks[i];
+        return _LorebookRow(
+          lorebook: lb,
+          use: uses[lb.id]!,
+          selecting: selecting,
+          selected: _selected.contains(lb.id),
+          onTap: selecting
+              ? () => _toggleSelected(lb.id)
+              : () => _openEditor(lb.id),
+          // While dragging is armed a long press lifts the row instead.
+          onLongPress: reordering || selecting
+              ? null
+              : () => _startSelection(lb.id),
+          onMore: () => _lorebookMenu(context, lb),
+          onConnections: () => showLorebookConnections(context, lb.id),
+        );
+      },
+    );
+  }
 
-          return Builder(
-            builder: (context) => ListView(
-              padding: const EdgeInsets.fromLTRB(0, 0, 0, 16).add(
-                EdgeInsets.only(
-                  // A sidebar panel starts its rows right under the header.
-                  top:
-                      MediaQuery.paddingOf(context).top +
-                      (inSidebarPanel(context) ? 0 : 16),
-                  bottom: MediaQuery.paddingOf(context).bottom,
-                ),
-              ),
-              children: [
-                // A search shows only its hits: no settings or folders above.
-                if (folderId == null && !searching) ...[
-                  const LorebookGlobalSettingsSection(),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: FolderSection(
-                      domain: FolderDomain.lorebook,
-                      onOpenFolder: _openFolder,
-                      icon: Icons.menu_book_outlined,
-                    ),
-                  ),
-                ],
-                if (searching && lorebooks.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text(
-                      'search_no_results'.tr(),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: context.cs.onSurfaceVariant),
-                    ),
-                  )
-                else if (lorebooks.isEmpty && !(folderId == null && hasFolders))
-                  _EmptyState(
-                    onCreate: () => _createLorebook(context),
-                    onImport: () => _importSTLorebook(context),
-                  )
-                else ...[
-                  if (lorebooks.isEmpty && folderId != null)
-                    const FolderEmptyState()
-                  else
-                    for (final lb in lorebooks)
-                      _LorebookCard(
-                        lorebook: lb,
-                        onTap: () => openLorebookEditor(context, lb.id),
-                        onMore: () => _lorebookMenu(context, lb),
-                        onConnections: () =>
-                            showLorebookConnections(context, lb.id),
-                      ),
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      16,
-                      inSidebarPanel(context) ? 16 : 4,
-                      16,
-                      8,
-                    ),
-                    child: _AddButton(
-                      label: 'btn_add'.tr(),
-                      onTap: () => _openLorebookMenu(context),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          );
+  // ── Filters ────────────────────────────────────────────────────────────────
+
+  void _showFilterSheet(BuildContext context) {
+    showGlazeSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => LorebookFilterSheet(
+        filters: _filters,
+        onApply: (f) {
+          if (mounted) setState(() => _filters = f);
         },
-        loading: () => const Center(child: GlazeSpinner()),
-        error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
       ),
+    );
+  }
+
+  // ── Selection actions ──────────────────────────────────────────────────────
+
+  void _showSelectionActions(BuildContext context) {
+    final folderId = _currentFolderId;
+    final ids = _selected.toList();
+    GlazeBottomSheet.show<void>(
+      context,
+      title: '${ids.length} ${'selected_count'.tr()}',
+      items: [
+        BottomSheetItem(
+          icon: Icons.create_new_folder_outlined,
+          label: 'action_add_to_folder'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            showAddToFolderSheet(
+              context,
+              domain: FolderDomain.lorebook,
+              targets: ids,
+              onDone: () {
+                if (mounted) setState(_selected.clear);
+              },
+            );
+          },
+        ),
+        if (folderId != null)
+          BottomSheetItem(
+            icon: Icons.folder_off_outlined,
+            label: 'action_remove_from_folder'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              final repo = ref.read(folderRepoProvider);
+              for (final id in ids) {
+                unawaited(repo.removeMember(folderId, id));
+              }
+              setState(_selected.clear);
+            },
+          ),
+        BottomSheetItem(
+          icon: Icons.delete_rounded,
+          label: 'action_delete'.tr(),
+          isDestructive: true,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _confirmDeleteSelected(context, ids);
+          },
+        ),
+      ],
+    );
+  }
+
+  void _confirmDeleteSelected(BuildContext context, List<String> ids) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'action_delete'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.delete_outline,
+        description: 'lorebook_delete_selected_confirm'.tr(
+          args: ['${ids.length}'],
+        ),
+      ),
+      items: [
+        BottomSheetItem(
+          label: 'btn_delete'.tr(),
+          isDestructive: true,
+          centered: true,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            setState(_selected.clear);
+            final folders = ref.read(folderRepoProvider);
+            final notifier = ref.read(lorebooksProvider.notifier);
+            for (final id in ids) {
+              unawaited(notifier.deleteLorebook(id));
+              unawaited(
+                folders.deleteMembersForMember(FolderDomain.lorebook, id),
+              );
+            }
+          },
+        ),
+        BottomSheetItem(
+          label: 'btn_cancel'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(),
+        ),
+      ],
     );
   }
 
@@ -342,8 +584,7 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
             updatedAt: currentTimestampSeconds(),
           );
           ref.read(lorebooksProvider.notifier).addLorebook(lorebook).then((_) {
-            if (!context.mounted) return;
-            openLorebookEditor(context, id);
+            if (mounted) _openEditor(id);
           });
         },
       ),
@@ -437,7 +678,7 @@ class _LorebookListScreenState extends ConsumerState<LorebookListScreen> {
           args: [single.lorebook.name, single.entryCount.toString()],
         ),
       );
-      await openLorebookEditor(context, single.lorebook.id);
+      _openEditor(single.lorebook.id);
       return;
     }
 
@@ -613,126 +854,102 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// ── Lorebook card ────────────────────────────────────────────────────────────
+// ── Lorebook row ─────────────────────────────────────────────────────────────
 
-class _LorebookCard extends ConsumerWidget {
+class _LorebookRow extends StatelessWidget {
   final Lorebook lorebook;
+  final LorebookUse use;
+  final bool selecting;
+  final bool selected;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final VoidCallback onMore;
   final VoidCallback onConnections;
 
-  const _LorebookCard({
+  const _LorebookRow({
     required this.lorebook,
+    required this.use,
+    required this.selecting,
+    required this.selected,
     required this.onTap,
+    required this.onLongPress,
     required this.onMore,
     required this.onConnections,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final activations = ref.watch(lorebookActivationsProvider);
-    final charCount = activations.character.values
-        .where((list) => list.contains(lorebook.id))
-        .length;
-    final chatCount = activations.chat.values
-        .where((list) => list.contains(lorebook.id))
-        .length;
-
-    final scopeColor = lorebook.enabled
+  Widget build(BuildContext context) {
+    final scopeColor = use.global
         ? Colors.green
-        : charCount > 0
+        : use.characters > 0
         ? Colors.purple
-        : chatCount > 0
+        : use.chats > 0
         ? Colors.orange
         : context.cs.onSurfaceVariant;
 
-    final content = Padding(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return GlazeListItem(
+      // A lorebook in use is outlined in the accent, as an active regex is.
+      accent: use.unused ? null : context.cs.primary,
+      selected: selected,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      trailing: selecting
+          ? GlazeSelectionCheck(selected: selected)
+          : Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  lorebook.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.onSurface,
-                  ),
+                IconButton(
+                  icon: Icon(Icons.link, size: 18, color: scopeColor),
+                  tooltip: 'header_connections'.tr(),
+                  onPressed: onConnections,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '${lorebook.entries.length} ${'label_entries'.tr()}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: context.cs.onSurfaceVariant,
-                  ),
-                ),
-                if (lorebook.enabled || charCount > 0 || chatCount > 0) ...[
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      if (lorebook.enabled)
-                        _ConnBadge(
-                          label: 'label_global'.tr(),
-                          color: Colors.green,
-                        ),
-                      if (charCount > 0)
-                        _ConnBadge(
-                          label: '$charCount ${'header_characters'.tr()}',
-                          color: Colors.purple,
-                        ),
-                      if (chatCount > 0)
-                        _ConnBadge(
-                          label: '$chatCount ${'tab_dialogs'.tr()}',
-                          color: Colors.orange,
-                        ),
-                    ],
-                  ),
-                ],
+                GlazeListMenuButton(onTap: onMore),
               ],
             ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            lorebook.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: context.cs.onSurface,
+            ),
           ),
-          const SizedBox(width: 8),
-          IconButton(
-            icon: Icon(Icons.link, size: 18, color: scopeColor),
-            tooltip: 'header_connections'.tr(),
-            onPressed: onConnections,
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.more_vert,
-              size: 20,
+          const SizedBox(height: 2),
+          Text(
+            '${lorebook.entries.length} ${'label_entries'.tr()}',
+            style: TextStyle(
+              fontSize: 11.5,
               color: context.cs.onSurfaceVariant,
             ),
-            onPressed: onMore,
           ),
+          if (!use.unused) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                if (use.global)
+                  _ConnBadge(label: 'label_global'.tr(), color: Colors.green),
+                if (use.characters > 0)
+                  _ConnBadge(
+                    label: '${use.characters} ${'header_characters'.tr()}',
+                    color: Colors.purple,
+                  ),
+                if (use.chats > 0)
+                  _ConnBadge(
+                    label: '${use.chats} ${'tab_dialogs'.tr()}',
+                    color: Colors.orange,
+                  ),
+              ],
+            ),
+          ],
         ],
-      ),
-    );
-    // In a sidebar panel the lorebook is a row of the list, edge to edge.
-    if (inSidebarPanel(context)) {
-      return FlatGroupSurface(
-        child: InkWell(
-          mouseCursor: SystemMouseCursors.click,
-          onTap: onTap,
-          child: content,
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      child: GlassSurface(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
-        onTap: onTap,
-        child: content,
       ),
     );
   }
@@ -758,46 +975,6 @@ class _ConnBadge extends StatelessWidget {
           fontSize: 11,
           fontWeight: FontWeight.w700,
           color: color,
-        ),
-      ),
-    );
-  }
-}
-
-// ── Add button (Vue ps-add-btn) ──────────────────────────────────────────────
-
-class _AddButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-
-  const _AddButton({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: context.cs.primary,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        mouseCursor: SystemMouseCursors.click,
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.add, size: 20, color: Colors.black),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black,
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );
