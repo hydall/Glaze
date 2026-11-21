@@ -3663,6 +3663,7 @@
   "error_character_id_not_found": "Could not find a character id in that link.",
   "error_handle_password_required": "Enter your handle and password.",
   "error_token_required": "Paste a bearer token.",
+  "error_hide_message_failed": "Failed to hide message: {error}",
   "error_delete_message_failed": "Failed to delete message: {error}",
   "vector_error_rebuild_cancelled": "Vector rebuild cancelled.",
   "vector_error_rebuild_failed": "Vector rebuild failed: {error}",

@@ -1189,7 +1189,12 @@ export class Bridge {
   }
 
   _executeUpdateMessage(msg) {
-    const section = document.querySelector(`[data-message-id="${msg.id}"]`);
+    // A row scrolled out of the virtual window is detached from the document
+    // but kept in `itemMap`; patch that element too, or the change (a hide, an
+    // edit) is lost and the row comes back stale when it scrolls into view.
+    const section = document.querySelector(`[data-message-id="${msg.id}"]`)
+      || this.virtualList?.itemMap?.get(msg.id)?.el
+      || null;
     if (!section) {
       // Last line of defence for the virtual placeholder: while Flutter still
       // believes one is on screen, a node the list lost has to be re-created
