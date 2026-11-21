@@ -136,13 +136,6 @@ export class Renderer {
     if (reasoning) section.dataset.reasoning = reasoning;
     if (isLast && this._roleKey(role) === 'char') section.dataset.isLast = 'true';
     if (messageData.personaName) section.dataset.personaName = messageData.personaName;
-    // Sent as a named persona: the message keeps that persona's avatar (or, if
-    // it was deleted or has no picture, its letter) instead of following the
-    // currently active persona. `avatarPinned` is what setIdentity checks
-    // before it repaints avatars.
-    if (messageData.personaId) section.dataset.personaId = messageData.personaId;
-    if (messageData.avatarUrl) section.dataset.avatarUrl = messageData.avatarUrl;
-    if (messageData.avatarUrl || messageData.avatarFallback) section.dataset.avatarPinned = '1';
     if (messageData.messageIndex != null) section.dataset.messageIndex = String(messageData.messageIndex);
     if (messageData.swipeIndex != null) section.dataset.swipeId = String(messageData.swipeIndex);
     if (messageData.swipeTotal != null) section.dataset.swipeTotal = String(messageData.swipeTotal);
@@ -271,15 +264,13 @@ if (messageData.isEditing) classes.push('editing');
     else if (roleKey === 'char') avatar.classList.add('tavo-character-avatar', 'tavo-group-character-avatar');
     const finalName = m.displayName || m.personaName || this._getDefaultName(m.role);
     const identity = window.bridge || null;
-    // `avatarFallback` means the message names a persona with no avatar to
-    // show — deleted, or never given a picture. It renders the letter rather
-    // than borrowing the active persona's avatar.
-    const pinnedAvatar = !!(m.avatarUrl || m.avatarFallback);
-    const avatarUrl = m.avatarUrl || (pinnedAvatar ? null : (roleKey === 'user'
+    // Avatars follow the active identity: a persona switch re-faces every
+    // user message (setIdentity repaints the ones already on screen).
+    const avatarUrl = roleKey === 'user'
       ? (identity && identity._personaAvatarUrl)
       : roleKey === 'char'
         ? (identity && identity._charAvatarUrl)
-        : null));
+        : null;
     if (avatarUrl) {
       const img = document.createElement('img');
       img.src = avatarUrl;

@@ -96,7 +96,8 @@ class ChatMessageOpsController {
     }
     if (current.isGenerating ||
         current.isGeneratingImage ||
-        current.isPostGenRunning) {
+        current.isPostGenRunning ||
+        current.isStopping) {
       debugPrint(
         '[edit] refused: busy (generating=${current.isGenerating} '
         'image=${current.isGeneratingImage} '

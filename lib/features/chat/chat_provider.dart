@@ -77,6 +77,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// send's `finally` can tell its own [ChatState.isSendPending] from one a
   /// later send has since set.
   int _sendPendingSeq = 0;
+
+  /// Sends between their first line and their end, by request id, and the
+  /// ones among them the user stopped before the reply started. A stopped
+  /// send is rolled back up to the durable append (its text goes back into
+  /// the composer); after it, the message stays and no reply runs.
+  int _sendRequestSeq = 0;
+  final Set<int> _activeSends = {};
+  final Set<int> _stoppedSends = {};
   int _sessionChangesInFlight = 0;
 
   /// The instruction a guided impersonation ran with, waiting for the message
@@ -216,7 +224,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       ImageRecoveryService.fixupSwipesWithImageResults(session);
 
   void abortImageGeneration() => _abortHandler.abortImageGeneration();
-  Future<void> abortGeneration() => _abortHandler.abortGeneration();
+  Future<void> abortGeneration() {
+    // Stop is offered from the tap of Send on, not only once the reply runs:
+    // a send still on its way to the pipeline is called off here.
+    if (_activeSends.isNotEmpty) {
+      _stoppedSends.addAll(_activeSends);
+      final current = state.value;
+      if (current != null && current.isSendPending) {
+        state = AsyncData(current.copyWith(isSendPending: false));
+      }
+    }
+    return _abortHandler.abortGeneration();
+  }
+
+  bool _isSendStopped(int request) => _stoppedSends.contains(request);
   void cancelImageGeneration() => _abortHandler.cancelImageGeneration();
   Future<void> retryImageGeneration() async =>
       _imageRecoverySvc.retryImageGeneration();
@@ -364,6 +385,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (current == null ||
         current.isGenerating ||
         current.isSendPending ||
+        current.isStopping ||
         current.isPostGenRunning) {
       throw StateError('The chat is busy generating');
     }
@@ -539,11 +561,37 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     List<String> imageDataUrls = const [],
     Completer<bool>? durableAcceptance,
   }) async {
+    // Claimed on the first line, before any wait, so a Stop tapped while the
+    // send is still queued behind a write already reaches it.
+    final request = ++_sendRequestSeq;
+    _activeSends.add(request);
+    try {
+      await _runSend(
+        request,
+        text,
+        guidanceText: guidanceText,
+        imageDataUrls: imageDataUrls,
+        durableAcceptance: durableAcceptance,
+      );
+    } finally {
+      _activeSends.remove(request);
+      _stoppedSends.remove(request);
+    }
+  }
+
+  Future<void> _runSend(
+    int request,
+    String text, {
+    String? guidanceText,
+    List<String> imageDataUrls = const [],
+    Completer<bool>? durableAcceptance,
+  }) async {
     if (!ref.mounted) {
       durableAcceptance?.complete(false);
       return;
     }
     await _sessionWrites.settle();
+    await _abortHandler.settled;
     if (!ref.mounted) {
       durableAcceptance?.complete(false);
       return;
@@ -564,7 +612,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (current == null ||
         current.isGenerating ||
         current.isGeneratingImage ||
-        current.isPostGenRunning) {
+        current.isPostGenRunning ||
+        _isSendStopped(request)) {
       durableAcceptance?.complete(false);
       return;
     }
@@ -590,6 +639,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         hookedText = hook.text;
         if (hookedText.trim().isEmpty && imageDataUrls.isEmpty) return;
       }
+      if (_isSendStopped(request)) return;
       var outgoingText = hookedText;
       if (translation.enabled &&
           translation.autoTranslateUser &&
@@ -599,6 +649,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           translation.inputLanguage,
           sessionId: current.session!.id,
         );
+        if (!ref.mounted || _isSendStopped(request)) return;
       }
       // Stamp the message with the persona that sent it. The id is what the
       // chat resolves against later (a renamed persona keeps naming its old
@@ -692,6 +743,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       );
       await _yieldToFrame();
       if (!ref.mounted) return;
+      if (_isSendStopped(request)) {
+        // Stopped before anything was written: take the bubble back down.
+        // The composer gets the text back from the refused acceptance.
+        final latest = state.value;
+        if (latest != null && latest.session?.id == current.session!.id) {
+          state = AsyncData(
+            latest.copyWith(session: current.session, isSendPending: false),
+          );
+        }
+        return;
+      }
 
       final updatedSession = expectedAcceptedVariation == null
           ? await ref
@@ -730,6 +792,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       if (afterWrite == null ||
           afterWrite.isGenerating ||
           afterWrite.session?.id != updatedSession.id) {
+        return;
+      }
+      if (_isSendStopped(request)) {
+        // Stopped while the message was being written: it stays, the reply
+        // never starts.
+        state = AsyncData(
+          afterWrite.copyWith(session: updatedSession, isSendPending: false),
+        );
         return;
       }
       state = AsyncData(
@@ -792,8 +862,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
         }
 
+        // Stopped while the variation was being committed.
+        final beforeRun = state.value;
+        if (beforeRun == null ||
+            !beforeRun.isGenerating ||
+            beforeRun.session?.id != updatedSession.id) {
+          return;
+        }
         // A user-side rewrite block may have changed the message just sent.
-        final latestSession = state.value?.session;
+        final latestSession = beforeRun.session;
         await _runGeneration(
           latestSession?.id == updatedSession.id
               ? latestSession!
@@ -967,6 +1044,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       await abortGeneration();
     }
     await _sessionWrites.settle();
+    await _abortHandler.settled;
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;
@@ -1096,6 +1174,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     await _sessionWrites.settle();
+    await _abortHandler.settled;
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;
@@ -1187,6 +1266,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     await _sessionWrites.settle();
+    await _abortHandler.settled;
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;

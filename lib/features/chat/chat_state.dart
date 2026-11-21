@@ -25,6 +25,18 @@ class ChatState {
   /// one button, never block a run.
   final bool isSendPending;
 
+  /// True while a stop is being made durable after the UI already shows the
+  /// run as stopped.
+  ///
+  /// A stop is optimistic: [isGenerating] and friends drop the moment the user
+  /// taps it, and the partial reply (or the restored variation) is painted
+  /// straight away. Saving that result still takes a DB write, and the
+  /// message-mutating actions (edit, swipe, plugin writes) treat this flag as
+  /// busy so they cannot race it. New runs wait for the stop to settle instead
+  /// (`AbortHandler.settled`), so a send tapped right after Stop is queued,
+  /// not refused.
+  final bool isStopping;
+
   final String? error;
   final String? lastRawResponse;
   final DateTime? generationStartTime;
@@ -57,6 +69,7 @@ class ChatState {
     this.isGeneratingImage = false,
     this.isPostGenRunning = false,
     this.isSendPending = false,
+    this.isStopping = false,
     this.error,
     this.lastRawResponse,
     this.generationStartTime,
@@ -86,6 +99,7 @@ class ChatState {
     bool? isGeneratingImage,
     bool? isPostGenRunning,
     bool? isSendPending,
+    bool? isStopping,
     Object? error = _unset,
     String? lastRawResponse,
     DateTime? generationStartTime,
@@ -102,6 +116,7 @@ class ChatState {
       isGeneratingImage: isGeneratingImage ?? this.isGeneratingImage,
       isPostGenRunning: isPostGenRunning ?? this.isPostGenRunning,
       isSendPending: isSendPending ?? this.isSendPending,
+      isStopping: isStopping ?? this.isStopping,
       error: error == _unset ? this.error : error as String?,
       lastRawResponse: lastRawResponse ?? this.lastRawResponse,
       generationStartTime: generationStartTime ?? this.generationStartTime,

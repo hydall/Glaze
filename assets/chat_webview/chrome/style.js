@@ -246,7 +246,6 @@ export const CHROME_CSS = `
    content padding the composer asked for. */
 .gc-input { min-height: 56px; padding: 12px 18px; color: var(--gc-text); overflow-y: hidden; line-height: 1.5; }
 .gc-input::placeholder { color: var(--gc-text2); }
-.gc-input.gc-nocaret { caret-color: transparent; user-select: none; -webkit-user-select: none; }
 .gc-guide { background: rgba(255,152,0,0.06); box-shadow: inset 0 -1px 0 rgba(255,152,0,0.25); }
 .gc-guide-head { display: flex; align-items: center; padding: 8px 8px 0 18px; }
 .gc-guide-caption { flex: 1; min-width: 0; font-weight: 700; letter-spacing: 0.8px; color: rgba(255,152,0,0.8); line-height: normal; }

@@ -228,9 +228,7 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
         if (index >= 0) setState(() => _attachments.removeAt(index));
       },
       'pasteRequest': (_) => unawaited(_pasteImagesFromClipboard()),
-      'guidanceClose': (_) {
-        if (!widget.isEditingMessage) _toggleGuidance();
-      },
+      'guidanceClose': (_) => _toggleGuidance(),
       'searchPrev': (_) => widget.onSearchPrev?.call(),
       'searchNext': (_) => widget.onSearchNext?.call(),
       'selCancel': (_) => widget.onCancelSelection?.call(),
@@ -263,9 +261,6 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
         ..onUnfocusRequested = null
         ..onFocusRequested = null;
       _bindFocus();
-    }
-    if (widget.isEditingMessage && widget.composerFocus.hasFocus) {
-      widget.composerFocus.unfocus();
     }
   }
 
@@ -515,7 +510,6 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
   }
 
   Future<bool> _pasteImagesFromClipboard() async {
-    if (widget.isEditingMessage) return false;
     final images = await ClipboardImages.read(limit: maxMessageAttachments);
     if (!mounted || images.isEmpty) return false;
     _addAttachments(images, droppedByLimit: false);
@@ -524,7 +518,6 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
 
   /// Images pasted into the page's field, as `data:` URLs.
   void _onAttach(Map<String, dynamic> data) {
-    if (widget.isEditingMessage) return;
     final urls = data['urls'];
     if (urls is! List) return;
     final images = <ClipboardImage>[];
@@ -620,10 +613,19 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
     onTap?.call();
   }
 
+  void _showSendBlockedWhileEditing() {
+    GlazeToast.show(context, 'send_blocked_while_editing'.tr());
+  }
+
   Future<bool> _handleSend() async {
-    if (widget.isEditingMessage || _isDispatchingSend) return false;
+    if (_isDispatchingSend) return false;
     final text = _controller.text;
     if (text.trim().isEmpty && _attachments.isEmpty) return false;
+    // Typing is allowed while a message is being edited; only sending waits.
+    if (widget.isEditingMessage) {
+      _showSendBlockedWhileEditing();
+      return false;
+    }
     if (widget.canSend != null && !widget.canSend!()) return false;
     final attachments = List<_Attachment>.unmodifiable(_attachments);
     final guidance = _guidanceMode && _guidanceController.text.trim().isNotEmpty
@@ -870,7 +872,11 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
       (_guidanceMode && _guidanceController.text.trim().isNotEmpty) ||
       _attachments.isNotEmpty;
 
+  /// Includes the send this composer is still handing over: the button is
+  /// Stop from the tap of Send on, never the empty-field action for the
+  /// moment between the field clearing and the chat painting the message.
   bool get _isGenerating =>
+      _isDispatchingSend ||
       widget.isGenerating ||
       widget.isGeneratingImage ||
       widget.isPostGenRunning;
@@ -901,7 +907,7 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
       if (isGenerating) {
         widget.onStop?.call();
       } else if (widget.isEditingMessage) {
-        return;
+        if (hasContent) _showSendBlockedWhileEditing();
       } else if (guidanceOnly) {
         impersonate();
       } else if (hasContent) {
@@ -938,7 +944,7 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
       'icon': chromeIcon(icon, glyph: idle ? emptyAction?.glyph : null),
       // Mirrors the null branch of [_sendButtonTap].
       'tap': !(editing && !isGenerating && !hasContent),
-      'insert': idle && !widget.isEditingMessage ? emptyAction?.insert : null,
+      'insert': idle ? emptyAction?.insert : null,
     };
   }
 
@@ -1009,9 +1015,7 @@ class _ChatComposerHostState extends ConsumerState<ChatComposerHost> {
       'placeholder': _guidanceMode
           ? 'chat_guidance_message_hint'.tr()
           : 'chat_placeholder'.tr(),
-      'readOnly':
-          widget.isEditingMessage || _isImpersonating || _draftTranslator.busy,
-      'locked': widget.isEditingMessage,
+      'readOnly': _isImpersonating || _draftTranslator.busy,
       'virtualSend': widget.virtualKeyboardSend,
       'enterSend': widget.enterToSend,
       'guidance': _guidanceMode

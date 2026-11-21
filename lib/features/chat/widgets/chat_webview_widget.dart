@@ -10,7 +10,6 @@ import '../../../core/state/active_regex_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
-import '../../personas/persona_list_provider.dart';
 import '../../../../shared/theme/theme_font_provider.dart';
 import '../../../../shared/theme/theme_preset.dart';
 import '../bridge/chat_bridge_controller.dart';
@@ -1446,12 +1445,6 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     if (_bridge != null) {
       _bindBridgeCallbacks();
       final session = ref.watch(chatProvider(widget.charId)).value?.session;
-      // The roster a message's stored `personaId` is resolved against. Watched
-      // (not read) so a persona renamed or deleted elsewhere reaches the page:
-      // the listener in ChatWebViewBuildListeners re-renders on the same change.
-      _bridge!.setPersonaRoster(
-        ref.watch(personaListProvider).value ?? const [],
-      );
       _bridge!.setRegexContext(
         displayRegexes,
         character,

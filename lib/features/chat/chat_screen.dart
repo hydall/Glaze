@@ -2579,25 +2579,28 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                 imageDataUrls: imageDataUrls,
                               );
                         },
-                    isGenerating: widget.state.isGenerating,
+                    // The send window counts: the button turns into Stop on
+                    // the tap of Send, not once the message is written and the
+                    // reply starts, and Stop there calls the send off.
+                    isGenerating:
+                        widget.state.isGenerating ||
+                        widget.state.isSendPending,
                     isGeneratingImage: widget.state.isGeneratingImage,
                     isPostGenRunning: widget.state.isPostGenRunning,
-                    onStop:
-                        (widget.state.isGenerating ||
-                            widget.state.isGeneratingImage ||
-                            widget.state.isPostGenRunning)
-                        ? () {
-                            final notifier = ref.read(
-                              chatProvider(widget.charId).notifier,
-                            );
-                            if (widget.state.isGeneratingImage &&
-                                !widget.state.isGenerating) {
-                              notifier.cancelImageGeneration();
-                            } else {
-                              notifier.abortGeneration();
-                            }
-                          }
-                        : null,
+                    // Always wired: the composer offers Stop only while
+                    // something runs, including a send it is still handing
+                    // over, before any of these flags is up.
+                    onStop: () {
+                      final notifier = ref.read(
+                        chatProvider(widget.charId).notifier,
+                      );
+                      if (widget.state.isGeneratingImage &&
+                          !widget.state.isGenerating) {
+                        notifier.cancelImageGeneration();
+                      } else {
+                        notifier.abortGeneration();
+                      }
+                    },
                     // On desktop the drawer lives in the right sidebar and the
                     // bottom drawer is never rendered — the button would only
                     // animate an empty gap open, so it is left out.

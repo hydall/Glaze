@@ -114,10 +114,9 @@ function piecesOf(section) {
 /** What a message template sees. [m] is the message map the bridge renders. */
 export function messageData(m, identity, name) {
   const role = roleKey(m.role);
-  const pinned = !!(m.avatarUrl || m.avatarFallback);
-  const avatarUrl = m.avatarUrl || (pinned ? null : (role === 'user'
+  const avatarUrl = (role === 'user'
     ? identity && identity._personaAvatarUrl
-    : role === 'char' ? identity && identity._charAvatarUrl : null)) || '';
+    : role === 'char' ? identity && identity._charAvatarUrl : null) || '';
   const day = m.timestamp ? formatDate(m.timestamp) : null;
   return {
     id: m.id || '',
@@ -129,7 +128,8 @@ export function messageData(m, identity, name) {
     initial: (name || '?').charAt(0).toUpperCase(),
     avatarUrl,
     avatarColor: m.avatarColor || '',
-    persona: m.personaName || '',
+    // A user message is always the active persona's, which `name` carries.
+    persona: m.personaName || (role === 'user' ? name : ''),
     text: m.text || '',
     reasoning: m.reasoning || '',
     timestamp: m.timestamp || 0,

@@ -9,7 +9,6 @@ import '../../../core/state/active_regex_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
-import '../../personas/persona_list_provider.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_overlay_blur_region.dart';
 import '../chat_provider.dart';
@@ -163,10 +162,6 @@ class ChatWebViewInitializer {
         sessionId: input.sessionId,
       )),
     );
-    // Before the first setMessages: user messages resolve their stored
-    // `personaId` against this roster, and one that arrives late would render
-    // the whole chat with letter avatars first.
-    bridge.setPersonaRoster(ref.read(personaListProvider).value ?? const []);
     bridge.setRegexContext(
       await _displayRegexes(),
       character,

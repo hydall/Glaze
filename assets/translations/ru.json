@@ -380,6 +380,7 @@
   "translation_not_configured": "Настройте движок перевода в настройках API.",
   "translation_failed": "Ошибка перевода: {}",
   "translation_input_empty": "Сначала введите сообщение для перевода.",
+  "send_blocked_while_editing": "Нельзя отправить новое сообщение во время редактирования старого.",
   "translation_provider": "Движок перевода",
   "translation_provider_desc": "Модель чата или отдельный сервис перевода.",
   "translation_provider_llm": "Модель чата (LLM)",
