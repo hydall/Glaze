@@ -909,29 +909,20 @@ void main() {
       expect(_asset('bridge.js'), contains('bridge.legacy.js'));
     });
 
-    test('identity refresh can override legacy default user name', () {
-      expect(
-        bridgeControllerJs,
-        contains("const storedPersonaName = stored === 'You' ? '' : stored"),
-      );
-      expect(
-        _asset('bridge.legacy.js'),
-        contains("const storedPersonaName = stored === 'You' ? '' : stored"),
-      );
-    });
-
-    // A user message carries the persona it was sent as, and the renderer
-    // stamps `data-avatar-pinned` on it. An identity push repaints every
-    // avatar in the DOM, so it has to leave those alone — otherwise switching
-    // persona re-faces the whole history, and a message from a deleted persona
-    // borrows the picture of whoever is active now.
-    test('identity refresh leaves a message-pinned avatar alone', () {
+    // Every user message wears the active persona: an identity push repaints
+    // the name and avatar of each user section from the active identity, with
+    // no per-message persona that could hold it back.
+    test('identity refresh re-faces every user message', () {
       for (final source in [bridgeControllerJs, _asset('bridge.legacy.js')]) {
+        expect(source, contains("? (this._personaName || 'You')"));
         expect(
           source,
-          contains("const pinned = section.dataset.avatarPinned === '1'"),
+          contains(
+            'const newAvatarUrl = isUser ? this._personaAvatarUrl '
+            ': this._charAvatarUrl;',
+          ),
         );
-        expect(source, contains('section.dataset.avatarUrl || null'));
+        expect(source, isNot(contains('avatarPinned')));
       }
     });
   });
