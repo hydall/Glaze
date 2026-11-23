@@ -1,0 +1,173 @@
+name: Promote nightly → stable
+
+# Promotes nightly to stable on a schedule, so stable does not sit for weeks
+# because nobody remembered to merge it.
+#
+# What gets promoted is not the tip of nightly but the newest commit on it that
+# has been there for at least `soak_hours` (default 72). That commit has had a
+# few days in nightly builds, which is the stand-in for the manual "installed it
+# and used it" gate in docs/WORKFLOW.md. Because the pick moves forward on every
+# run, a busy nightly that never stays quiet for three days still gets promoted.
+#
+# Flow: move the `auto/promote-stable` branch to the picked commit, open (or
+# reuse) a PR from it into stable, run CI on it, and merge the PR with a merge
+# commit once CI is green — the same shape as the hand-made promotion PRs.
+# Anything that stops the merge (red CI, a conflict with stable-only commits,
+# a required review) leaves the PR open and fails this run, so it shows up
+# in the Actions tab and in GitHub's failure email instead of silently stalling.
+#
+# Pause: set the repository variable AUTO_PROMOTE_PAUSED to `true` (Settings →
+# Secrets and variables → Actions → Variables). Scheduled runs then do nothing;
+# a manual run still works.
+#
+# Scheduled workflows only fire from the default branch, so this file has to be
+# on stable before the schedule takes effect.
+
+on:
+  schedule:
+    # Mondays, 15:17 UTC. Cron is UTC-only; the odd minute avoids the
+    # top-of-hour queue.
+    - cron: "17 15 * * 1"
+  workflow_dispatch:
+    inputs:
+      soak_hours:
+        description: "Only promote commits that have been on nightly at least this many hours (0 = the tip of nightly)"
+        required: false
+        default: "72"
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: promote-stable
+  cancel-in-progress: false
+
+env:
+  PROMOTE_BRANCH: auto/promote-stable
+
+jobs:
+  promote:
+    if: github.event_name == 'workflow_dispatch' || vars.AUTO_PROMOTE_PAUSED != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOAK_HOURS: ${{ inputs.soak_hours || '72' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pick the commit to promote
+        id: pick
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin nightly stable
+
+          if ! [[ "$SOAK_HOURS" =~ ^[0-9]+$ ]]; then
+            echo "::error::soak_hours must be a whole number, got '$SOAK_HOURS'"
+            exit 1
+          fi
+          cutoff=$(( $(date +%s) - SOAK_HOURS * 3600 ))
+
+          # First-parent history of nightly = one commit per merged PR. Take the
+          # newest one whose commit time is before the cutoff.
+          candidate=""
+          while read -r sha ts; do
+            if [ "$ts" -le "$cutoff" ]; then candidate="$sha"; break; fi
+          done < <(git log --first-parent --format='%H %ct' origin/nightly)
+
+          if [ -z "$candidate" ]; then
+            echo "Nothing on nightly is older than ${SOAK_HOURS}h."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git merge-base --is-ancestor "$candidate" origin/stable; then
+            echo "stable already contains $(git log -1 --format='%h %s' "$candidate")."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          count=$(git rev-list --count --first-parent origin/stable.."$candidate")
+          echo "Promoting $(git log -1 --format='%h %s' "$candidate") — $count change(s)."
+          {
+            echo "skip=false"
+            echo "sha=$candidate"
+            echo "short=$(git rev-parse --short "$candidate")"
+            echo "count=$count"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Move the promotion branch
+        if: steps.pick.outputs.skip == 'false'
+        run: git push --force origin "${{ steps.pick.outputs.sha }}:refs/heads/$PROMOTE_BRANCH"
+
+      - name: Open or update the PR
+        if: steps.pick.outputs.skip == 'false'
+        id: pr
+        run: |
+          set -euo pipefail
+          sha="${{ steps.pick.outputs.sha }}"
+          title="Merge nightly into stable ($(date -u +%Y-%m-%d), ${{ steps.pick.outputs.short }})"
+
+          {
+            echo "Automatic promotion of nightly up to \`${{ steps.pick.outputs.short }}\`,"
+            echo "the newest nightly commit that is at least ${SOAK_HOURS}h old."
+            echo
+            echo "## Changes"
+            echo
+            git log --first-parent --format='- %s' origin/stable.."$sha"
+            echo
+            echo "Opened by \`.github/workflows/promote-stable.yml\`; it merges this PR itself once CI is green."
+          } > body.md
+
+          number=$(gh pr list --head "$PROMOTE_BRANCH" --base stable --state open --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$title" --body-file body.md
+          else
+            gh pr create --head "$PROMOTE_BRANCH" --base stable --title "$title" --body-file body.md
+            number=$(gh pr list --head "$PROMOTE_BRANCH" --base stable --state open --json number --jq '.[0].number')
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "PR #$number"
+
+      - name: Run CI on the promoted commit
+        # A PR opened with the workflow token does not start pull_request
+        # workflows, so CI is dispatched on the branch instead. Its checks land
+        # on the same commit the PR points at.
+        if: steps.pick.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          sha="${{ steps.pick.outputs.sha }}"
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gh workflow run ci.yml --ref "$PROMOTE_BRANCH"
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            sleep 10
+            run_id=$(gh run list --workflow ci.yml --branch "$PROMOTE_BRANCH" \
+              --event workflow_dispatch --limit 5 \
+              --json databaseId,headSha,createdAt \
+              --jq "[.[] | select(.headSha == \"$sha\" and .createdAt >= \"$started\")][0].databaseId // empty")
+            [ -n "$run_id" ] && break
+          done
+          if [ -z "$run_id" ]; then
+            echo "::error::The CI run did not start."
+            exit 1
+          fi
+
+          echo "Watching CI run $run_id"
+          gh run watch "$run_id" --exit-status --interval 30 > /dev/null
+
+      - name: Merge
+        if: steps.pick.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          gh pr merge "${{ steps.pr.outputs.number }}" --merge \
+            --match-head-commit "${{ steps.pick.outputs.sha }}" --delete-branch
+          echo "Promoted ${{ steps.pick.outputs.count }} change(s) to stable in PR #${{ steps.pr.outputs.number }}." >> "$GITHUB_STEP_SUMMARY"

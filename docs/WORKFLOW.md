@@ -106,6 +106,33 @@ tests pass; only a build on a phone or desktop proves the app still works.
 When a promoted build turns out to be broken, revert the squashed commit of the
 offending feature on `nightly` and re-promote — that is what squash-merging buys.
 
+### Automatic promotion
+
+`.github/workflows/promote-stable.yml` does the promotion on a schedule (Mondays,
+15:17 UTC), so `stable` does not fall behind when nobody remembers to merge:
+
+- It picks the **newest `nightly` commit that is at least 72 hours old**, not the
+  tip. Those days in nightly builds stand in for the device check above, and the
+  pick moves forward every run, so a `nightly` that never stays quiet still gets
+  promoted.
+- It moves the `auto/promote-stable` branch to that commit, opens a PR into
+  `stable` (or updates the open one), dispatches CI on it, and merges the PR with
+  a merge commit once CI is green.
+- A red CI, a conflict with `stable`-only commits or a required review leaves the
+  PR open and fails the run — fix it by hand and merge, or let the next run retry.
+- **Pause** it by setting the repository variable `AUTO_PROMOTE_PAUSED` to
+  `true` (Settings → Secrets and variables → Actions → Variables) — for example
+  while a known-broken feature sits on `nightly`. A manual run still works and
+  takes a `soak_hours` input (`0` promotes the tip of `nightly`).
+- It only merges code. Publishing a release is still the manual
+  *Build Release (Publish)* workflow.
+
+Requirements: the schedule only fires once the workflow file is on `stable`
+(the default branch), and *Settings → Actions → General → Allow GitHub Actions
+to create and approve pull requests* must be on.
+
+Promoting by hand still works the same way:
+
 ```bash
 # nightly → stable (ship it)
 git checkout stable && git pull && git merge --no-ff nightly && git push
