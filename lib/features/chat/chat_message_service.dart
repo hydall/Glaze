@@ -369,13 +369,23 @@ class ChatMessageService {
     return durable?.messages ?? const [];
   }
 
-  ChatSession toggleMessageHidden(ChatSession session, int index) {
-    if (index < 0 || index >= session.messages.length) return session;
-    final newMessages = List<ChatMessage>.from(session.messages);
-    newMessages[index] = newMessages[index].copyWith(
-      isHidden: !newMessages[index].isHidden,
+  /// Sets [ChatMessage.isHidden] to [hidden] on every message whose id is in
+  /// [ids]. Returns [session] itself when nothing changes.
+  ChatSession setMessagesHidden(
+    ChatSession session,
+    Set<String> ids,
+    bool hidden,
+  ) {
+    final needsChange = session.messages.any(
+      (m) => ids.contains(m.id) && m.isHidden != hidden,
     );
-    return _persist(session, newMessages);
+    if (!needsChange) return session;
+    return session.copyWith(
+      messages: [
+        for (final m in session.messages)
+          ids.contains(m.id) ? m.copyWith(isHidden: hidden) : m,
+      ],
+    );
   }
 
   /// Flips [ChatMessage.imageHidden] for the message at [index]. The bubble

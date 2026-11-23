@@ -3704,6 +3704,7 @@
   "error_character_id_not_found": "Не удалось найти идентификатор персонажа в этой ссылке.",
   "error_handle_password_required": "Введите логин и пароль.",
   "error_token_required": "Вставьте bearer-токен.",
+  "error_hide_message_failed": "Не удалось скрыть сообщение: {error}",
   "error_delete_message_failed": "Не удалось удалить сообщение: {error}",
   "vector_error_rebuild_cancelled": "Переиндексация отменена.",
   "vector_error_rebuild_failed": "Переиндексация не удалась: {error}",

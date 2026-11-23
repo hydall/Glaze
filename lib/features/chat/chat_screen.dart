@@ -2514,12 +2514,16 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                       _webViewStateKey.currentState?.selectMessagesBelow();
                     },
                     onHideSelected: () async {
-                      await _selectionCtrl.hideSelected(
+                      // hideSelected drops the selection synchronously;
+                      // rebuild before awaiting so the toolbar closes on the
+                      // frame of the tap.
+                      final pending = _selectionCtrl.hideSelected(
                         ref,
                         widget.charId,
                         widget.state.messages,
                       );
-                      if (mounted) setState(() {});
+                      setState(() {});
+                      await pending;
                     },
                     onDeleteSelected: () async {
                       if (!await confirmMessageDeletion(

@@ -327,17 +327,59 @@ class ChatMessageOpsController {
   }
 
   Future<void> toggleMessageHidden(int index) async {
-    if (!_ref.mounted) return;
+    final messages = _getState().value?.session?.messages;
+    if (messages == null || index < 0 || index >= messages.length) return;
+    final message = messages[index];
+    await setMessagesHidden({message.id}, hidden: !message.isHidden);
+  }
+
+  /// Hides (or shows) every message in [ids] at once.
+  ///
+  /// Optimistic: the bubbles change on the frame of the tap and the whole set
+  /// goes to the database in one write. Sets the flag rather than flipping
+  /// it, so a selection that mixes hidden and shown messages ends up all
+  /// one way instead of swapping.
+  Future<void> setMessagesHidden(
+    Set<String> ids, {
+    required bool hidden,
+  }) async {
+    if (!_ref.mounted || ids.isEmpty) return;
     final current = _getState().value;
-    if (current == null || current.session == null) return;
+    final original = current?.session;
+    if (current == null || original == null) return;
+    final optimistic = _messageSvc.setMessagesHidden(original, ids, hidden);
+    if (identical(optimistic, original)) return;
+
     final token = _writes.beginPublication();
-    final updated = await _writes.run(
-      () => _messageSvc.commitMessageMutation(
-        current.session!,
-        index,
-        _messageSvc.toggleMessageHidden,
-      ),
-    );
+    ChatSessionService.updateCache(optimistic);
+    _setState(AsyncData(current.copyWith(session: optimistic)));
+    _invalidateHistory();
+    _dropTokenBreakdown();
+
+    final ChatSession updated;
+    try {
+      updated = await _writes.run(
+        () => _messageSvc.commitMessagesMutation(
+          original,
+          (latest) => _messageSvc.setMessagesHidden(latest, ids, hidden),
+        ),
+      );
+    } catch (e) {
+      debugPrint('[ChatMessageOps] hide failed, restoring messages: $e');
+      if (!_ref.mounted) return;
+      final after = _getState().value;
+      if (after != null && identical(after.session, optimistic)) {
+        ChatSessionService.updateCache(original);
+        _setState(AsyncData(after.copyWith(session: original)));
+        _invalidateHistory();
+      }
+      GlazeToast.showWithoutContext(
+        'error_hide_message_failed'.tr(namedArgs: {'error': '$e'}),
+        isError: true,
+        duration: 5000,
+      );
+      return;
+    }
     if (!_ref.mounted) return;
     _dropTokenBreakdown();
     _publish(updated, token: token);

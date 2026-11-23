@@ -1201,7 +1201,12 @@ class Bridge {
   }
 
   _executeUpdateMessage(msg) {
-    const section = document.querySelector(`[data-message-id="${msg.id}"]`);
+    // A row scrolled out of the virtual window is detached from the document
+    // but kept in `itemMap`; patch that element too, or the change (a hide, an
+    // edit) is lost and the row comes back stale when it scrolls into view.
+    const section = document.querySelector(`[data-message-id="${msg.id}"]`)
+      || this.virtualList?.itemMap?.get(msg.id)?.el
+      || null;
     if (!section) return;
 
     const animate = !!msg.swipeDirection;

@@ -129,6 +129,18 @@ no markdown pass anywhere that reads a string containing live HTML.
 
 ---
 
+## Updates reach rows outside the render window
+
+Only the rows around the viewport are in the document. Every other row keeps
+its element, detached, in `virtualList.itemMap`, and the list re-mounts that
+same element when it scrolls back into view. So a per-message patch
+(`updateMessage`) must find its row through `itemMap` when the document has no
+such node. Looking in the document alone skipped every row the reader had
+scrolled away from: hiding a long selection hid only the messages on screen.
+`specs/hide_offscreen.spec.js` holds this.
+
+---
+
 ## The render window is never allowed to leave the viewport
 
 The list is virtualised (`useVirtualScroll.js`): only a window of rows is
