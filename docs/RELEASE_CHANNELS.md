@@ -1,19 +1,18 @@
 # Release channels
 
 Two long-lived branches, one per build channel. The channel decides packaging
-— app identity, data folder, cloud root and update source — and the watermark
-default. It no longer decides whether developer mode is on.
+— app identity, data folder, cloud root and update source. It no longer decides
+whether developer mode is on or whether the build watermark is shown.
 
-| Branch    | Channel   | Dev mode default | Watermark default   | Audience              |
-|-----------|-----------|------------------|---------------------|-----------------------|
-| `stable`  | `stable`  | off              | on while beta       | public releases       |
-| `nightly` | `nightly` | off              | **on**              | daily internal builds |
-| any other | `nightly` | off              | **on**              | feature branches      |
+| Branch    | Channel   | Audience              |
+|-----------|-----------|-----------------------|
+| `stable`  | `stable`  | public releases       |
+| `nightly` | `nightly` | daily internal builds |
+| any other | `nightly` | feature branches      |
 
 Developer mode is hidden on every channel, local `flutter run` included, and is
 unlocked only through the 7-tap easter egg on the version badge in About. The
-build watermark is shown on every current version — `stable` only drops it once
-the app leaves beta, since a beta needs its screenshots identifiable.
+build watermark (version, branch, build date) is on by default everywhere.
 
 `stable` is the repository default branch. Branching and promotion rules live in
 [`WORKFLOW.md`](./WORKFLOW.md).
@@ -47,17 +46,20 @@ const isStableChannel = buildChannel == 'stable';
 The default is `nightly`, so a local `flutter run` — which never passes the
 define — is packaged like an internal build.
 
-## What the channel still controls
+## Dev mode and the watermark
 
-Of the two persisted settings in `lib/core/state/dev_mode_provider.dart`, only
-the watermark is channel-aware now:
+Neither depends on the channel any more, and there is no alpha/beta/release
+stage either — versions are plain calendar versions (`docs/WORKFLOW.md`
+§ Version numbers).
 
 ```dart
-// devModeProvider — hidden until unlocked in About, on every channel
+// devModeProvider (lib/core/state/dev_mode_provider.dart) — hidden until
+// unlocked in About, on every channel
 return prefs?.getBool(prefsKey) ?? false;
 
-// hideBuildWatermarkProvider (note: "hide") — only a non-beta stable hides it
-return prefs?.getBool(_prefsKey) ?? (isStableChannel && !isBetaVersion);
+// hideBuildWatermarkProvider (lib/core/state/build_watermark_provider.dart,
+// note: "hide") — shown on every channel
+return prefs?.getBool(_prefsKey) ?? false;
 ```
 
 - **Dev settings are opt-in everywhere.** The Dev group in
@@ -65,12 +67,10 @@ return prefs?.getBool(_prefsKey) ?? (isStableChannel && !isBetaVersion);
   only thing that flips it is tapping the version badge seven times in
   `lib/features/menu/about_screen.dart`. A nightly build looks exactly like a
   stable one until someone does that — no channel gives it away for free.
-- **The watermark ships on every current version.** `isBetaVersion` in
-  `lib/core/constants/app_version.dart` is a plain `const true` (it used to be
-  derived from a `0.x` version; calendar versions carry no such signal), so even
-  a stable build stamps its date and branch today. Flip it to `false` when the
-  app leaves beta and the stamp disappears from `stable`. Turning it off before
-  then means unlocking dev mode first.
+- **The watermark is a user setting.** It shows the version, branch and build
+  date, so any screenshot says which build it came from. It is on by default and
+  can be switched off in Settings → Appearance (`BuildWatermarkToggle`), behind
+  a warning that it is what makes support easier. It no longer needs dev mode.
 - **A user's own choice still wins.** Both values are persisted in
   `SharedPreferences`; the defaults above are only used when nothing has been
   stored yet, so an install that already toggled either setting keeps what it
@@ -217,8 +217,8 @@ trade rather than a gap worth closing.
    workflows (all three build jobs each) if it gets its own Dropbox app key,
    and to `_foreignChannelFolders` in `dropbox_adapter.dart` so a wipe from
    `stable` leaves it alone.
-4. If it needs dev-tooling behaviour that differs from the "hidden everywhere,
-   watermark everywhere" default, extend `build_channel.dart` — keep the derived
+4. If it needs dev-tooling behaviour that differs from the "dev mode hidden
+   everywhere" default, extend `build_channel.dart` — keep the derived
    flags `const` so they tree-shake.
 
 Do not read `buildChannel` directly in feature code; depend on the derived

@@ -11,6 +11,7 @@ import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../app_settings_provider.dart';
 import 'app_settings_behavior_groups.dart';
+import 'build_watermark_toggle.dart';
 import 'settings_group_base.dart';
 import 'settings_highlight.dart';
 import 'settings_pickers.dart';
@@ -121,6 +122,7 @@ class _AppearanceGroup extends SettingsGroup {
           onChanged: (v) =>
               notifierOf(ref).save(settings.copyWith(hideTooltips: !v)),
         ),
+        BuildWatermarkToggle(highlightId: highlightId),
         // Only where the screen turns: a desktop window has no rail.
         if (ScreenOrientation.isConfigurable)
           toggle(

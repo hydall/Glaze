@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants/app_version.dart';
-import '../../core/state/dev_mode_provider.dart';
+import '../../core/state/build_watermark_provider.dart';
 
 /// Persistent build watermark pinned to the bottom-right of the screen.
 ///
-/// Shows the build branch (when injected) above the build date, both aligned
-/// to the right edge. Visible by default everywhere except a `stable` build of
-/// a non-beta version; it follows [hideBuildWatermarkProvider], which can only
-/// be switched off from the Dev settings — and those need dev mode unlocked in
-/// About first. Must be placed as a direct child of a [Stack].
+/// Shows the app version, the build branch (when injected) and the build date,
+/// stacked and aligned to the right edge, so any screenshot says which build it
+/// came from. Visible by default on every channel; it follows
+/// [hideBuildWatermarkProvider], which the user can switch off in Settings →
+/// Appearance. Must be placed as a direct child of a [Stack].
 class BuildWatermark extends ConsumerWidget {
   const BuildWatermark({super.key});
 
@@ -47,12 +47,7 @@ class BuildWatermark extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                if (isBetaVersion)
-                  Text(
-                    'BETA',
-                    textAlign: TextAlign.right,
-                    style: style.copyWith(color: Colors.orange.withValues(alpha: 0.5)),
-                  ),
+                Text('v$appVersion', textAlign: TextAlign.right, style: style),
                 if (buildBranch.isNotEmpty)
                   Text(buildBranch, textAlign: TextAlign.right, style: style),
                 Text(_dateLabel, textAlign: TextAlign.right, style: style),
