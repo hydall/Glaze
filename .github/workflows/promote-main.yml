@@ -82,16 +82,31 @@ jobs:
             if [ "$ts" -le "$cutoff" ]; then candidate="$sha"; break; fi
           done < <(git log --first-parent --format='%H %ct' origin/nightly)
 
-          if [ -z "$candidate" ]; then
-            echo "Nothing on nightly is older than ${SOAK_HOURS}h."
+          # Every "nothing to do" exit below ends the run green, with a
+          # one-line reason in the run summary, and touches no branch or PR.
+          skip() {
+            echo "$1"
+            echo "Nothing promoted: $1" >> "$GITHUB_STEP_SUMMARY"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
+          }
+
+          if [ -z "$candidate" ]; then
+            skip "nothing on nightly is older than ${SOAK_HOURS}h."
           fi
 
+          # No PR merged into nightly since the last promotion.
           if git merge-base --is-ancestor "$candidate" origin/main; then
-            echo "main already contains $(git log -1 --format='%h %s' "$candidate")."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            skip "main already contains $(git log -1 --format='%h %s' "$candidate")."
+          fi
+
+          # New commits whose changes main already has (a fix that also went
+          # straight to main, a change and its revert): the merge would leave
+          # main's files exactly as they are, so it would be an empty promotion.
+          # A conflict makes merge-tree fail, which counts as a real change.
+          if merged_tree=$(git merge-tree --write-tree origin/main "$candidate" 2>/dev/null) \
+             && [ "$merged_tree" = "$(git rev-parse 'origin/main^{tree}')" ]; then
+            skip "the new nightly commits would not change any file on main."
           fi
 
           count=$(git rev-list --count --first-parent origin/main.."$candidate")
