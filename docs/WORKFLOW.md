@@ -9,18 +9,18 @@ The repository has two long-lived release branches, one per build channel:
 | Branch    | Channel   | Role                                    |
 |-----------|-----------|-----------------------------------------|
 | `nightly` | `nightly` | integration — where features land        |
-| `stable`  | `stable`  | public releases (default branch)         |
+| `main`    | `stable`  | public releases (default branch)         |
 
-Work flows upward, `nightly → stable`, by ordinary merges. The channel is
+Work flows upward, `nightly → main`, by ordinary merges. The channel is
 derived from the branch name at build time, so a commit picks up the right build
 settings automatically as it is promoted — see `docs/RELEASE_CHANNELS.md`.
 
 Each feature = a branch off `nightly`, pushed to `origin`, then a PR into
 upstream `hydall/Glaze:nightly`.
 
-- **Always base a feature branch on `nightly`** — never on `stable`, and never on whatever happened to be checked out. `stable` is the repository's *default* branch, so a fresh clone (and every agent session started from one) lands there: check the base before the first commit. If a branch was already cut from the wrong base, rebase it before opening the PR — `git fetch origin nightly && git rebase origin/nightly` — so the PR carries only its own commits.
-- **No direct commits to `nightly` or `stable`** — always use a feature branch.
-- **Never PR straight into `stable`** — features enter through `nightly` and are promoted.
+- **Always base a feature branch on `nightly`** — never on `main`, and never on whatever happened to be checked out. `main` is the repository's *default* branch, so a fresh clone (and every agent session started from one) lands there: check the base before the first commit. If a branch was already cut from the wrong base, rebase it before opening the PR — `git fetch origin nightly && git rebase origin/nightly` — so the PR carries only its own commits.
+- **No direct commits to `nightly` or `main`** — always use a feature branch.
+- **Never PR straight into `main`** — features enter through `nightly` and are promoted.
 - **Squash-merge every PR** — one feature = one commit on `nightly`, so a regression found later is a single `git revert <sha>` instead of untangling a range.
 - **CI must be green before merge** — see below.
 - **Stack while catching up** — if a feature depends on another not-yet-merged branch, branch off that branch instead of `nightly`.
@@ -58,7 +58,7 @@ Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use whatever is
 
 ## CI gate
 
-`.github/workflows/ci.yml` runs on every PR into `nightly` or `stable`:
+`.github/workflows/ci.yml` runs on every PR into `nightly` or `main`:
 `flutter analyze`, `flutter test`, and the WebView render suite
 (`test/webview_js` — Node + Playwright, no Flutter). A red check means the PR
 is not merged — no exceptions, no "it works on my machine".
@@ -93,32 +93,32 @@ skipped or forgotten.
 
 ## Promoting a release
 
-Promotion is a merge, not a PR. A `nightly → stable` diff is an aggregate of many
+Promotion is a merge, not a PR. A `nightly → main` diff is an aggregate of many
 features that nobody reads; opening a PR for it adds ceremony without adding a
 check.
 
-**`nightly → stable` is gated on a real device, not on the diff.** Promote only
+**`nightly → main` is gated on a real device, not on the diff.** Promote only
 after a build of `nightly` (the *Build (Branch)* workflow) has been installed and
 actually used, and nothing obvious is broken. CI proves the code compiles and the
 tests pass; only a build on a phone or desktop proves the app still works.
-`stable` means "that held up".
+`main` means "that held up".
 
 When a promoted build turns out to be broken, revert the squashed commit of the
 offending feature on `nightly` and re-promote — that is what squash-merging buys.
 
 ### Automatic promotion
 
-`.github/workflows/promote-stable.yml` does the promotion on a schedule (Wednesdays,
-12:00 Moscow / 09:00 UTC), so `stable` does not fall behind when nobody remembers to merge:
+`.github/workflows/promote-main.yml` does the promotion on a schedule (Wednesdays,
+12:00 Moscow / 09:00 UTC), so `main` does not fall behind when nobody remembers to merge:
 
 - It picks the **newest `nightly` commit that is at least 72 hours old**, not the
   tip. Those days in nightly builds stand in for the device check above, and the
   pick moves forward every run, so a `nightly` that never stays quiet still gets
   promoted.
-- It moves the `auto/promote-stable` branch to that commit, opens a PR into
-  `stable` (or updates the open one), dispatches CI on it, and merges the PR with
+- It moves the `auto/promote-main` branch to that commit, opens a PR into
+  `main` (or updates the open one), dispatches CI on it, and merges the PR with
   a merge commit once CI is green.
-- A red CI, a conflict with `stable`-only commits or a required review leaves the
+- A red CI, a conflict with `main`-only commits or a required review leaves the
   PR open and fails the run — fix it by hand and merge, or let the next run retry.
 - **Pause** it by setting the repository variable `AUTO_PROMOTE_PAUSED` to
   `true` (Settings → Secrets and variables → Actions → Variables) — for example
@@ -127,15 +127,15 @@ offending feature on `nightly` and re-promote — that is what squash-merging bu
 - It only merges code. Publishing a release is still the manual
   *Build Release (Publish)* workflow.
 
-Requirements: the schedule only fires once the workflow file is on `stable`
+Requirements: the schedule only fires once the workflow file is on `main`
 (the default branch), and *Settings → Actions → General → Allow GitHub Actions
 to create and approve pull requests* must be on.
 
 Promoting by hand still works the same way:
 
 ```bash
-# nightly → stable (ship it)
-git checkout stable && git pull && git merge --no-ff nightly && git push
+# nightly → main (ship it)
+git checkout main && git pull && git merge --no-ff nightly && git push
 ```
 
 ## Version numbers
@@ -158,7 +158,7 @@ the release tags (`v26.11.1`, …):
   `pubspec.yaml` is a placeholder that only local builds show.
 
 Every published release takes a number, a nightly pre-release included, so the
-numbers seen on `stable` can skip.
+numbers seen on `main` can skip.
 
 The old `0.x` tags do not match the scheme and are ignored; `26.11.1` compares
 as newer than `0.10.1`, so existing installs see it as an update.

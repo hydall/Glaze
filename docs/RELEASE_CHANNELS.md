@@ -6,15 +6,18 @@ whether developer mode is on or whether the build watermark is shown.
 
 | Branch    | Channel   | Audience              |
 |-----------|-----------|-----------------------|
-| `stable`  | `stable`  | public releases       |
+| `main`    | `stable`  | public releases       |
 | `nightly` | `nightly` | daily internal builds |
 | any other | `nightly` | feature branches      |
 
 Developer mode is hidden on every channel, local `flutter run` included, and is
 unlocked only through the 7-tap easter egg on the version badge in About. The
-build watermark (version, branch, build date) is on by default everywhere.
+build watermark (version, build date, and the branch on non-`main` builds) is
+on by default everywhere.
 
-`stable` is the repository default branch. Branching and promotion rules live in
+`main` is the repository default branch. It used to be called `stable`; the
+branch was renamed, the channel kept its name, because the channel id is baked
+into installed apps (package ids, data folders, the Windows installer). Branching and promotion rules live in
 [`WORKFLOW.md`](./WORKFLOW.md).
 
 ## How the channel reaches the app
@@ -24,7 +27,7 @@ compile-time define (`.github/workflows/build-branch.yml`, `metadata` job):
 
 ```bash
 case "$BUILD_BRANCH" in
-  stable)  BUILD_CHANNEL=stable  ;;
+  main)    BUILD_CHANNEL=stable  ;;
   *)       BUILD_CHANNEL=nightly ;;
 esac
 ```

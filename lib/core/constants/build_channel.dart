@@ -5,7 +5,7 @@
 ///
 /// | branch        | channel   |
 /// |---------------|-----------|
-/// | `stable`      | `stable`  |
+/// | `main`        | `stable`  |
 /// | `nightly`     | `nightly` |
 /// | anything else | `nightly` |
 ///

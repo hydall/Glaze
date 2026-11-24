@@ -1,6 +1,6 @@
-name: Promote nightly → stable
+name: Promote nightly → main
 
-# Promotes nightly to stable on a schedule, so stable does not sit for weeks
+# Promotes nightly to main (the stable channel) on a schedule, so it does not sit for weeks
 # because nobody remembered to merge it.
 #
 # What gets promoted is not the tip of nightly but the newest commit on it that
@@ -9,10 +9,10 @@ name: Promote nightly → stable
 # and used it" gate in docs/WORKFLOW.md. Because the pick moves forward on every
 # run, a busy nightly that never stays quiet for three days still gets promoted.
 #
-# Flow: move the `auto/promote-stable` branch to the picked commit, open (or
-# reuse) a PR from it into stable, run CI on it, and merge the PR with a merge
+# Flow: move the `auto/promote-main` branch to the picked commit, open (or
+# reuse) a PR from it into main, run CI on it, and merge the PR with a merge
 # commit once CI is green — the same shape as the hand-made promotion PRs.
-# Anything that stops the merge (red CI, a conflict with stable-only commits,
+# Anything that stops the merge (red CI, a conflict with main-only commits,
 # a required review) leaves the PR open and fails this run, so it shows up
 # in the Actions tab and in GitHub's failure email instead of silently stalling.
 #
@@ -21,7 +21,7 @@ name: Promote nightly → stable
 # a manual run still works.
 #
 # Scheduled workflows only fire from the default branch, so this file has to be
-# on stable before the schedule takes effect.
+# on main before the schedule takes effect.
 
 on:
   schedule:
@@ -42,11 +42,11 @@ permissions:
   actions: write
 
 concurrency:
-  group: promote-stable
+  group: promote-main
   cancel-in-progress: false
 
 env:
-  PROMOTE_BRANCH: auto/promote-stable
+  PROMOTE_BRANCH: auto/promote-main
 
 jobs:
   promote:
@@ -67,7 +67,7 @@ jobs:
         id: pick
         run: |
           set -euo pipefail
-          git fetch --no-tags origin nightly stable
+          git fetch --no-tags origin nightly main
 
           if ! [[ "$SOAK_HOURS" =~ ^[0-9]+$ ]]; then
             echo "::error::soak_hours must be a whole number, got '$SOAK_HOURS'"
@@ -88,13 +88,13 @@ jobs:
             exit 0
           fi
 
-          if git merge-base --is-ancestor "$candidate" origin/stable; then
-            echo "stable already contains $(git log -1 --format='%h %s' "$candidate")."
+          if git merge-base --is-ancestor "$candidate" origin/main; then
+            echo "main already contains $(git log -1 --format='%h %s' "$candidate")."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          count=$(git rev-list --count --first-parent origin/stable.."$candidate")
+          count=$(git rev-list --count --first-parent origin/main.."$candidate")
           echo "Promoting $(git log -1 --format='%h %s' "$candidate") — $count change(s)."
           {
             echo "skip=false"
@@ -113,7 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           sha="${{ steps.pick.outputs.sha }}"
-          title="Merge nightly into stable ($(date -u +%Y-%m-%d), ${{ steps.pick.outputs.short }})"
+          title="Merge nightly into main ($(date -u +%Y-%m-%d), ${{ steps.pick.outputs.short }})"
 
           {
             echo "Automatic promotion of nightly up to \`${{ steps.pick.outputs.short }}\`,"
@@ -121,17 +121,17 @@ jobs:
             echo
             echo "## Changes"
             echo
-            git log --first-parent --format='- %s' origin/stable.."$sha"
+            git log --first-parent --format='- %s' origin/main.."$sha"
             echo
-            echo "Opened by \`.github/workflows/promote-stable.yml\`; it merges this PR itself once CI is green."
+            echo "Opened by \`.github/workflows/promote-main.yml\`; it merges this PR itself once CI is green."
           } > body.md
 
-          number=$(gh pr list --head "$PROMOTE_BRANCH" --base stable --state open --json number --jq '.[0].number // empty')
+          number=$(gh pr list --head "$PROMOTE_BRANCH" --base main --state open --json number --jq '.[0].number // empty')
           if [ -n "$number" ]; then
             gh pr edit "$number" --title "$title" --body-file body.md
           else
-            gh pr create --head "$PROMOTE_BRANCH" --base stable --title "$title" --body-file body.md
-            number=$(gh pr list --head "$PROMOTE_BRANCH" --base stable --state open --json number --jq '.[0].number')
+            gh pr create --head "$PROMOTE_BRANCH" --base main --title "$title" --body-file body.md
+            number=$(gh pr list --head "$PROMOTE_BRANCH" --base main --state open --json number --jq '.[0].number')
           fi
           echo "number=$number" >> "$GITHUB_OUTPUT"
           echo "PR #$number"
@@ -170,4 +170,4 @@ jobs:
           set -euo pipefail
           gh pr merge "${{ steps.pr.outputs.number }}" --merge \
             --match-head-commit "${{ steps.pick.outputs.sha }}" --delete-branch
-          echo "Promoted ${{ steps.pick.outputs.count }} change(s) to stable in PR #${{ steps.pr.outputs.number }}." >> "$GITHUB_STEP_SUMMARY"
+          echo "Promoted ${{ steps.pick.outputs.count }} change(s) to main in PR #${{ steps.pr.outputs.number }}." >> "$GITHUB_STEP_SUMMARY"

@@ -6,9 +6,9 @@ import '../../core/state/build_watermark_provider.dart';
 
 /// Persistent build watermark pinned to the bottom-right of the screen.
 ///
-/// Shows the app version, the build branch (when injected) and the build date,
-/// stacked and aligned to the right edge, so any screenshot says which build it
-/// came from. Visible by default on every channel; it follows
+/// Shows the app version, the build branch (nightly and feature builds only)
+/// and the build date, stacked and aligned to the right edge, so any screenshot
+/// says which build it came from. Visible by default on every channel; it follows
 /// [hideBuildWatermarkProvider], which the user can switch off in Settings →
 /// Appearance. Must be placed as a direct child of a [Stack].
 class BuildWatermark extends ConsumerWidget {
@@ -48,7 +48,7 @@ class BuildWatermark extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text('v$appVersion', textAlign: TextAlign.right, style: style),
-                if (buildBranch.isNotEmpty)
+                if (showBuildBranch)
                   Text(buildBranch, textAlign: TextAlign.right, style: style),
                 Text(_dateLabel, textAlign: TextAlign.right, style: style),
               ],

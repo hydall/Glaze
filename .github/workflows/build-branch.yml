@@ -106,10 +106,10 @@ jobs:
 
           # Release channel drives the in-app dev-tooling defaults (developer
           # mode + build watermark) via --dart-define=BUILD_CHANNEL. Only the
-          # stable branch gets a non-nightly channel; every other branch builds
+          # main branch gets the stable channel; every other branch builds
           # as nightly, i.e. with dev tooling on.
           case "$BUILD_BRANCH" in
-            stable)  BUILD_CHANNEL=stable  ;;
+            main)    BUILD_CHANNEL=stable  ;;
             *)       BUILD_CHANNEL=nightly ;;
           esac
 

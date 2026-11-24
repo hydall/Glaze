@@ -101,7 +101,7 @@ jobs:
           FILE_SLUG="G-$(date -u '+%d%m%Y-%H%M')-$SAFE_BRANCH"
 
           case "$BUILD_BRANCH" in
-            stable)  BUILD_CHANNEL=stable  ;;
+            main)    BUILD_CHANNEL=stable  ;;
             *)       BUILD_CHANNEL=nightly ;;
           esac
 
