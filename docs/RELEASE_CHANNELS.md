@@ -6,14 +6,14 @@ default. It no longer decides whether developer mode is on.
 
 | Branch    | Channel   | Dev mode default | Watermark default   | Audience              |
 |-----------|-----------|------------------|---------------------|-----------------------|
-| `stable`  | `stable`  | off              | on while `0.x`      | public releases       |
+| `stable`  | `stable`  | off              | on while beta       | public releases       |
 | `nightly` | `nightly` | off              | **on**              | daily internal builds |
 | any other | `nightly` | off              | **on**              | feature branches      |
 
 Developer mode is hidden on every channel, local `flutter run` included, and is
 unlocked only through the 7-tap easter egg on the version badge in About. The
 build watermark is shown on every current version — `stable` only drops it once
-the app leaves `0.x`, since a beta needs its screenshots identifiable.
+the app leaves beta, since a beta needs its screenshots identifiable.
 
 `stable` is the repository default branch. Branching and promotion rules live in
 [`WORKFLOW.md`](./WORKFLOW.md).
@@ -65,10 +65,12 @@ return prefs?.getBool(_prefsKey) ?? (isStableChannel && !isBetaVersion);
   only thing that flips it is tapping the version badge seven times in
   `lib/features/menu/about_screen.dart`. A nightly build looks exactly like a
   stable one until someone does that — no channel gives it away for free.
-- **The watermark ships on every current version.** `isBetaVersion` is true for
-  the whole `0.x` line (`lib/core/constants/app_version.dart`), so even a stable
-  build stamps its date and branch today; the stamp disappears from `stable` on
-  its own at `1.0`. Turning it off before then means unlocking dev mode first.
+- **The watermark ships on every current version.** `isBetaVersion` in
+  `lib/core/constants/app_version.dart` is a plain `const true` (it used to be
+  derived from a `0.x` version; calendar versions carry no such signal), so even
+  a stable build stamps its date and branch today. Flip it to `false` when the
+  app leaves beta and the stamp disappears from `stable`. Turning it off before
+  then means unlocking dev mode first.
 - **A user's own choice still wins.** Both values are persisted in
   `SharedPreferences`; the defaults above are only used when nothing has been
   stored yet, so an install that already toggled either setting keeps what it

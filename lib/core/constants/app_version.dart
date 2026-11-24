@@ -1,6 +1,11 @@
+/// Release version, `YY.M.N` (year, month, release number in that month).
+///
+/// CI computes it from the release tags (`.github/scripts/calver.sh`) and
+/// passes it in; it is never bumped by hand. The default only shows in local
+/// builds.
 const appVersion = String.fromEnvironment(
   'APP_VERSION',
-  defaultValue: '0.10.1',
+  defaultValue: '26.11.0',
 );
 const buildDate = String.fromEnvironment('BUILD_DATE');
 const buildBranch = String.fromEnvironment('BUILD_BRANCH');
@@ -10,9 +15,10 @@ const buildBranch = String.fromEnvironment('BUILD_BRANCH');
 /// case the update checker cannot diff against the latest CI build.
 const buildCommit = String.fromEnvironment('BUILD_COMMIT');
 
-bool get isBetaVersion {
-  final parts = appVersion.split('.');
-  if (parts.isEmpty) return false;
-  final major = int.tryParse(parts.first);
-  return major != null && major == 0;
-}
+/// Whether the app still presents itself as a beta: the badge in About and the
+/// build watermark on by default, `stable` included.
+///
+/// This used to be derived from a `0.x` version. Calendar versions carry no
+/// such signal, so it is a plain switch now — set it to `false` when the app
+/// leaves beta.
+const isBetaVersion = true;

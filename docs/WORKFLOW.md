@@ -138,6 +138,31 @@ Promoting by hand still works the same way:
 git checkout stable && git pull && git merge --no-ff nightly && git push
 ```
 
+## Version numbers
+
+Versions are `YY.M.N`: two-digit year, month without a leading zero, and the
+number of the release within that month, from 1. A hotfix is just the next
+release — `26.11.1`, then `26.11.2`; December starts again at `26.12.1`. Always
+three numbers, because iOS accepts no more.
+
+Nobody bumps the version by hand. `.github/scripts/calver.sh` derives it from
+the release tags (`v26.11.1`, …):
+
+- *Build Release (Publish)* takes the next free number of the current month and
+  tags the release with it. A tag typed into the `tag_name` input wins.
+- *Build (Branch)* carries the newest released version; the watermark's date,
+  branch and commit tell those builds apart.
+- Each build job writes the version into `pubspec.yaml` for that build only
+  (`.github/scripts/stamp_version.sh`), so `flutter build`, the Linux packages and
+  the Windows installer all pick it up. The `version:` in the committed
+  `pubspec.yaml` is a placeholder that only local builds show.
+
+Every published release takes a number, a nightly pre-release included, so the
+numbers seen on `stable` can skip.
+
+The old `0.x` tags do not match the scheme and are ignored; `26.11.1` compares
+as newer than `0.10.1`, so existing installs see it as an update.
+
 ## Build distribution
 
 Two manual workflows produce installable builds. Both are started from the
