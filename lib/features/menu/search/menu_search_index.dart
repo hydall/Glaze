@@ -95,6 +95,14 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       const ['tooltips', 'hints', 'подсказки'],
       groupKey: 'settings_group_appearance',
     ),
+    row(
+      'show_build_watermark',
+      'menu_show_build_watermark',
+      'desc_show_build_watermark',
+      Icons.bug_report_outlined,
+      const ['watermark', 'version', 'build', 'вотермарка', 'водяной знак', 'версия', 'сборка'],
+      groupKey: 'settings_group_appearance',
+    ),
     if (ScreenOrientation.isConfigurable)
       row(
         'nav_rail_left',

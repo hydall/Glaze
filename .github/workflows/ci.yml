@@ -12,7 +12,7 @@ on:
   pull_request:
     branches:
       - nightly
-      - stable
+      - main
   workflow_dispatch:
 
 # A new push to the PR branch makes the in-flight run pointless.

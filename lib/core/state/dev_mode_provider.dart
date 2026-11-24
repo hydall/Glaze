@@ -1,7 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../constants/app_version.dart';
-import '../constants/build_channel.dart';
 import 'shared_prefs_provider.dart';
 
 /// Whether developer mode (hidden dev tools / settings) is unlocked.
@@ -32,36 +30,6 @@ class DevModeNotifier extends Notifier<bool> {
     state = value;
     final prefs = await ref.read(sharedPreferencesProvider.future);
     await prefs.setBool(prefsKey, value);
-  }
-
-  Future<void> toggle() => set(!state);
-}
-
-/// Dev setting: hide the build-date watermark pinned to the bottom-right
-/// corner of the screen.
-///
-/// Visible by default everywhere except a `stable` build of a non-beta
-/// version — while the app is on a `0.x` version even stable ships the build
-/// stamp, because that is what makes a bug report identifiable. Hiding it is a
-/// dev setting, so it takes unlocking dev mode in About first.
-final hideBuildWatermarkProvider =
-    NotifierProvider<HideBuildWatermarkNotifier, bool>(
-  HideBuildWatermarkNotifier.new,
-);
-
-class HideBuildWatermarkNotifier extends Notifier<bool> {
-  static const _prefsKey = 'hideBuildWatermark';
-
-  @override
-  bool build() {
-    final prefs = ref.watch(sharedPreferencesProvider).value;
-    return prefs?.getBool(_prefsKey) ?? (isStableChannel && !isBetaVersion);
-  }
-
-  Future<void> set(bool value) async {
-    state = value;
-    final prefs = await ref.read(sharedPreferencesProvider.future);
-    await prefs.setBool(_prefsKey, value);
   }
 
   Future<void> toggle() => set(!state);
