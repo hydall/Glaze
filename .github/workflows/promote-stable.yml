@@ -25,9 +25,9 @@ name: Promote nightly → stable
 
 on:
   schedule:
-    # Saturdays, 06:17 UTC (09:17 Moscow). Cron is UTC-only; the odd minute avoids the
-    # top-of-hour queue.
-    - cron: "17 6 * * 6"
+    # Wednesdays, 09:00 UTC = 12:00 Moscow. Cron is UTC-only; GitHub may start
+    # an on-the-hour run a few minutes late.
+    - cron: "0 9 * * 3"
   workflow_dispatch:
     inputs:
       soak_hours:

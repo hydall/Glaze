@@ -108,8 +108,8 @@ offending feature on `nightly` and re-promote — that is what squash-merging bu
 
 ### Automatic promotion
 
-`.github/workflows/promote-stable.yml` does the promotion on a schedule (Saturdays,
-06:17 UTC), so `stable` does not fall behind when nobody remembers to merge:
+`.github/workflows/promote-stable.yml` does the promotion on a schedule (Wednesdays,
+12:00 Moscow / 09:00 UTC), so `stable` does not fall behind when nobody remembers to merge:
 
 - It picks the **newest `nightly` commit that is at least 72 hours old**, not the
   tip. Those days in nightly builds stand in for the device check above, and the
