@@ -1,16 +1,17 @@
 name: Release article (site, Discord, Telegram)
 
 # After a release is published from `main`, writes its changelog article on the
-# site, deploys the site, and posts the release to the Discord and Telegram
-# channels:
+# site, deploys the site, and posts the release to the Discord channel (in
+# English) and the Telegram channel (in Russian):
 #
 #   **Glaze** `26.11.1`
 #
-#   СКАЧАТЬ                         → the site's download page
+#   DOWNLOAD / СКАЧАТЬ                          → the site's download page
 #
-#   СТАТЬЯ С ОПИСАНИЕМ РЕЛИЗА       → the article (its preview card shows)
+#   RELEASE NOTES / СТАТЬЯ С ОПИСАНИЕМ РЕЛИЗА   → the article (its preview card shows)
 #
-#   Релиз был сделан автоматически… (only for releases made by auto-release.yml)
+#   This release was made automatically… / Релиз был сделан автоматически…
+#   (only for releases made by auto-release.yml)
 #
 # - The article (Russian + English), the roadmap entry and the link-preview
 #   cover are written by .github/scripts/release_article.py, which asks the

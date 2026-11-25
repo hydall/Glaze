@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# Posts a release to the Telegram channel and the Discord channel:
+# Posts a release to the Telegram channel (in Russian) and the Discord channel
+# (in English):
 #
 #   **Glaze** `26.11.1`
 #
-#   СКАЧАТЬ                     (link: the site's download page)
+#   СКАЧАТЬ / DOWNLOAD                          (link: the site's download page)
 #
-#   СТАТЬЯ С ОПИСАНИЕМ РЕЛИЗА   (link: the release article, whose card shows)
+#   СТАТЬЯ С ОПИСАНИЕМ РЕЛИЗА / RELEASE NOTES   (link: the release article,
+#                                                whose card shows)
 #
-#   Релиз был сделан автоматически на основе ветки main с GitHub
-#   (за исключением изменений за последние 24 часа)        — only when AUTO=true
+#   Релиз был сделан автоматически… /
+#   This release was made automatically…        — only when AUTO=true
 #
-# In Discord the text is an embed with the article's cover, and the message
-# body pings the release role.
+# The links are the same in both: the site sends Russian readers on to its
+# Russian page by itself. In Discord the text is an embed with the article's
+# cover, and the message body pings the release role.
 #
 # Used by .github/workflows/release-article.yml once the article is deployed.
 #
@@ -36,7 +39,8 @@ SITE_URL="${SITE_URL:-https://hydall.github.io/Glaze}"
 DOWNLOAD_URL="$SITE_URL/#download"
 # The article's static page: it carries the preview card (title, cover).
 ARTICLE_URL="$SITE_URL/articles/$VERSION/"
-AUTO_LINE="Релиз был сделан автоматически на основе ветки main с GitHub (за исключением изменений за последние 24 часа)"
+AUTO_LINE_RU="Релиз был сделан автоматически на основе ветки main с GitHub (за исключением изменений за последние 24 часа)"
+AUTO_LINE_EN="This release was made automatically from the main branch on GitHub (leaving out the changes of the last 24 hours)"
 
 failed=0
 
@@ -45,7 +49,7 @@ if [ -z "${TG_BOT_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
   echo "::warning::TG_BOT_TOKEN / TG_RELEASE_CHAT_ID are not set, Telegram skipped."
 else
   text="<b>Glaze</b> <code>$VERSION</code>"$'\n\n'"<a href=\"$DOWNLOAD_URL\">СКАЧАТЬ</a>"$'\n\n'"<a href=\"$ARTICLE_URL\">СТАТЬЯ С ОПИСАНИЕМ РЕЛИЗА</a>"
-  [ "${AUTO:-false}" = "true" ] && text="$text"$'\n\n'"$AUTO_LINE"
+  [ "${AUTO:-false}" = "true" ] && text="$text"$'\n\n'"$AUTO_LINE_RU"
   payload=$(jq -n --arg cid "$TG_CHAT" --arg tid "${TG_TOPIC:-}" --arg text "$text" --arg url "$ARTICLE_URL" \
     '{chat_id: $cid, text: $text, parse_mode: "HTML",
       link_preview_options: {url: $url, prefer_large_media: true}}
@@ -61,15 +65,15 @@ else
 fi
 
 # ── Discord ──────────────────────────────────────────────────────────────────
-# An embed carrying the same text, with the article's cover as its picture.
+# An embed carrying the same text in English, with the article's cover as its picture.
 # The role ping goes in the message body: a mention inside an embed notifies
 # nobody.
 if [ -z "${DISCORD_WEBHOOK:-}" ]; then
   echo "::warning::DISCORD_RELEASE_WEBHOOK is not set, Discord skipped."
 else
   role="${DISCORD_ROLE_ID:-1485034784135708734}"
-  desc="**Glaze** \`$VERSION\`"$'\n\n'"[СКАЧАТЬ]($DOWNLOAD_URL)"$'\n\n'"[СТАТЬЯ С ОПИСАНИЕМ РЕЛИЗА]($ARTICLE_URL)"
-  [ "${AUTO:-false}" = "true" ] && desc="$desc"$'\n\n'"$AUTO_LINE"
+  desc="**Glaze** \`$VERSION\`"$'\n\n'"[DOWNLOAD]($DOWNLOAD_URL)"$'\n\n'"[RELEASE NOTES]($ARTICLE_URL)"
+  [ "${AUTO:-false}" = "true" ] && desc="$desc"$'\n\n'"$AUTO_LINE_EN"
   payload=$(jq -n --arg role "$role" --arg desc "$desc" --arg url "$ARTICLE_URL" \
     --arg img "${ARTICLE_URL}og.png" \
     '{username: "Glaze",
