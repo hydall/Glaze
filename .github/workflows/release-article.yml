@@ -176,7 +176,9 @@ jobs:
           exit 1
 
       - name: Deploy the site
-        if: steps.rel.outputs.skip == 'false' && steps.rel.outputs.exists == 'false'
+        # Always, not only after writing: a re-run or a manual re-post of an
+        # existing article then also fixes a deploy that failed last time.
+        if: steps.rel.outputs.skip == 'false'
         run: |
           set -euo pipefail
           started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -196,9 +198,12 @@ jobs:
           gh run watch "$run_id" --exit-status --interval 20 > /dev/null
 
       - name: Post
+        # A re-run (attempt 2+) posts too: the first attempt may have written
+        # the article and then failed before posting.
         if: >-
           steps.rel.outputs.skip == 'false' &&
-          ((github.event_name == 'workflow_run' && steps.rel.outputs.exists == 'false') ||
+          ((github.event_name == 'workflow_run' &&
+            (steps.rel.outputs.exists == 'false' || github.run_attempt > 1)) ||
            (github.event_name == 'workflow_dispatch' && inputs.post))
         env:
           VERSION: ${{ steps.rel.outputs.version }}
