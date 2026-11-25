@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.first_try.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
@@ -33,5 +33,15 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      # deploy-pages sometimes finds no artifact right after the upload ("No
+      # artifacts named github-pages were found"), although it is there. One
+      # retry after a pause, instead of a red run and a site left stale.
+      - id: first_try
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - name: Wait before retrying the deploy
+        if: steps.first_try.outcome == 'failure'
+        run: sleep 45
       - id: deployment
+        if: steps.first_try.outcome == 'failure'
         uses: actions/deploy-pages@v4
