@@ -20,6 +20,10 @@ name: Release article (site, Discord, Telegram)
 #     link goes to. Unset = Discord is skipped with a warning.
 #   RELEASE_POST_LANG (var): ru (default), en or both — language of the posts.
 #
+# Off by default: after a release nothing happens until the repository
+# variable RELEASE_ARTICLE_AUTO is `true`. A manual run (Actions → this
+# workflow → Run workflow) works either way, with or without posting.
+#
 # workflow_run workflows run from the default branch, so this file has to be on
 # `main`.
 
@@ -51,9 +55,12 @@ concurrency:
 jobs:
   article:
     # Only releases built from main; pre-releases from nightly get no article.
+    # The automatic run is off until the repository variable
+    # RELEASE_ARTICLE_AUTO is set to `true`; a manual run always works.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
+      (vars.RELEASE_ARTICLE_AUTO == 'true' &&
+       github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 40

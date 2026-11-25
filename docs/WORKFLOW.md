@@ -128,7 +128,8 @@ offending feature on `nightly` and re-promote — that is what squash-merging bu
   promotion is a release (next `YY.M.N`), and the release's article and posts
   follow on their own (§ Release article). A week with nothing to promote makes
   no release. `AUTO_RELEASE=false` (repository variable) keeps the merge and
-  skips the release.
+  skips the release. The article and posts after it only run while
+  `RELEASE_ARTICLE_AUTO` is `true`.
 
 Requirements: the schedule only fires once the workflow file is on `main`
 (the default branch), and *Settings → Actions → General → Allow GitHub Actions
@@ -225,7 +226,12 @@ announcement.
 ## Release article
 
 Once *Build Release (Publish)* finishes on `main`,
-`.github/workflows/release-article.yml` announces the release:
+`.github/workflows/release-article.yml` announces the release.
+
+**Off for now:** the automatic run only happens when the repository variable
+`RELEASE_ARTICLE_AUTO` is `true`. Until then releases get no article and no
+posts; the workflow can still be run by hand for a given tag.
+
 
 - `.github/scripts/release_article.py` collects the PRs since the previous
   stable release (with their descriptions) and has the DeepSeek model the
