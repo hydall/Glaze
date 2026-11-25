@@ -222,6 +222,9 @@ announces it (started by `auto-release.yml` for its releases, by its own
   (за исключением изменений за последние 24 часа)   ← auto-releases only
   ```
 
+  In Discord the text goes in an embed with the article's cover, and the
+  message body pings the release role (`DISCORD_ROLE_ID` in
+  `post_release.sh`, overridable by the env var of the same name).
 - It runs once per release. Pre-releases get nothing. To fix an article, edit
   the files on `main`; to post a release again, run the workflow by hand with
   its tag.
