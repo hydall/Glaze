@@ -49,15 +49,20 @@ class _GlassNavBarState extends ConsumerState<GlassNavBar> {
 
     final row = Padding(
       padding: const EdgeInsets.symmetric(vertical: 7),
+      // Every tab takes an equal share of the bar, so a long label or a
+      // large system font can never push the tabs past the right edge.
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: _buttons(
-          context,
-          ref,
-          currentIndex: widget.currentIndex,
-          onTap: widget.onTap,
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-        ),
+        children: [
+          for (final button in _buttons(
+            context,
+            ref,
+            currentIndex: widget.currentIndex,
+            onTap: widget.onTap,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            expand: true,
+          ))
+            Expanded(child: button),
+        ],
       ),
     );
 

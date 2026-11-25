@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 import '../utils/error_format.dart';
@@ -118,6 +119,54 @@ class _Entry {
   _Entry(this.createdAt, this.vector);
 }
 
+/// One embedding HTTP call, timed for the session log: how long it queued in
+/// [EmbeddingRequestRateLimiter], how long the request itself took, and how
+/// long this service's HTTP client had been idle before it (a connection left over from
+/// before a long idle stretch is the suspect when a request hangs).
+///
+/// Foreground calls — a generation is waiting on them — are always logged;
+/// background indexing only when slow or failed, so a long chat's indexing
+/// does not flood the log.
+class _EmbeddingRequestTiming {
+  _EmbeddingRequestTiming({
+    required this.stage,
+    required this.foreground,
+    required this.inputs,
+    required DateTime? lastFinishedAt,
+  }) : _idleMs = lastFinishedAt == null
+           ? null
+           : DateTime.now().difference(lastFinishedAt).inMilliseconds;
+
+  static const int _slowBackgroundMs = 2000;
+
+  final String stage;
+  final bool foreground;
+  final int inputs;
+  final int? _idleMs;
+  final Stopwatch _watch = Stopwatch()..start();
+  int? _queueMs;
+
+  /// `ok`, an HTTP status, a Dio error type, or the default when the call
+  /// never got as far as the network (cancelled while queued).
+  String outcome = 'not sent';
+
+  void sent() => _queueMs = _watch.elapsedMilliseconds;
+
+  bool get wasSent => _queueMs != null;
+
+  void finish() {
+    final totalMs = _watch.elapsedMilliseconds;
+    final queueMs = _queueMs ?? totalMs;
+    final httpMs = _queueMs == null ? null : totalMs - _queueMs!;
+    if (!foreground && outcome == 'ok' && totalMs < _slowBackgroundMs) return;
+    debugPrint(
+      '[embedding] stage=$stage ${foreground ? 'foreground' : 'background'} '
+      'inputs=$inputs queueMs=$queueMs httpMs=${httpMs ?? '-'} '
+      'idleBeforeMs=${_idleMs ?? '-'} outcome=$outcome',
+    );
+  }
+}
+
 class EmbeddingService {
   static const String _embeddingsRoute = '/embeddings';
 
@@ -129,6 +178,10 @@ class EmbeddingService {
     ),
   );
   final _EmbeddingCache _cache = _EmbeddingCache();
+
+  /// When this service's last HTTP call ended. Each service has its own
+  /// [Dio] and so its own connection pool; the idle gap is per pool.
+  DateTime? _lastRequestFinishedAt;
 
   /// [foreground] marks a request someone is waiting on right now (a query
   /// embedding for the current generation); it is let through before any
@@ -322,6 +375,12 @@ class EmbeddingService {
     }
 
     final requestToken = EmbeddingRequestGate.beginRequest(cancelToken);
+    final timing = _EmbeddingRequestTiming(
+      stage: captureContext?.stage ?? 'embedding',
+      foreground: foreground,
+      inputs: texts.length,
+      lastFinishedAt: _lastRequestFinishedAt,
+    );
     try {
       if (requestToken.isCancelled) {
         throw requestToken.cancelError!;
@@ -331,6 +390,7 @@ class EmbeddingService {
         requestToken,
         foreground: foreground,
       );
+      timing.sent();
       // Embeddings never touch a chat transport, so nothing captured them and
       // a turn's vector search was invisible in the Requests timeline. Only the
       // texts that actually go out are recorded — cache hits never reach here.
@@ -351,6 +411,7 @@ class EmbeddingService {
         headers: headers,
         requestToken: requestToken,
       );
+      timing.outcome = 'ok';
 
       final data = response.data;
       if (data == null) throw 'Empty response';
@@ -376,6 +437,9 @@ class EmbeddingService {
         return embedding.map((v) => (v as num).toDouble()).toList();
       }).toList();
     } on DioException catch (e) {
+      timing.outcome = e.response?.statusCode != null
+          ? 'http ${e.response!.statusCode}'
+          : 'dio:${e.type.name}';
       if (e.response?.statusCode == 429) {
         final retryAfter =
             int.tryParse(e.response?.headers.value('retry-after') ?? '') ?? 60;
@@ -384,8 +448,14 @@ class EmbeddingService {
       // Dio's own message is a generic status-code essay; the provider's body
       // is what says which field it rejected (unknown model, bad input, …).
       throw formatError(e);
+    } catch (e) {
+      if (timing.outcome == 'ok') timing.outcome = 'bad response';
+      rethrow;
     } finally {
       EmbeddingRequestGate.endRequest(requestToken);
+      timing.finish();
+      // Only a call that reached the network used the pool.
+      if (timing.wasSent) _lastRequestFinishedAt = DateTime.now();
     }
   }
 

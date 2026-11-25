@@ -197,6 +197,7 @@ class StreamGenerationService {
         shouldAbort: _isAborted,
         cancelToken: cancelToken,
         onPhase: _phase,
+        logRetrievalTiming: true,
       );
       if (_isAborted()) {
         return ChatState(
