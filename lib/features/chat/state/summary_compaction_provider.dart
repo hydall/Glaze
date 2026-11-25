@@ -5,8 +5,33 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/summary_block.dart';
 import '../services/summary_generation_service.dart';
 
+/// A manual run that found nothing to retell: everything not yet in the
+/// summary fits in the raw tail it keeps. Carries the numbers, so the reader
+/// sees why, and can retell all but the newest messages instead.
+class SummaryNothingToCompact extends SummaryChainException {
+  /// Fresh history no block stands in for.
+  final int historyTokens;
+
+  /// The raw tail the run kept, per the manual tail setting.
+  final int tailTokens;
+
+  /// Whether the run kept the manual tail; false for a run that already
+  /// retold everything but the newest messages.
+  final bool keptTail;
+
+  const SummaryNothingToCompact({
+    required this.historyTokens,
+    required this.tailTokens,
+    required this.keptTail,
+  }) : super('nothing_to_compact');
+
+  /// Whether retelling all but the newest messages would find anything: the
+  /// history did not fit only because the tail covered it.
+  bool get canCompactNewestOnly => keptTail && historyTokens > 0;
+}
+
 /// A compaction that ended in an error, or found nothing to do
-/// (`SummaryChainException('nothing_to_compact')`).
+/// ([SummaryNothingToCompact]).
 ///
 /// Kept in the state, as `SummaryRegenerationFailure` is: the sheet that
 /// started the run may be closed by the time it fails. [seq] tells an open
@@ -87,10 +112,12 @@ class SummaryCompactionNotifier extends Notifier<SummaryCompactionState> {
   /// Retells everything older than the fresh tail of [session], block by
   /// block, until nothing is left. Returns when the run has settled; the
   /// state carries everything a reader needs meanwhile. A second call for a
-  /// session already running is ignored.
+  /// session already running is ignored. [newestOnly] retells everything
+  /// but the newest messages, whatever the manual tail is set to.
   Future<void> compact({
     required String charId,
     required ChatSession session,
+    bool newestOnly = false,
   }) async {
     final sessionId = session.id;
     if (_tokens.containsKey(sessionId)) return;
@@ -104,6 +131,7 @@ class SummaryCompactionNotifier extends Notifier<SummaryCompactionState> {
             charId: charId,
             session: session,
             force: true,
+            newestOnly: newestOnly,
             cancelToken: token,
             onProgress: (progress) {
               // A progress call from a run that has been replaced is stale.
@@ -115,7 +143,11 @@ class SummaryCompactionNotifier extends Notifier<SummaryCompactionState> {
             },
           );
       if (!result.changed && !token.isCancelled) {
-        throw const SummaryChainException('nothing_to_compact');
+        throw SummaryNothingToCompact(
+          historyTokens: result.historyTokens,
+          tailTokens: result.tailTokens,
+          keptTail: !newestOnly,
+        );
       }
     } catch (e) {
       // A stop aborts nothing, so whatever was thrown is a real failure, the

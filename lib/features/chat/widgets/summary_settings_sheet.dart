@@ -26,6 +26,7 @@ import '../../settings/api_settings_screen.dart';
 import '../chat_provider.dart';
 import '../services/summary_generation_service.dart';
 import 'custom_prompt_manager_sheet.dart';
+import 'summary_outlook_card.dart';
 import '../../../shared/widgets/glaze_sheet.dart';
 
 /// Everything about the summary except the summary itself.
@@ -300,41 +301,29 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
         .updatePreset(preset.copyWith(blocks: blocks));
   }
 
-  /// The outlook for the sliders as they stand, in the reader's words.
-  String _outlookText() {
-    final outlook = ref
-        .read(summaryGenerationServiceProvider)
-        .outlook(
-          charId: widget.charId,
-          counts: _outlookCounts,
-          settings: _compaction,
-        );
-    if (outlook == null) return 'summary_outlook_none'.tr();
-    final text = 'summary_outlook_text'.tr(
-      namedArgs: {
-        'total': _tokens(outlook.total),
-        'fixed': _tokens(outlook.fixedTokens),
-        'summary': _tokens(outlook.summaryTokens),
-        'history': _tokens(outlook.historyTokens),
-        'trigger': _tokens(outlook.triggerTokens),
-        'compactTo': _tokens(outlook.compactToTokens),
-        'floor': _tokens(outlook.floorTokens),
-        'tail': _tokens(outlook.tailTokens),
-      },
+  /// "This chat now", following the sliders as they stand.
+  Widget _outlookGroup() {
+    final service = ref.read(summaryGenerationServiceProvider);
+    final outlook = service.outlook(
+      charId: widget.charId,
+      counts: _outlookCounts,
+      settings: _compaction,
     );
-    if (!outlook.floorOnly) return text;
-    return '$text\n\n${'summary_outlook_floor_only'.tr()}';
-  }
-
-  /// 12345 as "12 345": thousands set apart, no locale machinery.
-  static String _tokens(int n) {
-    final digits = n.toString();
-    final out = StringBuffer();
-    for (var i = 0; i < digits.length; i++) {
-      if (i > 0 && (digits.length - i) % 3 == 0) out.write('\u202f');
-      out.write(digits[i]);
-    }
-    return out.toString();
+    return MenuGroup(
+      header: 'summary_outlook_header'.tr(),
+      description: outlook == null ? 'summary_outlook_none'.tr() : null,
+      items: [
+        if (outlook != null)
+          SummaryOutlookCard(
+            outlook: outlook,
+            manualTailTokens: service.manualTailTokens(
+              charId: widget.charId,
+              settings: _compaction,
+            ),
+            autoEnabled: _compaction.autoEnabled,
+          ),
+      ],
+    );
   }
 
   static String _tailUnitLabel(SummaryManualTailUnit unit) => switch (unit) {
@@ -418,125 +407,13 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                       ),
                     ],
                   ),
+                  _outlookGroup(),
                   MenuGroup(
-                    header: 'summary_outlook_header'.tr(),
-                    description: _outlookText(),
-                    items: const [],
-                  ),
-                  MenuGroup(
-                    header: 'summary_generation_section'.tr(),
+                    header: 'summary_manual_section'.tr(),
+                    description: 'summary_manual_tail_hint'.tr(),
                     items: [
-                      MenuSwitchItem(
-                        label: 'summary_auto_label'.tr(),
-                        description: 'summary_auto_hint'.tr(),
-                        value: _compaction.autoEnabled,
-                        onChanged: (v) => setState(
-                          () => _compaction = _compaction.copyWith(
-                            autoEnabled: v,
-                          ),
-                        ),
-                      ),
-                      MenuRangeItem(
-                        label: 'summary_trigger_label'.tr(),
-                        unit: '%',
-                        description: 'summary_trigger_hint'.tr(),
-                        value: _compaction.triggerPercent.toDouble(),
-                        min: SummaryCompactionSettings.minTriggerPercent
-                            .toDouble(),
-                        max: SummaryCompactionSettings.maxTriggerPercent
-                            .toDouble(),
-                        divisions:
-                            SummaryCompactionSettings.maxTriggerPercent -
-                            SummaryCompactionSettings.minTriggerPercent,
-                        decimalPlaces: 0,
-                        editableValue: true,
-                        onChanged: (v) => setState(
-                          () => _compaction = _compaction.copyWith(
-                            triggerPercent: v.round(),
-                            // The line a run compacts to never sits above
-                            // the trigger.
-                            compactToPercent: math.min(
-                              _compaction.compactToPercent,
-                              v.round(),
-                            ),
-                          ),
-                        ),
-                      ),
-                      MenuRangeItem(
-                        label: 'summary_compact_to_label'.tr(),
-                        unit: '%',
-                        description: 'summary_compact_to_hint'.tr(),
-                        value: _compaction.compactToPercent.toDouble(),
-                        min: SummaryCompactionSettings.minCompactToPercent
-                            .toDouble(),
-                        max: _compaction.triggerPercent.toDouble(),
-                        divisions:
-                            _compaction.triggerPercent -
-                            SummaryCompactionSettings.minCompactToPercent,
-                        decimalPlaces: 0,
-                        editableValue: true,
-                        onChanged: (v) => setState(
-                          () => _compaction = _compaction.copyWith(
-                            compactToPercent: v.round().clamp(
-                              SummaryCompactionSettings.minCompactToPercent,
-                              _compaction.triggerPercent,
-                            ),
-                          ),
-                        ),
-                      ),
-                      MenuSelectorItem(
-                        label: 'summary_auto_floor_label'.tr(),
-                        description: 'summary_auto_floor_hint'.tr(),
-                        currentValue: _tailUnitLabel(
-                          _compaction.autoTailFloorUnit,
-                        ),
-                        onTap: _pickFloorUnit,
-                      ),
-                      if (_compaction.autoTailFloorUnit ==
-                          SummaryManualTailUnit.percent)
-                        MenuRangeItem(
-                          label: 'summary_manual_tail_percent_label'.tr(),
-                          unit: '%',
-                          value: _compaction.autoTailFloorPercent.toDouble(),
-                          min: SummaryCompactionSettings.minManualTailPercent
-                              .toDouble(),
-                          max: SummaryCompactionSettings.maxManualTailPercent
-                              .toDouble(),
-                          divisions:
-                              SummaryCompactionSettings.maxManualTailPercent -
-                              SummaryCompactionSettings.minManualTailPercent,
-                          decimalPlaces: 0,
-                          editableValue: true,
-                          onChanged: (v) => setState(
-                            () => _compaction = _compaction.copyWith(
-                              autoTailFloorPercent: v.round(),
-                            ),
-                          ),
-                        )
-                      else
-                        MenuFieldItem(
-                          label: 'summary_manual_tail_tokens_label'.tr(),
-                          controller: _floorTokens,
-                          placeholder:
-                              '${const SummaryCompactionSettings().autoTailFloorTokens}',
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                          // An empty or zero field keeps the last number.
-                          onChanged: (text) {
-                            final v = int.tryParse(text) ?? 0;
-                            if (v < 1) return;
-                            setState(
-                              () => _compaction = _compaction.copyWith(
-                                autoTailFloorTokens: v,
-                              ),
-                            );
-                          },
-                        ),
                       MenuSelectorItem(
                         label: 'summary_manual_tail_label'.tr(),
-                        description: 'summary_manual_tail_hint'.tr(),
                         currentValue: _tailUnitLabel(
                           _compaction.manualTailUnit,
                         ),
@@ -586,6 +463,126 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                             );
                           },
                         ),
+                    ],
+                  ),
+                  MenuGroup(
+                    header: 'summary_auto_section'.tr(),
+                    items: [
+                      MenuSwitchItem(
+                        label: 'summary_auto_label'.tr(),
+                        description: 'summary_auto_hint'.tr(),
+                        value: _compaction.autoEnabled,
+                        onChanged: (v) => setState(
+                          () => _compaction = _compaction.copyWith(
+                            autoEnabled: v,
+                          ),
+                        ),
+                      ),
+                      if (_compaction.autoEnabled) ...[
+                        MenuRangeItem(
+                          label: 'summary_trigger_label'.tr(),
+                          unit: '%',
+                          description: 'summary_trigger_hint'.tr(),
+                          value: _compaction.triggerPercent.toDouble(),
+                          min: SummaryCompactionSettings.minTriggerPercent
+                              .toDouble(),
+                          max: SummaryCompactionSettings.maxTriggerPercent
+                              .toDouble(),
+                          divisions:
+                              SummaryCompactionSettings.maxTriggerPercent -
+                              SummaryCompactionSettings.minTriggerPercent,
+                          decimalPlaces: 0,
+                          editableValue: true,
+                          onChanged: (v) => setState(
+                            () => _compaction = _compaction.copyWith(
+                              triggerPercent: v.round(),
+                              // The line a run compacts to never sits above
+                              // the trigger.
+                              compactToPercent: math.min(
+                                _compaction.compactToPercent,
+                                v.round(),
+                              ),
+                            ),
+                          ),
+                        ),
+                        MenuRangeItem(
+                          label: 'summary_compact_to_label'.tr(),
+                          unit: '%',
+                          description: 'summary_compact_to_hint'.tr(),
+                          value: _compaction.compactToPercent.toDouble(),
+                          min: SummaryCompactionSettings.minCompactToPercent
+                              .toDouble(),
+                          max: _compaction.triggerPercent.toDouble(),
+                          divisions:
+                              _compaction.triggerPercent -
+                              SummaryCompactionSettings.minCompactToPercent,
+                          decimalPlaces: 0,
+                          editableValue: true,
+                          onChanged: (v) => setState(
+                            () => _compaction = _compaction.copyWith(
+                              compactToPercent: v.round().clamp(
+                                SummaryCompactionSettings.minCompactToPercent,
+                                _compaction.triggerPercent,
+                              ),
+                            ),
+                          ),
+                        ),
+                        MenuSelectorItem(
+                          label: 'summary_auto_floor_label'.tr(),
+                          description: 'summary_auto_floor_hint'.tr(),
+                          currentValue: _tailUnitLabel(
+                            _compaction.autoTailFloorUnit,
+                          ),
+                          onTap: _pickFloorUnit,
+                        ),
+                        if (_compaction.autoTailFloorUnit ==
+                            SummaryManualTailUnit.percent)
+                          MenuRangeItem(
+                            label: 'summary_manual_tail_percent_label'.tr(),
+                            unit: '%',
+                            value: _compaction.autoTailFloorPercent.toDouble(),
+                            min: SummaryCompactionSettings.minManualTailPercent
+                                .toDouble(),
+                            max: SummaryCompactionSettings.maxManualTailPercent
+                                .toDouble(),
+                            divisions:
+                                SummaryCompactionSettings.maxManualTailPercent -
+                                SummaryCompactionSettings.minManualTailPercent,
+                            decimalPlaces: 0,
+                            editableValue: true,
+                            onChanged: (v) => setState(
+                              () => _compaction = _compaction.copyWith(
+                                autoTailFloorPercent: v.round(),
+                              ),
+                            ),
+                          )
+                        else
+                          MenuFieldItem(
+                            label: 'summary_manual_tail_tokens_label'.tr(),
+                            controller: _floorTokens,
+                            placeholder:
+                                '${const SummaryCompactionSettings().autoTailFloorTokens}',
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            // An empty or zero field keeps the last number.
+                            onChanged: (text) {
+                              final v = int.tryParse(text) ?? 0;
+                              if (v < 1) return;
+                              setState(
+                                () => _compaction = _compaction.copyWith(
+                                  autoTailFloorTokens: v,
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                    ],
+                  ),
+                  MenuGroup(
+                    header: 'summary_blocks_section'.tr(),
+                    items: [
                       MenuRangeItem(
                         label: 'summary_block_target_label'.tr(),
                         description: 'summary_block_target_hint'.tr(),
@@ -691,6 +688,12 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         icon: Icons.visibility_outlined,
                         label: 'summary_prompt_view_current'.tr(),
                         onTap: _viewPrompts,
+                      ),
+                      MenuItem(
+                        key: const Key('summary_prompt_macros'),
+                        icon: Icons.data_object_rounded,
+                        label: 'summary_prompt_macros'.tr(),
+                        onTap: _showMacros,
                       ),
                       MenuItem(
                         key: const Key('summary_manage_prompts'),
@@ -847,6 +850,24 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
           prompt: _shortenPreset().prompt,
         ),
       ],
+    ),
+  );
+
+  /// The macro reference, once for all three prompts, rather than repeated
+  /// under each of them.
+  Future<void> _showMacros() => GlazeBottomSheet.show<void>(
+    context,
+    title: 'summary_prompt_macros'.tr(),
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      child: SelectableText(
+        'summary_prompt_macros_text'.tr(),
+        style: TextStyle(
+          color: context.cs.onSurfaceVariant,
+          fontSize: 13,
+          height: 1.4,
+        ),
+      ),
     ),
   );
 
