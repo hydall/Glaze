@@ -16,6 +16,10 @@ name: Promote nightly → main
 # a required review) leaves the PR open and fails this run, so it shows up
 # in the Actions tab and in GitHub's failure email instead of silently stalling.
 #
+# After a merge it starts *Build Release (Publish)* on main, and that build's
+# completion starts release-article.yml (site article + Discord/Telegram post).
+# AUTO_RELEASE=false keeps the merge but skips the release.
+#
 # Pause: set the repository variable AUTO_PROMOTE_PAUSED to `true` (Settings →
 # Secrets and variables → Actions → Variables). Scheduled runs then do nothing;
 # a manual run still works.
@@ -186,3 +190,15 @@ jobs:
           gh pr merge "${{ steps.pr.outputs.number }}" --merge \
             --match-head-commit "${{ steps.pick.outputs.sha }}" --delete-branch
           echo "Promoted ${{ steps.pick.outputs.count }} change(s) to main in PR #${{ steps.pr.outputs.number }}." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Start the release build
+        # A promotion is a release: build and publish it from main right away.
+        # Its tag is the next YY.M.N (.github/scripts/calver.sh), and once it
+        # finishes, release-article.yml writes the site article and posts it.
+        # Skipped when nothing was promoted, so an idle week makes no release.
+        # Turn it off with the repository variable AUTO_RELEASE=false.
+        if: steps.pick.outputs.skip == 'false' && vars.AUTO_RELEASE != 'false'
+        run: |
+          set -euo pipefail
+          gh workflow run build-release.yml --ref main
+          echo "Started *Build Release (Publish)* on main." >> "$GITHUB_STEP_SUMMARY"

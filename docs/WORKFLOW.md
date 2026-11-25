@@ -124,8 +124,11 @@ offending feature on `nightly` and re-promote — that is what squash-merging bu
   `true` (Settings → Secrets and variables → Actions → Variables) — for example
   while a known-broken feature sits on `nightly`. A manual run still works and
   takes a `soak_hours` input (`0` promotes the tip of `nightly`).
-- It only merges code. Publishing a release is still the manual
-  *Build Release (Publish)* workflow.
+- After a merge it starts *Build Release (Publish)* on `main`, so every
+  promotion is a release (next `YY.M.N`), and the release's article and posts
+  follow on their own (§ Release article). A week with nothing to promote makes
+  no release. `AUTO_RELEASE=false` (repository variable) keeps the merge and
+  skips the release.
 
 Requirements: the schedule only fires once the workflow file is on `main`
 (the default branch), and *Settings → Actions → General → Allow GitHub Actions
