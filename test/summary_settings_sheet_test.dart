@@ -354,6 +354,17 @@ void main() {
     expect(find.text('label_enabled'.tr()), findsOneWidget);
     // The manual tail first, under the button it is for: a share of the
     // context by default; the token field shows only once tokens are picked.
+    // Summarizing runs on the Memory slot, so the settings say where that
+    // slot is bound, next to the master switch under General.
+    expect(
+      find.text('memory_books_generation_connection'.tr()),
+      findsOneWidget,
+    );
+    expect(find.text('summary_connection_hint'.tr()), findsOneWidget);
+    await _scrollTo(
+      tester,
+      find.text('summary_manual_tail_percent_label'.tr()),
+    );
     expect(find.text('summary_manual_section'.tr()), findsOneWidget);
     expect(find.text('summary_manual_tail_label'.tr()), findsOneWidget);
     expect(find.text('summary_manual_tail_unit_percent'.tr()), findsOneWidget);
@@ -370,19 +381,9 @@ void main() {
     expect(find.text('summary_compact_to_label'.tr()), findsOneWidget);
     await _scrollTo(tester, find.text('summary_auto_floor_label'.tr()));
     expect(find.text('summary_auto_floor_label'.tr()), findsOneWidget);
-    await _scrollTo(
-      tester,
-      find.text('memory_books_generation_connection'.tr()),
-    );
+    await _scrollTo(tester, find.text('summary_merge_label'.tr()));
     expect(find.text('summary_block_target_label'.tr()), findsOneWidget);
     expect(find.text('summary_merge_label'.tr()), findsOneWidget);
-    // Summarizing runs on the Memory slot, so the settings say where that
-    // slot is bound rather than leaving the reader to find it.
-    expect(
-      find.text('memory_books_generation_connection'.tr()),
-      findsOneWidget,
-    );
-    expect(find.text('summary_connection_hint'.tr()), findsOneWidget);
     await _scrollTo(tester, find.byKey(const Key('summary_manage_prompts')));
     // Prompts are picked from presets, as in Memory Books: one for retelling,
     // one for merging, one for shortening, a view of them and the saved-prompt
