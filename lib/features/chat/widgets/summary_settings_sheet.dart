@@ -311,6 +311,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     );
     return MenuGroup(
       header: 'summary_outlook_header'.tr(),
+      headerIcon: Icons.insights_rounded,
       description: outlook == null ? 'summary_outlook_none'.tr() : null,
       items: [
         if (outlook != null)
@@ -398,6 +399,8 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                 ),
                 children: [
                   MenuGroup(
+                    header: 'settings_group_general'.tr(),
+                    headerIcon: Icons.tune_rounded,
                     items: [
                       MenuSwitchItem(
                         label: 'label_enabled'.tr(),
@@ -405,11 +408,18 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         value: _enabled,
                         onChanged: (v) => setState(() => _enabled = v),
                       ),
+                      MenuItem(
+                        icon: Icons.cable_rounded,
+                        label: 'memory_books_generation_connection'.tr(),
+                        subtitle: 'summary_connection_hint'.tr(),
+                        onTap: _openApiSettings,
+                      ),
                     ],
                   ),
                   _outlookGroup(),
                   MenuGroup(
                     header: 'summary_manual_section'.tr(),
+                    headerIcon: Icons.compress_rounded,
                     description: 'summary_manual_tail_hint'.tr(),
                     items: [
                       MenuSelectorItem(
@@ -467,6 +477,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                   ),
                   MenuGroup(
                     header: 'summary_auto_section'.tr(),
+                    headerIcon: Icons.autorenew_rounded,
                     items: [
                       MenuSwitchItem(
                         label: 'summary_auto_label'.tr(),
@@ -582,6 +593,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                   ),
                   MenuGroup(
                     header: 'summary_blocks_section'.tr(),
+                    headerIcon: Icons.view_agenda_outlined,
                     items: [
                       MenuRangeItem(
                         label: 'summary_block_target_label'.tr(),
@@ -620,16 +632,11 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                           ),
                         ),
                       ),
-                      MenuItem(
-                        icon: Icons.cable_rounded,
-                        label: 'memory_books_generation_connection'.tr(),
-                        subtitle: 'summary_connection_hint'.tr(),
-                        onTap: _openApiSettings,
-                      ),
                     ],
                   ),
                   MenuGroup(
                     header: 'summary_prompts_section'.tr(),
+                    headerIcon: Icons.edit_note_rounded,
                     items: [
                       MenuSelectorItem(
                         key: const Key('summary_prompt_retell'),
@@ -713,6 +720,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                   if (_presetId != null)
                     MenuGroup(
                       header: 'label_injection_point'.tr(),
+                      headerIcon: Icons.input_rounded,
                       items: [
                         MenuSelectorItem(
                           label: 'label_role'.tr(),
