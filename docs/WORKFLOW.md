@@ -131,7 +131,7 @@ the release tags (`v26.11.1`, …):
   the Windows installer all pick it up. The `version:` in the committed
   `pubspec.yaml` is a placeholder that only local builds show.
 
-Every published release takes a number, a nightly pre-release included, so the
+Every published release takes a number, a pre-release from another branch included, so the
 numbers seen on `main` can skip.
 
 The old `0.x` tags do not match the scheme and are ignored; `26.11.1` compares
