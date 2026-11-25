@@ -1,0 +1,174 @@
+name: Auto-release from main
+
+# Releases main once a week, so releases do not depend on someone remembering.
+#
+# Every Wednesday it picks the newest commit on main that is at least
+# `soak_hours` old (default 24): what landed in the last day is left for the
+# next release. Then it builds and publishes that commit with *Build Release
+# (Publish)* (the next YY.M.N, see .github/scripts/calver.sh), and once the
+# build is done it starts release-article.yml, which writes the site article
+# and posts the download and article links to Discord and Telegram.
+#
+# It does nothing — and ends green, with the reason in the run summary — when
+#   - a stable release was already published this week (Monday 00:00 Moscow
+#     time onwards), by hand or by an earlier run,
+#   - main has no commit old enough,
+#   - the picked commit is already in the latest release, or would not change
+#     a single file of it.
+#
+# Pause: repository variable AUTO_RELEASE_PAUSED=true. Scheduled runs then do
+# nothing; a manual run still works.
+#
+# Scheduled workflows only fire from the default branch, so this file has to be
+# on main.
+
+on:
+  schedule:
+    # Wednesdays, 09:00 UTC = 12:00 Moscow. Cron is UTC-only; GitHub may start
+    # an on-the-hour run a few minutes late.
+    - cron: "0 9 * * 3"
+  workflow_dispatch:
+    inputs:
+      soak_hours:
+        description: "Leave out commits younger than this many hours (0 = release the tip of main)"
+        required: false
+        default: "24"
+        type: string
+      ignore_week:
+        description: "Release even if there was already a release this week"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || vars.AUTO_RELEASE_PAUSED != 'true'
+    runs-on: ubuntu-latest
+    # A release build of every platform takes most of an hour.
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOAK_HOURS: ${{ inputs.soak_hours || '24' }}
+      IGNORE_WEEK: ${{ inputs.ignore_week || false }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Pick the commit to release
+        id: pick
+        run: |
+          set -euo pipefail
+          git fetch --tags --force --quiet
+
+          # Every "nothing to do" exit ends the run green, with a one-line
+          # reason in the run summary.
+          skip() {
+            echo "$1"
+            echo "No release: $1" >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          if ! [[ "$SOAK_HOURS" =~ ^[0-9]+$ ]]; then
+            echo "::error::soak_hours must be a whole number, got '$SOAK_HOURS'"
+            exit 1
+          fi
+
+          # Latest stable release (pre-releases do not count).
+          latest=$(gh release list --exclude-pre-releases --exclude-drafts --limit 1 \
+            --json tagName,publishedAt --jq '.[0] // empty | "\(.tagName) \(.publishedAt)"')
+          latest_tag="${latest%% *}"
+          latest_at="${latest#* }"
+
+          # One release a week at most.
+          if [ -n "$latest" ] && [ "$IGNORE_WEEK" != "true" ]; then
+            week_start=$(TZ=Europe/Moscow date -d "$(TZ=Europe/Moscow date +%F) -$(( $(TZ=Europe/Moscow date +%u) - 1 )) days 00:00" +%s)
+            if [ "$(date -d "$latest_at" +%s)" -ge "$week_start" ]; then
+              skip "$latest_tag was already released this week ($latest_at)."
+            fi
+          fi
+
+          # Newest first-parent commit (= one merged PR) at least SOAK_HOURS old.
+          cutoff=$(( $(date +%s) - SOAK_HOURS * 3600 ))
+          candidate=""
+          while read -r sha ts; do
+            if [ "$ts" -le "$cutoff" ]; then candidate="$sha"; break; fi
+          done < <(git log --first-parent --format='%H %ct' origin/main)
+          [ -n "$candidate" ] || skip "nothing on main is older than ${SOAK_HOURS}h."
+
+          if [ -n "$latest_tag" ]; then
+            if git merge-base --is-ancestor "$candidate" "$latest_tag"; then
+              skip "$latest_tag already contains $(git log -1 --format='%h %s' "$candidate")."
+            fi
+            if git diff --quiet "$latest_tag" "$candidate"; then
+              skip "the commits since $latest_tag do not change any file."
+            fi
+            count=$(git rev-list --count --first-parent "$latest_tag..$candidate")
+          else
+            count=$(git rev-list --count --first-parent "$candidate")
+          fi
+
+          echo "Releasing $(git log -1 --format='%h %s' "$candidate"): $count change(s) since ${latest_tag:-the start}."
+          {
+            echo "skip=false"
+            echo "sha=$candidate"
+            echo "count=$count"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish the release
+        id: build
+        if: steps.pick.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          sha="${{ steps.pick.outputs.sha }}"
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gh workflow run build-release.yml --ref main -f commit="$sha"
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            sleep 10
+            run_id=$(gh run list --workflow build-release.yml --branch main \
+              --event workflow_dispatch --limit 5 --json databaseId,createdAt \
+              --jq "[.[] | select(.createdAt >= \"$started\")][0].databaseId // empty")
+            [ -n "$run_id" ] && break
+          done
+          if [ -z "$run_id" ]; then
+            echo "::error::The release build did not start."
+            exit 1
+          fi
+          echo "Watching the release build, run $run_id"
+          gh run watch "$run_id" --exit-status --interval 60 > /dev/null
+
+          # The release the build just published: its tag is on the built commit.
+          git fetch --tags --force --quiet
+          tag=""
+          for t in $(gh release list --exclude-pre-releases --exclude-drafts --limit 5 --json tagName --jq '.[].tagName'); do
+            if [ "$(git rev-list -n 1 "$t")" = "$sha" ]; then tag="$t"; break; fi
+          done
+          if [ -z "$tag" ]; then
+            echo "::error::The build finished, but no release is tagged on $sha."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Released $tag (${{ steps.pick.outputs.count }} change(s)) from $sha." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Article and posts
+        # Started here rather than by release-article's own workflow_run
+        # trigger, which skips builds this workflow started: a run started
+        # with the workflow token is not guaranteed to fire it.
+        if: steps.pick.outputs.skip == 'false'
+        run: |
+          gh workflow run release-article.yml --ref main \
+            -f tag="${{ steps.build.outputs.tag }}" -f post=true -f auto=true

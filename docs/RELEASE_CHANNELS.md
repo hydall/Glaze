@@ -1,14 +1,18 @@
 # Release channels
 
-Two long-lived branches, one per build channel. The channel decides packaging
+One long-lived branch, `main`, where all development happens; the build
+channel is derived from the branch being built. The channel decides packaging
 — app identity, data folder, cloud root and update source. It no longer decides
 whether developer mode is on or whether the build watermark is shown.
 
 | Branch    | Channel   | Audience              |
 |-----------|-----------|-----------------------|
 | `main`    | `stable`  | public releases       |
-| `nightly` | `nightly` | daily internal builds |
-| any other | `nightly` | feature branches      |
+| any other | `nightly` | feature branch builds |
+
+The `nightly` branch is gone (development moved to `main`); the `nightly`
+channel lives on as the identity of every non-`main` build, so a test build of
+a feature branch still installs next to the stable app.
 
 Developer mode is hidden on every channel, local `flutter run` included, and is
 unlocked only through the 7-tap easter egg on the version badge in About. The

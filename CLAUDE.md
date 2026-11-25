@@ -220,12 +220,12 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 
 ## Workflow
 
-- Branch (`feat/xxx`) off `nightly`, push to `origin`, open a PR — see `docs/WORKFLOW.md` for branching, Trello, and cleanup checklists.
-- **Feature branches are always based on `nightly`** — `main` is the default branch, so a fresh clone starts there; check the base first, and `git rebase origin/nightly` a branch that was cut from the wrong one before opening the PR.
-- Open PRs only against upstream repository `hydall/Glaze` (base: `hydall/Glaze:nightly`), not against fork repos.
+- Branch (`feat/xxx`) off `main`, push to `origin`, open a PR — see `docs/WORKFLOW.md` for branching, Trello, and cleanup checklists.
+- **Feature branches are based on `main`** — all development happens there; there is no `nightly` branch any more.
+- Open PRs only against upstream repository `hydall/Glaze` (base: `hydall/Glaze:main`), not against fork repos.
 - PR title and body are **in English**, and the body lists the changes as bullets (one bullet per change, `##` headings when a PR carries several independent fixes) plus how it was verified. Full rules: `docs/WORKFLOW.md` § PR title and body.
 - PRs are squash-merged and gated on CI (`.github/workflows/ci.yml` — `flutter analyze` + `flutter test` + the WebView render suite in `test/webview_js`); a red check blocks the merge.
-- Release branches are `nightly` → `main` (the `stable` channel), one per build channel; features enter at `nightly` and are promoted by merge. Channel semantics: `docs/RELEASE_CHANNELS.md`.
+- Releases are cut from `main` (the `stable` channel) by `.github/workflows/auto-release.yml` once a week, leaving out the last 24 hours of commits; the release then gets its site article and Discord/Telegram posts. Channel semantics: `docs/RELEASE_CHANNELS.md`, release flow: `docs/WORKFLOW.md`.
 - Run `dart run build_runner build` after changing any freezed/drift model.
 - Single responsibility: split a class before it grows past ~200-250 lines (thin orchestrators, fat specialists, constructor injection). Details: `docs/CODE_STYLE.md`.
 
@@ -238,7 +238,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 - Mutate state directly — use immutable patterns with freezed
 - Forget `ref.watch` select for streaming UI (causes full rebuild per chunk)
 - Build a screen or sheet on bare Material (`TabBar`, `Card`, `OutlinedButton`, `Chip`, `SnackBar`, `AlertDialog`…) when `lib/shared/widgets/` has the Glaze equivalent — check `docs/UI_KIT.md` first
-- Commit directly to `nightly` or `main` — always use a feature branch
+- Commit directly to `main` — always use a feature branch
 - Bypass `_requireCapability` in the JS bridge — every `glaze.*` method must enforce the matching capability (default-deny)
 - Run user JS in a same-origin iframe — panel/sandbox scripts go in `sandbox="allow-scripts"` (no `allow-same-origin`)
 - Read-modify-write a `ChatSession` / `Character` from outside the dedicated atomic repo methods (chat/character variable scopes)

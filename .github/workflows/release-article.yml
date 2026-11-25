@@ -1,28 +1,37 @@
 name: Release article (site, Discord, Telegram)
 
 # After a release is published from `main`, writes its changelog article on the
-# site, deploys the site, and posts the article's link to Discord and Telegram.
+# site, deploys the site, and posts the release to the Discord and Telegram
+# channels:
+#
+#   **Glaze** `26.11.1`
+#
+#   СКАЧАТЬ                         → the site's download page
+#
+#   СТАТЬЯ С ОПИСАНИЕМ РЕЛИЗА       → the article (its preview card shows)
+#
+#   Релиз был сделан автоматически… (only for releases made by auto-release.yml)
 #
 # - The article (Russian + English), the roadmap entry and the link-preview
 #   cover are written by .github/scripts/release_article.py, which asks the
 #   same DeepSeek model the bug-triage bot uses, from the PRs in the release.
-# - The result is committed straight to `main` (the site lives only there) and
-#   the Pages workflow is dispatched: a push made with the workflow token does
-#   not start other workflows on its own. The link is posted only once the
-#   deploy has finished, so its preview card is already live.
+# - The result is committed straight to `main` and the Pages workflow is
+#   dispatched: a push made with the workflow token does not start other
+#   workflows on its own. The post goes out only once the deploy has finished,
+#   so the links and the preview card are already live.
 # - Runs once per release: when the article already exists it is not written
-#   again. A manual run can re-post the link of an existing article.
+#   again. A manual run can post an existing release again.
+#
+# Started by auto-release.yml for its own releases, and by the workflow_run
+# trigger below for a release built by hand from main.
 #
 # Secrets / variables:
 #   DEEPSEEK_API_KEY (secret), DEEPSEEK_MODEL, DEEPSEEK_BASE_URL (vars, optional)
-#   TG_BOT_TOKEN, TG_CHAT_ID, TG_TOPIC_ID (secrets, shared with the build posts)
-#   DISCORD_RELEASE_WEBHOOK (secret): webhook URL of the Discord channel the
-#     link goes to. Unset = Discord is skipped with a warning.
-#   RELEASE_POST_LANG (var): ru (default), en or both — language of the posts.
-#
-# Off by default: after a release nothing happens until the repository
-# variable RELEASE_ARTICLE_AUTO is `true`. A manual run (Actions → this
-# workflow → Run workflow) works either way, with or without posting.
+#   TG_BOT_TOKEN (secret, shared with the build posts)
+#   TG_RELEASE_CHAT_ID (secret): the Telegram channel, @username or -100… id;
+#     the bot must be an admin there. TG_RELEASE_TOPIC_ID only for a forum group.
+#   DISCORD_RELEASE_WEBHOOK (secret): webhook URL of the Discord channel.
+#   A target whose secret is unset is skipped with a warning.
 #
 # workflow_run workflows run from the default branch, so this file has to be on
 # `main`.
@@ -39,9 +48,14 @@ on:
         default: ""
         type: string
       post:
-        description: "Post the article's link to Discord and Telegram"
+        description: "Post the release to the Discord and Telegram channels"
         required: false
         default: true
+        type: boolean
+      auto:
+        description: "Made by auto-release (adds the 'released automatically' line)"
+        required: false
+        default: false
         type: boolean
 
 permissions:
@@ -54,14 +68,14 @@ concurrency:
 
 jobs:
   article:
-    # Only releases built from main; pre-releases from nightly get no article.
-    # The automatic run is off until the repository variable
-    # RELEASE_ARTICLE_AUTO is set to `true`; a manual run always works.
+    # Only releases built from main; pre-releases get no article. Builds that
+    # auto-release.yml started are skipped here: it starts this workflow
+    # itself, with the `auto` line, once its build is done.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (vars.RELEASE_ARTICLE_AUTO == 'true' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main')
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.triggering_actor.login != 'github-actions[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
@@ -180,77 +194,16 @@ jobs:
           fi
           gh run watch "$run_id" --exit-status --interval 20 > /dev/null
 
-      - name: Prepare the announcement
-        id: post
+      - name: Post
         if: >-
           steps.rel.outputs.skip == 'false' &&
           ((github.event_name == 'workflow_run' && steps.rel.outputs.exists == 'false') ||
            (github.event_name == 'workflow_dispatch' && inputs.post))
         env:
-          LANGS: ${{ vars.RELEASE_POST_LANG || 'ru' }}
-        run: |
-          set -euo pipefail
-          announce="$RUNNER_TEMP/announce.json"
-          if [ ! -f "$announce" ]; then
-            python3 .github/scripts/release_article.py --announce-only \
-              --version "${{ steps.rel.outputs.version }}" --tag "${{ steps.rel.outputs.tag }}" \
-              --announce-out "$announce"
-          fi
-          case "$LANGS" in
-            en)   langs='["en"]' ;;
-            both) langs='["ru","en"]' ;;
-            *)    langs='["ru"]' ;;
-          esac
-          # One paragraph per language: the lead, then the link. The link's
-          # preview card (title, cover) is the rest of the post.
-          jq -r --argjson langs "$langs" '
-            [ $langs[] as $l | .lead[$l] ] | join("\n\n")' "$announce" > "$RUNNER_TEMP/lead.txt"
-          jq -r '.url' "$announce" > "$RUNNER_TEMP/url.txt"
-          jq -r '.version' "$announce" > "$RUNNER_TEMP/version.txt"
-
-      - name: Post to Telegram
-        if: steps.post.outcome == 'success'
-        env:
+          VERSION: ${{ steps.rel.outputs.version }}
+          AUTO: ${{ inputs.auto || false }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          TG_TOPIC_ID: ${{ secrets.TG_TOPIC_ID }}
-        run: |
-          set -euo pipefail
-          if [ -z "${TG_BOT_TOKEN:-}" ] || [ -z "${TG_CHAT_ID:-}" ]; then
-            echo "::warning::TG_BOT_TOKEN / TG_CHAT_ID are not set, Telegram skipped."
-            exit 0
-          fi
-          esc() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' "$1"; }
-          url=$(cat "$RUNNER_TEMP/url.txt")
-          text="<b>Glaze $(cat "$RUNNER_TEMP/version.txt")</b>"$'\n\n'"$(esc "$RUNNER_TEMP/lead.txt")"$'\n\n'"$url"
-          payload=$(jq -n --arg cid "$TG_CHAT_ID" --arg tid "${TG_TOPIC_ID:-}" --arg text "$text" --arg url "$url" \
-            '{chat_id: $cid, text: $text, parse_mode: "HTML",
-              link_preview_options: {url: $url, prefer_large_media: true, show_above_text: false}}
-             + (if $tid == "" then {} else {message_thread_id: ($tid | tonumber)} end)')
-          res=$(curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-            -H 'Content-Type: application/json' -d "$payload")
-          if [ "$(jq -r '.ok' <<<"$res")" != "true" ]; then
-            echo "::error::Telegram: $(jq -r '.description // "unknown error"' <<<"$res")"
-            exit 1
-          fi
-          echo "Posted to Telegram."
-
-      - name: Post to Discord
-        if: steps.post.outcome == 'success'
-        env:
-          WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
-        run: |
-          set -euo pipefail
-          if [ -z "${WEBHOOK:-}" ]; then
-            echo "::warning::DISCORD_RELEASE_WEBHOOK is not set, Discord skipped."
-            exit 0
-          fi
-          content="**Glaze $(cat "$RUNNER_TEMP/version.txt")**"$'\n\n'"$(cat "$RUNNER_TEMP/lead.txt")"$'\n\n'"$(cat "$RUNNER_TEMP/url.txt")"
-          payload=$(jq -n --arg c "$content" '{content: $c, username: "Glaze", allowed_mentions: {parse: []}}')
-          code=$(curl -sS -o "$RUNNER_TEMP/discord.txt" -w '%{http_code}' -X POST "$WEBHOOK?wait=true" \
-            -H 'Content-Type: application/json' -d "$payload")
-          if [ "${code:0:1}" != "2" ]; then
-            echo "::error::Discord answered $code: $(cat "$RUNNER_TEMP/discord.txt")"
-            exit 1
-          fi
-          echo "Posted to Discord."
+          TG_CHAT: ${{ secrets.TG_RELEASE_CHAT_ID }}
+          TG_TOPIC: ${{ secrets.TG_RELEASE_TOPIC_ID }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: bash .github/scripts/post_release.sh

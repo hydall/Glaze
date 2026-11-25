@@ -31,14 +31,12 @@ jobs:
       - name: Checkout (triage tooling)
         uses: actions/checkout@v4
 
-      # The audited source is always nightly, whatever branch started the run.
-      # Scheduled runs only fire from the default branch (main), which trails
-      # nightly by hundreds of commits — auditing that would judge reports
-      # against code the fix has long since left.
-      - name: Checkout nightly (the source the agent reads)
+      # The audited source is always main, where development happens,
+      # whatever branch started the run.
+      - name: Checkout main (the source the agent reads)
         uses: actions/checkout@v4
         with:
-          ref: nightly
+          ref: main
           path: audit-src
 
       - name: Set up Python
