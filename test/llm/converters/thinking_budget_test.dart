@@ -146,6 +146,38 @@ void main() {
       );
     });
 
+    group('Gemini 3 levels follow what each model supports', () {
+      Object? level(String model, String effort) => calculateGoogleBudgetTokens(
+        maxTokens: 10000,
+        reasoningEffort: effort,
+        model: model,
+      );
+
+      test('3.1 Pro has medium, 3 Pro does not', () {
+        expect(level('gemini-3.1-pro-preview', 'medium'), 'medium');
+        expect(level('gemini-3-pro-preview', 'medium'), 'low');
+        expect(level('gemini-3.1-pro-preview', 'min'), 'low');
+        expect(level('gemini-3.1-pro-preview', 'max'), 'high');
+      });
+
+      test('3.7 and 3.8 Flash get low where minimal is rejected', () {
+        expect(level('gemini-3.8-flash', 'min'), 'low');
+        expect(level('gemini-3.7-flash', 'min'), 'low');
+        expect(level('gemini-3.8-flash', 'medium'), 'medium');
+      });
+
+      test('the other Flash and Flash-Lite models keep minimal', () {
+        for (final model in const [
+          'gemini-3-flash-preview',
+          'gemini-3.6-flash',
+          'gemini-3.5-flash-lite',
+          'gemini-3.1-flash-lite',
+        ]) {
+          expect(level(model, 'min'), 'minimal', reason: model);
+        }
+      });
+    });
+
     test('unknown model → null', () {
       expect(
         calculateGoogleBudgetTokens(
@@ -155,6 +187,41 @@ void main() {
         ),
         isNull,
       );
+    });
+
+    group('Gemini 4 takes levels, never a token budget', () {
+      Object? level(String model, String effort) => calculateGoogleBudgetTokens(
+        maxTokens: 30000,
+        reasoningEffort: effort,
+        model: model,
+      );
+
+      test('Carbon and Argon: low / medium / high, max capped at high', () {
+        for (final model in const ['gemini-4-carbon', 'gemini-4-argon']) {
+          expect(level(model, 'auto'), isNull, reason: model);
+          expect(level(model, 'min'), 'low', reason: model);
+          expect(level(model, 'low'), 'low', reason: model);
+          expect(level(model, 'medium'), 'medium', reason: model);
+          expect(level(model, 'high'), 'high', reason: model);
+          expect(level(model, 'max'), 'high', reason: model);
+        }
+      });
+
+      test('Hydrogen alone reaches xhigh', () {
+        expect(level('gemini-4-hydrogen', 'high'), 'high');
+        expect(level('gemini-4-hydrogen', 'max'), 'xhigh');
+      });
+
+      test('a Gemini 4 name with flash or pro in it still gets a level', () {
+        expect(level('gemini-4-flash', 'medium'), 'medium');
+        expect(level('gemini-4.5-pro', 'low'), 'low');
+      });
+
+      test('a proxy prefix does not hide the family', () {
+        expect(isGemini4Model('google/gemini-4-carbon'), isTrue);
+        expect(isGemini4Model('gemini-3-pro'), isFalse);
+        expect(isGemini4Model('gemini-2.5-flash'), isFalse);
+      });
     });
   });
 

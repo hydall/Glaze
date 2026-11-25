@@ -8,12 +8,14 @@ import '../../../core/state/persona_resolution.dart';
 import '../../extensions/models/info_block.dart';
 import '../../extensions/providers/info_blocks_provider.dart';
 import '../../extensions/services/extension_post_gen_service.dart';
+import '../../image_gen/services/image_tag_markup.dart';
 import '../chat_provider.dart';
 import 'ext_block_dialogs.dart';
 
 /// Wire-up for the chat WebView's ext-block bridge callbacks
 /// (`onExtBlocksRunAll`, `onExtBlockStop`, `onExtBlockRegen`,
-/// `onExtBlockRegenImage`, `onExtBlockEdit`, `onExtBlockDelete`).
+/// `onExtBlockRegenImage`, `onExtBlockEdit`, `onExtBlockDelete`,
+/// `onExtBlockImgVariant`).
 ///
 /// Extracted from `chat_webview_widget.dart` so the widget's
 /// `onWebViewCreated` callback can stay focused on bridge setup
@@ -181,6 +183,34 @@ class ChatWebViewExtBlockCallbacks {
           .delete(block.id);
       if (!isMounted()) return;
       await refreshPanel(sessionId, messageId);
+    };
+  }
+
+  /// Build the `onExtBlockImgVariant` callback: stores which image of a
+  /// card's picture is on screen. The page has already swapped it; this only
+  /// makes the choice survive a reload, like a message's image switcher.
+  Future<void> Function(
+    String blockId,
+    String messageId,
+    int imageIndex,
+    int variantIndex,
+  )
+  onImgVariant() {
+    return (blockId, messageId, imageIndex, variantIndex) async {
+      if (!isMounted()) return;
+      final sessionId = this.sessionId;
+      if (sessionId == null || sessionId.isEmpty) return;
+      final block = _blockForChat(sessionId, messageId, blockId);
+      if (block == null) return;
+      final content = ImageTagMarkup.setImageBlockVariant(
+        block.content,
+        imageIndex,
+        variantIndex,
+      );
+      if (content == block.content) return;
+      await ref
+          .read(infoBlocksProvider(sessionId).notifier)
+          .updateContent(block.id, content);
     };
   }
 

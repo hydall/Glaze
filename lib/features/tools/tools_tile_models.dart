@@ -118,6 +118,13 @@ List<ToolsTileDef> buildToolsTileCatalog() => [
     defaultSize: ToolsTileSize.small,
   ),
   ToolsTileDef(
+    id: 'embeddings',
+    titleKey: 'tab_embeddings',
+    subtitleKey: 'tools_embeddings_subtitle',
+    icon: Icons.hub_outlined,
+    defaultSize: ToolsTileSize.small,
+  ),
+  ToolsTileDef(
     id: 'lorebooks',
     titleKey: 'menu_lorebooks',
     subtitleKey: 'tools_lorebooks_subtitle',

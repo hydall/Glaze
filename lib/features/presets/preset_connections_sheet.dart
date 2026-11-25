@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:easy_localization/easy_localization.dart';
 
-import '../../core/models/chat_message.dart';
 import '../../core/models/preset.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/character_provider.dart';
 import '../../core/state/chat_session_ops_provider.dart';
 import '../../shared/widgets/connection_sheet_widgets.dart';
-import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../character_list/widgets/character_picker_sheet.dart';
+import '../chat_history/chat_picker_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/help_tip.dart';
 import '../../shared/widgets/sheet_view.dart';
@@ -161,19 +161,15 @@ class _PresetConnectionsSheetState
       return;
     }
 
-    final selected = await GlazeBottomSheet.show<dynamic>(
+    final selected = await showCharacterPicker(
       context,
-      title: "${'header_connections'.tr()} ${'sheet_title_char_options'.tr()}",
-      items: available
-          .map((c) => BottomSheetItem(
-                label: c.name,
-                onTap: () => Navigator.of(context, rootNavigator: true).pop(c),
-              ))
-          .toList(),
+      title: 'lbc_add_character'.tr(),
+      excludedIds: existingIds,
+      target: CharacterPickTarget.variation,
     );
 
     if (selected != null) {
-      await setPresetConnection(ref, 'character', selected.id as String, widget.presetId);
+      await setPresetConnection(ref, 'character', selected.id, widget.presetId);
     }
   }
 
@@ -193,22 +189,14 @@ class _PresetConnectionsSheetState
       return;
     }
 
-    final chars = ref.read(charactersProvider).value ?? [];
-
-    final selected = await GlazeBottomSheet.show<ChatSession>(
+    final selected = await showChatPicker(
       context,
-      title: "${'header_connections'.tr()} ${'tab_dialogs'.tr()}",
-      items: available.map((s) {
-        final char = chars.where((c) => c.id == s.characterId).firstOrNull;
-        return BottomSheetItem(
-          label: '${char?.name ?? s.characterId} #${s.sessionIndex}',
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(s),
-        );
-      }).toList(),
+      title: 'lbc_add_chat'.tr(),
+      excludedSessionIds: existingIds,
     );
 
     if (selected != null) {
-      await setPresetConnection(ref, 'chat', selected.id, widget.presetId);
+      await setPresetConnection(ref, 'chat', selected.sessionId, widget.presetId);
     }
   }
 }

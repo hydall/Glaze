@@ -89,11 +89,22 @@ class PanelHostService {
       return null;
     }
 
+    // The page closed the panel this key had under the message before it
+    // opened the new one; forget it here too.
+    final key = options['key'];
+    if (key is String && key.isNotEmpty) {
+      _panels.removeWhere(
+        (_, p) =>
+            p.charId == charId && p.messageId == messageId && p.key == key,
+      );
+    }
+
     final state = _PanelState(
       localId: localId,
       remoteId: remoteId,
       messageId: messageId,
       charId: charId,
+      key: key is String ? key : '',
       lastHeight: (options['minHeight'] as num?)?.toDouble() ?? 0.0,
     );
     _panels[remoteId] = state;
@@ -229,12 +240,16 @@ class _PanelState {
     required this.messageId,
     required this.charId,
     required this.lastHeight,
+    this.key = '',
   });
 
   final String localId;
   final String remoteId;
   final String messageId;
   final String charId;
+
+  /// The `key` option the panel was opened with; empty when unkeyed.
+  final String key;
   double lastHeight;
 }
 

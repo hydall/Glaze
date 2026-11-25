@@ -28,6 +28,7 @@ import 'controllers/chat_session_controller.dart';
 import 'controllers/chat_draft_controller.dart';
 import 'services/generation_pipeline.dart';
 import 'services/impersonation_service.dart';
+import 'services/variation_error_state.dart';
 import 'state/chat_session_write_queue.dart';
 import 'state/generation_phase_provider.dart';
 import '../extensions/services/extension_post_gen_service.dart';
@@ -76,6 +77,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   /// send's `finally` can tell its own [ChatState.isSendPending] from one a
   /// later send has since set.
   int _sendPendingSeq = 0;
+
+  /// Sends between their first line and their end, by request id, and the
+  /// ones among them the user stopped before the reply started. A stopped
+  /// send is rolled back up to the durable append (its text goes back into
+  /// the composer); after it, the message stays and no reply runs.
+  int _sendRequestSeq = 0;
+  final Set<int> _activeSends = {};
+  final Set<int> _stoppedSends = {};
   int _sessionChangesInFlight = 0;
 
   /// The instruction a guided impersonation ran with, waiting for the message
@@ -121,6 +130,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<ChatState> build() async {
     ref.keepAlive();
     _sessionCtrl = _createSessionController(ref);
+    // These are built once and keep their state through a rebuild, so they
+    // are handed the Ref of this build rather than made again.
+    _abortHandler.rebind(ref);
+    _messageOpsCtrl.rebind(ref);
+    _swipeCtrl.rebind(ref);
+    _draftCtrl.rebind(ref);
     // Mirror this character's generation state into the global registry so the
     // chat list can show a live "typing" indicator for the session without
     // building its full state. Generation outlives the chat screen
@@ -209,7 +224,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       ImageRecoveryService.fixupSwipesWithImageResults(session);
 
   void abortImageGeneration() => _abortHandler.abortImageGeneration();
-  Future<void> abortGeneration() => _abortHandler.abortGeneration();
+  Future<void> abortGeneration() {
+    // Stop is offered from the tap of Send on, not only once the reply runs:
+    // a send still on its way to the pipeline is called off here.
+    if (_activeSends.isNotEmpty) {
+      _stoppedSends.addAll(_activeSends);
+      final current = state.value;
+      if (current != null && current.isSendPending) {
+        state = AsyncData(current.copyWith(isSendPending: false));
+      }
+    }
+    return _abortHandler.abortGeneration();
+  }
+
+  bool _isSendStopped(int request) => _stoppedSends.contains(request);
   void cancelImageGeneration() => _abortHandler.cancelImageGeneration();
   Future<void> retryImageGeneration() async =>
       _imageRecoverySvc.retryImageGeneration();
@@ -323,7 +351,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   void _invalidateHistory() => ref.invalidate(chatHistoryProvider);
 
   // Delegate methods to controllers
-  Future<void> editMessage(
+  Future<MessageEditOutcome> editMessage(
     int index,
     String newContent, {
     String? tagStart,
@@ -357,6 +385,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (current == null ||
         current.isGenerating ||
         current.isSendPending ||
+        current.isStopping ||
         current.isPostGenRunning) {
       throw StateError('The chat is busy generating');
     }
@@ -365,6 +394,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   Future<void> toggleMessageHidden(int index) =>
       _messageOpsCtrl.toggleMessageHidden(index);
+
+  Future<void> setMessagesHidden(Set<String> ids, {required bool hidden}) =>
+      _messageOpsCtrl.setMessagesHidden(ids, hidden: hidden);
 
   Future<void> toggleImageHidden(int index) =>
       _messageOpsCtrl.toggleImageHidden(index);
@@ -432,6 +464,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   Future<void> setGreeting(int messageIndex, int direction) =>
       _swipeCtrl.setGreeting(messageIndex, direction);
+
+  /// Jumps straight to blue sub-swipe [agentSwipeId] (variation picker).
+  Future<void> setAgentSwipe(int messageIndex, int agentSwipeId) =>
+      _swipeCtrl.setAgentSwipe(messageIndex, agentSwipeId);
+
+  /// See [ChatSwipeController.greetingOptions].
+  Future<List<String>> greetingOptions() => _swipeCtrl.greetingOptions();
 
   Future<void> switchSession(int sessionIndex) {
     // The message an impersonation wrote stays in the composer of the chat it
@@ -525,11 +564,37 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     List<String> imageDataUrls = const [],
     Completer<bool>? durableAcceptance,
   }) async {
+    // Claimed on the first line, before any wait, so a Stop tapped while the
+    // send is still queued behind a write already reaches it.
+    final request = ++_sendRequestSeq;
+    _activeSends.add(request);
+    try {
+      await _runSend(
+        request,
+        text,
+        guidanceText: guidanceText,
+        imageDataUrls: imageDataUrls,
+        durableAcceptance: durableAcceptance,
+      );
+    } finally {
+      _activeSends.remove(request);
+      _stoppedSends.remove(request);
+    }
+  }
+
+  Future<void> _runSend(
+    int request,
+    String text, {
+    String? guidanceText,
+    List<String> imageDataUrls = const [],
+    Completer<bool>? durableAcceptance,
+  }) async {
     if (!ref.mounted) {
       durableAcceptance?.complete(false);
       return;
     }
     await _sessionWrites.settle();
+    await _abortHandler.settled;
     if (!ref.mounted) {
       durableAcceptance?.complete(false);
       return;
@@ -550,7 +615,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (current == null ||
         current.isGenerating ||
         current.isGeneratingImage ||
-        current.isPostGenRunning) {
+        current.isPostGenRunning ||
+        _isSendStopped(request)) {
       durableAcceptance?.complete(false);
       return;
     }
@@ -576,6 +642,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         hookedText = hook.text;
         if (hookedText.trim().isEmpty && imageDataUrls.isEmpty) return;
       }
+      if (_isSendStopped(request)) return;
       var outgoingText = hookedText;
       if (translation.enabled &&
           translation.autoTranslateUser &&
@@ -585,6 +652,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           translation.inputLanguage,
           sessionId: current.session!.id,
         );
+        if (!ref.mounted || _isSendStopped(request)) return;
       }
       // Stamp the message with the persona that sent it. The id is what the
       // chat resolves against later (a renamed persona keeps naming its old
@@ -678,6 +746,17 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       );
       await _yieldToFrame();
       if (!ref.mounted) return;
+      if (_isSendStopped(request)) {
+        // Stopped before anything was written: take the bubble back down.
+        // The composer gets the text back from the refused acceptance.
+        final latest = state.value;
+        if (latest != null && latest.session?.id == current.session!.id) {
+          state = AsyncData(
+            latest.copyWith(session: current.session, isSendPending: false),
+          );
+        }
+        return;
+      }
 
       final updatedSession = expectedAcceptedVariation == null
           ? await ref
@@ -716,6 +795,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       if (afterWrite == null ||
           afterWrite.isGenerating ||
           afterWrite.session?.id != updatedSession.id) {
+        return;
+      }
+      if (_isSendStopped(request)) {
+        // Stopped while the message was being written: it stays, the reply
+        // never starts.
+        state = AsyncData(
+          afterWrite.copyWith(session: updatedSession, isSendPending: false),
+        );
         return;
       }
       state = AsyncData(
@@ -778,8 +865,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           }
         }
 
+        // Stopped while the variation was being committed.
+        final beforeRun = state.value;
+        if (beforeRun == null ||
+            !beforeRun.isGenerating ||
+            beforeRun.session?.id != updatedSession.id) {
+          return;
+        }
         // A user-side rewrite block may have changed the message just sent.
-        final latestSession = state.value?.session;
+        final latestSession = beforeRun.session;
         await _runGeneration(
           latestSession?.id == updatedSession.id
               ? latestSession!
@@ -953,6 +1047,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       await abortGeneration();
     }
     await _sessionWrites.settle();
+    await _abortHandler.settled;
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;
@@ -1009,16 +1104,13 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     // session, so nothing extra is persisted. Cancelling puts it back: the
     // abort path reloads the durable row when nothing streamed, and rebuilds
     // `swipes[]` from `restorationMessage` + the partial text when it did.
-    final pendingSwipes = [
-      ...(prevAssistant.swipes.isNotEmpty
-          ? prevAssistant.swipes
-          : [prevAssistant.content]),
-      '',
-    ];
-    final pendingSwipesMeta = [
-      ...?_previousSwipesMetaForRegen(prevAssistant),
-      <String, dynamic>{},
-    ];
+    //
+    // A regenerate over an error replaces it rather than adding beside it:
+    // `regenBaseOf` leaves the failed variation out of what the run builds on
+    // (the restoration snapshot above still holds it, for a cancel).
+    final base = regenBaseOf(prevAssistant);
+    final pendingSwipes = [...base.swipes, ''];
+    final pendingSwipesMeta = [...base.swipesMeta, <String, dynamic>{}];
 
     final clearedMsg = prevAssistant.copyWith(
       content: '',
@@ -1068,14 +1160,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       guidanceText: guidanceText,
       guidanceType: guidanceType,
       regenTargetId: regenTargetId,
-      previousSwipes: prevAssistant.swipes.isNotEmpty
-          ? prevAssistant.swipes
-          : [prevAssistant.content],
-      previousSwipeId: prevAssistant.swipeId,
+      previousSwipes: base.swipes,
+      previousSwipeId: base.droppedActiveError ? 0 : base.activeIndex,
       previousReasoning: prevAssistant.reasoning,
       previousGenTime: prevAssistant.genTime,
       previousTokens: prevAssistant.tokens,
-      previousSwipesMeta: _previousSwipesMetaForRegen(prevAssistant),
+      previousSwipesMeta: base.swipesMeta,
     );
   }
 
@@ -1087,6 +1177,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     await _sessionWrites.settle();
+    await _abortHandler.settled;
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;
@@ -1169,39 +1260,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     }
   }
 
-  List<Map<String, dynamic>>? _previousSwipesMetaForRegen(ChatMessage message) {
-    final swipes = message.swipes.isNotEmpty
-        ? message.swipes
-        : [message.content];
-    final meta = List<Map<String, dynamic>>.generate(
-      swipes.length,
-      (i) => i < message.swipesMeta.length
-          ? Map<String, dynamic>.from(message.swipesMeta[i])
-          : <String, dynamic>{},
-    );
-    if (message.swipeId >= 0 && message.swipeId < meta.length) {
-      final active = meta[message.swipeId];
-      final nested = message.agentSwipes
-          .map((swipe) => swipe.toJson())
-          .toList();
-      if (message.agentSwipeId >= 0 &&
-          message.agentSwipeId < nested.length &&
-          nested[message.agentSwipeId]['time'] == null) {
-        nested[message.agentSwipeId]['time'] = message.time;
-      }
-      meta[message.swipeId] = <String, dynamic>{
-        ...active,
-        if (!active.containsKey('genTime')) 'genTime': message.genTime,
-        if (!active.containsKey('reasoning')) 'reasoning': message.reasoning,
-        if (!active.containsKey('tokens')) 'tokens': message.tokens,
-        if (!active.containsKey('time')) 'time': message.time,
-        if (nested.isNotEmpty) 'agentSwipes': nested,
-        if (nested.isNotEmpty) 'agentSwipeId': message.agentSwipeId,
-      };
-    }
-    return meta;
-  }
-
   /// Extend the trailing assistant message with a fresh generation, then fold
   /// the result back into that message. Runs the ordinary chat pipeline —
   /// same transport, same protocol, same post-generation stages as a send —
@@ -1211,6 +1269,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     await _sessionWrites.settle();
+    await _abortHandler.settled;
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;

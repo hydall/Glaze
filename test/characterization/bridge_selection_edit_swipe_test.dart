@@ -425,6 +425,7 @@ void main() {
         'onSwipe',
         'onRegenerate',
         'onChangeGreeting',
+        'onOpenVariants',
         'onSelectionAction',
         'onEditSave',
         'onEditCancel',

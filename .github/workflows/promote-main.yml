@@ -1,0 +1,188 @@
+name: Promote nightly → main
+
+# Promotes nightly to main (the stable channel) on a schedule, so it does not sit for weeks
+# because nobody remembered to merge it.
+#
+# What gets promoted is not the tip of nightly but the newest commit on it that
+# has been there for at least `soak_hours` (default 72). That commit has had a
+# few days in nightly builds, which is the stand-in for the manual "installed it
+# and used it" gate in docs/WORKFLOW.md. Because the pick moves forward on every
+# run, a busy nightly that never stays quiet for three days still gets promoted.
+#
+# Flow: move the `auto/promote-main` branch to the picked commit, open (or
+# reuse) a PR from it into main, run CI on it, and merge the PR with a merge
+# commit once CI is green — the same shape as the hand-made promotion PRs.
+# Anything that stops the merge (red CI, a conflict with main-only commits,
+# a required review) leaves the PR open and fails this run, so it shows up
+# in the Actions tab and in GitHub's failure email instead of silently stalling.
+#
+# Pause: set the repository variable AUTO_PROMOTE_PAUSED to `true` (Settings →
+# Secrets and variables → Actions → Variables). Scheduled runs then do nothing;
+# a manual run still works.
+#
+# Scheduled workflows only fire from the default branch, so this file has to be
+# on main before the schedule takes effect.
+
+on:
+  schedule:
+    # Wednesdays, 09:00 UTC = 12:00 Moscow. Cron is UTC-only; GitHub may start
+    # an on-the-hour run a few minutes late.
+    - cron: "0 9 * * 3"
+  workflow_dispatch:
+    inputs:
+      soak_hours:
+        description: "Only promote commits that have been on nightly at least this many hours (0 = the tip of nightly)"
+        required: false
+        default: "72"
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: promote-main
+  cancel-in-progress: false
+
+env:
+  PROMOTE_BRANCH: auto/promote-main
+
+jobs:
+  promote:
+    if: github.event_name == 'workflow_dispatch' || vars.AUTO_PROMOTE_PAUSED != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOAK_HOURS: ${{ inputs.soak_hours || '72' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pick the commit to promote
+        id: pick
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin nightly main
+
+          if ! [[ "$SOAK_HOURS" =~ ^[0-9]+$ ]]; then
+            echo "::error::soak_hours must be a whole number, got '$SOAK_HOURS'"
+            exit 1
+          fi
+          cutoff=$(( $(date +%s) - SOAK_HOURS * 3600 ))
+
+          # First-parent history of nightly = one commit per merged PR. Take the
+          # newest one whose commit time is before the cutoff.
+          candidate=""
+          while read -r sha ts; do
+            if [ "$ts" -le "$cutoff" ]; then candidate="$sha"; break; fi
+          done < <(git log --first-parent --format='%H %ct' origin/nightly)
+
+          # Every "nothing to do" exit below ends the run green, with a
+          # one-line reason in the run summary, and touches no branch or PR.
+          skip() {
+            echo "$1"
+            echo "Nothing promoted: $1" >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+
+          if [ -z "$candidate" ]; then
+            skip "nothing on nightly is older than ${SOAK_HOURS}h."
+          fi
+
+          # No PR merged into nightly since the last promotion.
+          if git merge-base --is-ancestor "$candidate" origin/main; then
+            skip "main already contains $(git log -1 --format='%h %s' "$candidate")."
+          fi
+
+          # New commits whose changes main already has (a fix that also went
+          # straight to main, a change and its revert): the merge would leave
+          # main's files exactly as they are, so it would be an empty promotion.
+          # A conflict makes merge-tree fail, which counts as a real change.
+          if merged_tree=$(git merge-tree --write-tree origin/main "$candidate" 2>/dev/null) \
+             && [ "$merged_tree" = "$(git rev-parse 'origin/main^{tree}')" ]; then
+            skip "the new nightly commits would not change any file on main."
+          fi
+
+          count=$(git rev-list --count --first-parent origin/main.."$candidate")
+          echo "Promoting $(git log -1 --format='%h %s' "$candidate") — $count change(s)."
+          {
+            echo "skip=false"
+            echo "sha=$candidate"
+            echo "short=$(git rev-parse --short "$candidate")"
+            echo "count=$count"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Move the promotion branch
+        if: steps.pick.outputs.skip == 'false'
+        run: git push --force origin "${{ steps.pick.outputs.sha }}:refs/heads/$PROMOTE_BRANCH"
+
+      - name: Open or update the PR
+        if: steps.pick.outputs.skip == 'false'
+        id: pr
+        run: |
+          set -euo pipefail
+          sha="${{ steps.pick.outputs.sha }}"
+          title="Merge nightly into main ($(date -u +%Y-%m-%d), ${{ steps.pick.outputs.short }})"
+
+          {
+            echo "Automatic promotion of nightly up to \`${{ steps.pick.outputs.short }}\`,"
+            echo "the newest nightly commit that is at least ${SOAK_HOURS}h old."
+            echo
+            echo "## Changes"
+            echo
+            git log --first-parent --format='- %s' origin/main.."$sha"
+            echo
+            echo "Opened by \`.github/workflows/promote-main.yml\`; it merges this PR itself once CI is green."
+          } > body.md
+
+          number=$(gh pr list --head "$PROMOTE_BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$title" --body-file body.md
+          else
+            gh pr create --head "$PROMOTE_BRANCH" --base main --title "$title" --body-file body.md
+            number=$(gh pr list --head "$PROMOTE_BRANCH" --base main --state open --json number --jq '.[0].number')
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "PR #$number"
+
+      - name: Run CI on the promoted commit
+        # A PR opened with the workflow token does not start pull_request
+        # workflows, so CI is dispatched on the branch instead. Its checks land
+        # on the same commit the PR points at.
+        if: steps.pick.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          sha="${{ steps.pick.outputs.sha }}"
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gh workflow run ci.yml --ref "$PROMOTE_BRANCH"
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            sleep 10
+            run_id=$(gh run list --workflow ci.yml --branch "$PROMOTE_BRANCH" \
+              --event workflow_dispatch --limit 5 \
+              --json databaseId,headSha,createdAt \
+              --jq "[.[] | select(.headSha == \"$sha\" and .createdAt >= \"$started\")][0].databaseId // empty")
+            [ -n "$run_id" ] && break
+          done
+          if [ -z "$run_id" ]; then
+            echo "::error::The CI run did not start."
+            exit 1
+          fi
+
+          echo "Watching CI run $run_id"
+          gh run watch "$run_id" --exit-status --interval 30 > /dev/null
+
+      - name: Merge
+        if: steps.pick.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          gh pr merge "${{ steps.pr.outputs.number }}" --merge \
+            --match-head-commit "${{ steps.pick.outputs.sha }}" --delete-branch
+          echo "Promoted ${{ steps.pick.outputs.count }} change(s) to main in PR #${{ steps.pr.outputs.number }}." >> "$GITHUB_STEP_SUMMARY"

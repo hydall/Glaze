@@ -19,6 +19,7 @@ import '../../core/utils/image_src.dart';
 import '../../core/utils/error_format.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import 'controllers/chat_message_ops_controller.dart';
 import 'editing_message_provider.dart';
 
 import '../../core/state/character_provider.dart';
@@ -37,6 +38,7 @@ import 'widgets/chat_header_search.dart';
 import 'widgets/message_actions.dart';
 import 'widgets/message_delete_confirmation.dart';
 import 'widgets/output_limit_sheet.dart';
+import 'widgets/variant_picker_sheet.dart';
 import 'widgets/game_time_seed_dialog.dart';
 import '../../shared/theme/theme_font_provider.dart';
 import '../../shared/theme/theme_preset.dart';
@@ -473,38 +475,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         // to /chat/<id>?session=N) the keep-alive WebView is already
         // mounted; destroying and recreating `_ChatBody` here would not
         // re-run WebView init reliably and left a grey, unresponsive page
-        // until restart. Keep the body mounted and overlay the spinner so
-        // the WebView's own `_applySessionSwitch` handles the transition.
+        // until restart. Keep the body mounted and show the spinner over it
+        // so the WebView's own `_applySessionSwitch` handles the transition.
         if (awaitingTargetSession && !_everBuiltBody) {
           return const Center(child: GlazeSpinner());
         }
         _everBuiltBody = true;
+        // The spinner over a session switch is drawn by the page
+        // (chrome/busy.js), which also takes the taps until it lands.
+        _chrome.set('busy', awaitingTargetSession);
         return ChatColumnWidth(
-          child: Stack(
-            children: [
-              _ChatBody(
-                charId: charId,
-                state: state,
-                drawerCtrl: _drawerCtrl,
-                search: _search,
-                keyboardHeight: keyboardHeight,
-                onScrollDirection: _onScrollDirection,
-                virtualKeyboardSend: virtualKeyboardSend,
-                enterToSend: enterToSend,
-                targetMessageId: widget.targetMessageId,
-                isHeaderHidden: _isHeaderHidden,
-                chrome: _chrome,
-              ),
-              if (awaitingTargetSession)
-                const Positioned.fill(
-                  child: AbsorbPointer(
-                    child: ColoredBox(
-                      color: Colors.transparent,
-                      child: Center(child: GlazeSpinner()),
-                    ),
-                  ),
-                ),
-            ],
+          child: _ChatBody(
+            charId: charId,
+            state: state,
+            drawerCtrl: _drawerCtrl,
+            search: _search,
+            keyboardHeight: keyboardHeight,
+            onScrollDirection: _onScrollDirection,
+            virtualKeyboardSend: virtualKeyboardSend,
+            enterToSend: enterToSend,
+            targetMessageId: widget.targetMessageId,
+            isHeaderHidden: _isHeaderHidden,
+            chrome: _chrome,
           ),
         );
       },
@@ -819,60 +811,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 /// The round glass button floating over the chat that jumps to the top or the
 /// bottom of the message list. One widget so the two jump buttons only differ
 /// in icon, direction and callback.
-class _ChatScrollButton extends StatelessWidget {
-  const _ChatScrollButton({
-    required this.visible,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final bool visible;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      ignoring: !visible,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-        opacity: visible ? 1 : 0,
-        child: AnimatedSlide(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          offset: visible ? Offset.zero : const Offset(0, 0.2),
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              onTap: onTap,
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: context.cs.surface.withValues(alpha: 0.9),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.08),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.22),
-                      blurRadius: 18,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Icon(icon, color: context.cs.primary, size: 26),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ChatBody extends ConsumerStatefulWidget {
   final String charId;
   final ChatState state;
@@ -921,21 +859,27 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// [didChangeAppLifecycleState].
   double _lastMessageListBottom = 0;
 
-  /// Measured height of the floating [ContextCoverageCard] (0 when hidden) so
-  /// the message list reserves room at the *top* for it — otherwise the card
-  /// floats under the header and covers the first visible messages.
-  double _contextCardHeight = 0.0;
+  /// The part of [_lastMessageListBottom] that must not scroll the chat when
+  /// it changes: the composer's height unless the reader asked the chat to
+  /// follow the composer as it grows. Cached alongside it for the resume
+  /// re-assert.
+  double _lastNonScrollingInset = 0;
 
-  /// The same height, but frozen at the card's *collapsed* size.
+  /// The [ContextCoverageCard]'s *collapsed* height, as the page that draws
+  /// it reports it (0 when it is not shown), so the message list reserves room
+  /// at the *top* for it — otherwise the card floats under the header and
+  /// covers the first visible messages.
   ///
-  /// Only this one insets the message list. Reserving the expanded height too
-  /// would rewrite the WebView's `padding-top` on every open/close, and the
-  /// page keeps its `scrollTop` across that rewrite — so the chat visibly
-  /// jumped each time the panel was toggled. The expanded body is an overlay
-  /// instead: it floats over the first messages for as long as it is open and
-  /// the list underneath never moves.
+  /// Only the collapsed height insets the message list. Reserving the
+  /// expanded height too would rewrite the WebView's `padding-top` on every
+  /// open/close, and the page keeps its `scrollTop` across that rewrite — so
+  /// the chat visibly jumped each time the panel was toggled. The expanded
+  /// body is an overlay instead: it floats over the first messages for as long
+  /// as it is open and the list underneath never moves.
   double _contextCardCollapsedHeight = 0.0;
-  final GlobalKey _contextCardKey = GlobalKey();
+
+  /// Takes the scroll buttons' intents off the chrome again.
+  VoidCallback? _removeScrollIntents;
 
   /// Measured height of the box the chat WebView is laid out in. Pushed to the
   /// page alongside the bottom inset: whether the soft keyboard shrinks the
@@ -1136,6 +1080,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
           _webViewStateKey.currentContext;
     }
     widget.chrome.layout.addListener(_onChromeLayout);
+    _removeScrollIntents = widget.chrome.onAll({
+      'scrollDown': (_) => unawaited(_scrollToBottom()),
+      'scrollUp': (_) => unawaited(_scrollToTop()),
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkHeight());
     _publishOpenChat();
     final targetId = widget.targetMessageId;
@@ -1148,9 +1096,16 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
 
   void _onChromeLayout() {
     if (!mounted) return;
-    final height = widget.chrome.layout.value.composerHeight;
+    final report = widget.chrome.layout.value;
+    final height = report.composerHeight;
     if (height > 0 && (height - _inputBarHeight).abs() >= 0.5) {
       setState(() => _inputBarHeight = height);
+    }
+    // The page reports the coverage card's collapsed height whatever state
+    // the card is in, so opening it never moves the message list.
+    final coverage = report.coverageHeight;
+    if ((coverage - _contextCardCollapsedHeight).abs() >= 0.5) {
+      setState(() => _contextCardCollapsedHeight = coverage);
     }
   }
 
@@ -1206,45 +1161,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
 
   void _checkHeight() {
     if (!mounted) return;
-    var changed = false;
-    var nextContextCardHeight = _contextCardHeight;
-    var nextContextCardCollapsedHeight = _contextCardCollapsedHeight;
-    var nextWebViewBoxHeight = _webViewBoxHeight;
-
-    // The context card is only mounted while visible. When it is absent its
-    // reserved top height collapses back to 0 so the list reclaims the space.
-    final contextHeight = _contextCardKey.currentContext?.size?.height ?? 0.0;
-    if (contextHeight != _contextCardHeight) {
-      nextContextCardHeight = contextHeight;
-      changed = true;
-    }
-
-    // The reserve follows the card only while it is collapsed (and all the way
-    // down to 0 when it unmounts). While it is expanded the last collapsed
-    // height stands, so opening the panel never moves the message list.
-    final reserveHeight = (_contextCardExpanded && contextHeight > 0)
-        ? _contextCardCollapsedHeight
-        : contextHeight;
-    if (reserveHeight != _contextCardCollapsedHeight) {
-      nextContextCardCollapsedHeight = reserveHeight;
-      changed = true;
-    }
-
     // Only ever grows/shrinks with the window itself (rotation, desktop resize)
     // — the keyboard cannot move it, since the scaffold runs with
     // `resizeToAvoidBottomInset: false`.
     final boxHeight = _webViewBoxKey.currentContext?.size?.height ?? 0.0;
     if (boxHeight > 0 && boxHeight != _webViewBoxHeight) {
-      nextWebViewBoxHeight = boxHeight;
-      changed = true;
-    }
-
-    if (changed) {
-      setState(() {
-        _contextCardHeight = nextContextCardHeight;
-        _contextCardCollapsedHeight = nextContextCardCollapsedHeight;
-        _webViewBoxHeight = nextWebViewBoxHeight;
-      });
+      setState(() => _webViewBoxHeight = boxHeight);
     }
   }
 
@@ -1626,6 +1548,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     _keyboardSettleTimer?.cancel();
     _translations.cancelAll();
     widget.chrome.layout.removeListener(_onChromeLayout);
+    _removeScrollIntents?.call();
     super.dispose();
   }
 
@@ -1646,6 +1569,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         _webViewStateKey.currentState?.applyBottomInset(
               _lastMessageListBottom,
               viewportHeight: _webViewBoxHeight,
+              nonScrollingInset: _lastNonScrollingInset,
             ) ??
             Future<void>.value(),
       );
@@ -1873,17 +1797,11 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             : 0.0;
         final panelHeight = math.max(targetDrawerInset, widget.keyboardHeight);
         final factor = math.min(1.0, panelHeight / math.max(1.0, safeBottom));
-        final effectiveBottomInset = panelHeight + (safeBottom * (1 - factor));
         // The context card floats under the header (top of the chat). It is
         // shown when either retrieval layer has something to report, and can be
         // switched off entirely in the interface settings.
         final showContextCard =
             contextCardEnabled && (hasMemoryActivity || lorebookCandidates > 0);
-        // When the card is dismissed its widget unmounts, so the size notifier
-        // can't fire — reclaim the reserved top space on the next frame.
-        if (!showContextCard && _contextCardHeight != 0.0) {
-          WidgetsBinding.instance.addPostFrameCallback((_) => _checkHeight());
-        }
         // Reserve room at the top so the card sits in a gap under the header
         // instead of covering the first visible messages. The gap above the
         // card is part of the reserve — the card is a separate surface from the
@@ -1893,24 +1811,17 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         // WebView as its top padding, and re-pushing it while the panel opens
         // would shift the messages under a stationary scroll offset. See
         // [_contextCardCollapsedHeight].
-        final contextTopReserve = showContextCard
+        final contextTopReserve =
+            showContextCard && _contextCardCollapsedHeight > 0
             ? kContextCardHeaderGap + _contextCardCollapsedHeight + 8
             : 0.0;
         final effectiveTopInset = messageListTop + contextTopReserve;
-        // Where the card actually ends — the expanded body included. The
-        // floating status cards stack below that, so an open panel does not
-        // render underneath them.
-        final contextCardBottom = showContextCard
-            ? messageListTop + kContextCardHeaderGap + _contextCardHeight + 8
-            : messageListTop;
-
-        final messageListBottom = _inputBarHeight + effectiveBottomInset;
 
         // WebView-bound inset: the *end value* of the current transition,
         // not the per-frame animated one. Pushing the animated value would
         // relayout the whole in-WebView message list on every keyboard/
         // drawer frame (see setBottomPadding in chat_bridge_controller.js).
-        // The Flutter overlays below keep following the animation; only the
+        // The page's chrome keeps following the animation; only the
         // WebView padding jumps once, then gets corrected on settle (see
         // didUpdateWidget). While the keyboard rises, the end value is
         // predicted from the persisted last keyboard height; while it
@@ -1943,6 +1854,13 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             targetPanelHeight +
             (safeBottom * (1 - targetFactor));
         _lastMessageListBottom = webViewBottomInset;
+        // A long message wrapping onto another line grows the composer; unless
+        // the reader opted in, that leaves the list where it is instead of
+        // pushing it up. The keyboard and the drawer still move it.
+        final nonScrollingInset = (appSettings?.followComposerResize ?? false)
+            ? 0.0
+            : _inputBarHeight;
+        _lastNonScrollingInset = nonScrollingInset;
         final showScrollBtn =
             _showScrollToBottom &&
             !widget.search.showSearch &&
@@ -1955,6 +1873,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             !widget.isHeaderHidden &&
             !widget.search.showSearch &&
             !isEditingMessage;
+        // Drawn by the page (chrome/scroll.js), above the composer and
+        // under it while it fills the screen; a tap comes back as an intent.
+        widget.chrome.set('scroll', {
+          'down': showScrollBtn,
+          'up': showScrollTopBtn,
+        });
 
         final animatedBottomPanelInset =
             panelHeight + (safeBottom * (1 - factor));
@@ -2051,6 +1975,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         continuationTargetId: widget.state.continuationTargetId,
                         bottomInset: webViewBottomInset,
                         viewportHeight: _webViewBoxHeight,
+                        nonScrollingInset: nonScrollingInset,
                         topInset: effectiveTopInset,
                         chromeChannel: widget.chrome,
                         charName: character?.name,
@@ -2113,6 +2038,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             (appSettings?.hideTokenCount ?? false),
                         disableSwipeRegeneration:
                             appSettings?.disableSwipeRegeneration ?? false,
+                        disableStreamAutoScroll:
+                            appSettings?.disableStreamAutoScroll ?? false,
                         studioEnabled:
                             ref
                                 .watch(
@@ -2195,6 +2122,17 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             ref
                                 .read(chatProvider(widget.charId).notifier)
                                 .setGreeting(idx, dir);
+                          },
+                          onOpenVariants: (id, kind) {
+                            unawaited(
+                              showVariantPickerSheet(
+                                context: context,
+                                ref: ref,
+                                charId: widget.charId,
+                                messageId: id,
+                                kind: kind,
+                              ),
+                            );
                           },
                           onRegenerate: (id, mode) async {
                             if (!await _maybeSeedGameTime()) return;
@@ -2280,11 +2218,29 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         ),
                         editActions: EditActionsCallbacks(
                           onEditSave: (id, text) async {
+                            // Every way the edit can fail to land is said to
+                            // the reader: a refusal that only closed the
+                            // editor looked like a save that lost the text.
                             final idx = widget.state.messages.indexWhere(
                               (m) => m.id == id,
                             );
-                            if (idx >= 0 && text.isNotEmpty) {
-                              await ref
+                            MessageEditOutcome outcome;
+                            String? notice;
+                            if (idx < 0) {
+                              debugPrint(
+                                '[edit] save refused: $id not in chat',
+                              );
+                              outcome = MessageEditOutcome.gone;
+                            } else if (text.isEmpty) {
+                              // The page found no text to send: an emptied
+                              // editor, or none left in the row.
+                              debugPrint(
+                                '[edit] save refused: no text for $id',
+                              );
+                              outcome = MessageEditOutcome.unchanged;
+                              notice = 'edit_refused_empty';
+                            } else {
+                              outcome = await ref
                                   .read(chatProvider(widget.charId).notifier)
                                   .editMessage(
                                     idx,
@@ -2294,11 +2250,36 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                   );
                             }
                             if (!mounted ||
+                                !context.mounted ||
                                 ref.read(
                                       editingMessageIdProvider(widget.charId),
                                     ) !=
                                     id) {
                               return;
+                            }
+                            switch (outcome) {
+                              case MessageEditOutcome.busy:
+                                // The editor stays open with the text in it.
+                                GlazeToast.show(
+                                  context,
+                                  'edit_refused_busy'.tr(),
+                                  isWarning: true,
+                                  duration: 4000,
+                                );
+                                return;
+                              case MessageEditOutcome.gone:
+                                notice = 'edit_refused_gone';
+                              case MessageEditOutcome.saved:
+                              case MessageEditOutcome.unchanged:
+                                break;
+                            }
+                            if (notice != null) {
+                              GlazeToast.show(
+                                context,
+                                notice.tr(),
+                                isWarning: true,
+                                duration: 4000,
+                              );
                             }
                             ref
                                     .read(
@@ -2452,145 +2433,37 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                 ),
               ),
             ),
-            // Everything laid over the WebView keeps to the capped column (see
-            // [ChatColumnWidth]); the WebView alone spans the full width.
-            Positioned.fill(
-              left: column?.gutter ?? 0,
-              right: column?.gutter ?? 0,
-              child: PluginHolesCutter(
-                holes: ref.watch(pluginHolesProvider(widget.charId)),
-                enabled: !pluginLayerSupported(),
-                child: Stack(
-                  children: [
-                    // The scroll-to-bottom button. Mirror Vue ChatInput
-                    // (`v-if="!isSearchMode"`): it is suppressed while searching.
-                    Positioned(
-                      right: 16,
-                      bottom: messageListBottom + 16,
-                      child: _ChatScrollButton(
-                        visible: showScrollBtn,
-                        icon: Icons.keyboard_arrow_down_rounded,
-                        onTap: _scrollToBottom,
-                      ),
+            // The scroll buttons, the context card and the status cards are
+            // drawn by the page too (chrome/scroll.js, chrome/cards.js), in its
+            // own stacking order: under the header and the composer. These
+            // widgets keep the cards' logic and lay out nothing; positioned at
+            // a point so their empty boxes never size the Stack.
+            Positioned(
+              left: 0,
+              top: 0,
+              child: Stack(
+                children: [
+                  if (showContextCard)
+                    ContextCoverageCard(
+                      channel: widget.chrome,
+                      charId: widget.charId,
+                      memory: hasMemoryActivity ? memoryActivity : null,
+                      expanded: _contextCardExpanded,
+                      hidden: widget.isHeaderHidden,
+                      sessionId: widget.state.session?.id,
+                      onToggle: () {
+                        setState(() {
+                          _contextCardExpanded = !_contextCardExpanded;
+                        });
+                      },
                     ),
-                    // Context coverage panel: memory + lorebook for the next prompt.
-                    // It sits under the header, separated by [kContextCardHeaderGap],
-                    // and rides the header's own hide-on-scroll animation (same curve,
-                    // same pixel travel — see
-                    // [kGlazeHeaderHideDuration]), so the two slide away and come back
-                    // as one unit. It cannot live inside GlazeScaffold's header itself:
-                    // its measured height is what insets the top of the message list
-                    // (see [_contextCardHeight]), and that measurement belongs to this
-                    // body. The animation wrappers stay OUTSIDE the size notifier so
-                    // the reserved space is the panel's natural height — the reserve
-                    // does not collapse while the header is hidden, exactly like the
-                    // header's own reserved strip.
-                    if (showContextCard)
-                      Positioned(
-                        top: messageListTop + kContextCardHeaderGap,
-                        left: 12,
-                        right: 12,
-                        child: IgnorePointer(
-                          ignoring: widget.isHeaderHidden,
-                          child: AnimatedSlide(
-                            offset: widget.isHeaderHidden
-                                ? Offset(
-                                    0,
-                                    -glazeHeaderHideSlideFor(
-                                      // The panel is anchored below the header, one
-                                      // gap down: `messageListTop` (safe-area top +
-                                      // 10px padding + the 56px app bar) plus that gap
-                                      // is how far it has to travel to clear it.
-                                      headerHeight:
-                                          messageListTop +
-                                          kContextCardHeaderGap,
-                                      overlayHeight: _contextCardHeight,
-                                    ),
-                                  )
-                                : Offset.zero,
-                            duration: kGlazeHeaderHideDuration,
-                            curve: kGlazeHeaderHideCurve,
-                            child: AnimatedOpacity(
-                              opacity: widget.isHeaderHidden ? 0.0 : 1.0,
-                              duration: kGlazeHeaderHideDuration,
-                              curve: kGlazeHeaderHideCurve,
-                              child:
-                                  NotificationListener<
-                                    SizeChangedLayoutNotification
-                                  >(
-                                    onNotification: (n) {
-                                      WidgetsBinding.instance
-                                          .addPostFrameCallback(
-                                            (_) => _checkHeight(),
-                                          );
-                                      return true;
-                                    },
-                                    child: SizeChangedLayoutNotifier(
-                                      child: Container(
-                                        key: _contextCardKey,
-                                        child: ContextCoverageCard(
-                                          charId: widget.charId,
-                                          memory: hasMemoryActivity
-                                              ? memoryActivity
-                                              : null,
-                                          expanded: _contextCardExpanded,
-                                          sessionId: widget.state.session?.id,
-                                          onToggle: () {
-                                            setState(() {
-                                              _contextCardExpanded =
-                                                  !_contextCardExpanded;
-                                            });
-                                          },
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    // POST-cleaner live status card. Rendered AFTER the memory activity
-                    // card so it sits ABOVE it in z-order — the Stop button must stay
-                    // clickable even when the memory card is visible underneath.
-                    Positioned(
-                      left: 12,
-                      right: 12,
-                      top: contextCardBottom,
-                      child: const PostCleanerStatusCard(),
-                    ),
-                    // Studio tracker-cycle live status card. Shown during generation
-                    // while Studio trackers / final generator are running.
-                    Positioned(
-                      left: 12,
-                      right: 12,
-                      top: contextCardBottom + 56,
-                      child: const StudioStatusCard(),
-                    ),
-                    // Post-generation tasks (Ledger and extension blocks) live status.
-                    Positioned(
-                      left: 12,
-                      right: 12,
-                      top: contextCardBottom + 112,
-                      child: PostGenStatusCard(
-                        sessionId: widget.state.session?.id,
-                      ),
-                    ),
-                    // Scroll-to-top: stacked directly above the scroll-to-bottom
-                    // button in the bottom-right corner. It is gated on the header's
-                    // own hide-on-scroll (`!widget.isHeaderHidden`), so a downward
-                    // scroll takes it away with the header and an upward one brings it
-                    // back. Suppressed while searching, like the bottom button.
-                    Positioned(
-                      right: 16,
-                      bottom: messageListBottom + 16 + 44 + 8,
-                      child: _ChatScrollButton(
-                        visible: showScrollTopBtn,
-                        icon: Icons.keyboard_arrow_up_rounded,
-                        onTap: _scrollToTop,
-                      ),
-                    ),
-                  ],
-                ),
+                  PostCleanerStatusCard(channel: widget.chrome),
+                  StudioStatusCard(channel: widget.chrome),
+                  PostGenStatusCard(
+                    channel: widget.chrome,
+                    sessionId: widget.state.session?.id,
+                  ),
+                ],
               ),
             ),
             // The composer and the drawer are drawn by the page; these keep
@@ -2641,12 +2514,16 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                       _webViewStateKey.currentState?.selectMessagesBelow();
                     },
                     onHideSelected: () async {
-                      await _selectionCtrl.hideSelected(
+                      // hideSelected drops the selection synchronously;
+                      // rebuild before awaiting so the toolbar closes on the
+                      // frame of the tap.
+                      final pending = _selectionCtrl.hideSelected(
                         ref,
                         widget.charId,
                         widget.state.messages,
                       );
-                      if (mounted) setState(() {});
+                      setState(() {});
+                      await pending;
                     },
                     onDeleteSelected: () async {
                       if (!await confirmMessageDeletion(
@@ -2706,25 +2583,28 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                 imageDataUrls: imageDataUrls,
                               );
                         },
-                    isGenerating: widget.state.isGenerating,
+                    // The send window counts: the button turns into Stop on
+                    // the tap of Send, not once the message is written and the
+                    // reply starts, and Stop there calls the send off.
+                    isGenerating:
+                        widget.state.isGenerating ||
+                        widget.state.isSendPending,
                     isGeneratingImage: widget.state.isGeneratingImage,
                     isPostGenRunning: widget.state.isPostGenRunning,
-                    onStop:
-                        (widget.state.isGenerating ||
-                            widget.state.isGeneratingImage ||
-                            widget.state.isPostGenRunning)
-                        ? () {
-                            final notifier = ref.read(
-                              chatProvider(widget.charId).notifier,
-                            );
-                            if (widget.state.isGeneratingImage &&
-                                !widget.state.isGenerating) {
-                              notifier.cancelImageGeneration();
-                            } else {
-                              notifier.abortGeneration();
-                            }
-                          }
-                        : null,
+                    // Always wired: the composer offers Stop only while
+                    // something runs, including a send it is still handing
+                    // over, before any of these flags is up.
+                    onStop: () {
+                      final notifier = ref.read(
+                        chatProvider(widget.charId).notifier,
+                      );
+                      if (widget.state.isGeneratingImage &&
+                          !widget.state.isGenerating) {
+                        notifier.cancelImageGeneration();
+                      } else {
+                        notifier.abortGeneration();
+                      }
+                    },
                     // On desktop the drawer lives in the right sidebar and the
                     // bottom drawer is never rendered — the button would only
                     // animate an empty gap open, so it is left out.

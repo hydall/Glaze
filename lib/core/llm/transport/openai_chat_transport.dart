@@ -197,7 +197,8 @@ class OpenAiChatTransport implements ChatTransport {
     }
     if (!r.omitReasoning && r.requestReasoning && !r.omitReasoningEffort) {
       // Wire values are protocol-specific: official OpenAI caps at `high`,
-      // while a selected Custom Chat Completion protocol keeps `max`.
+      // while a selected Custom Chat Completion protocol keeps `max` (Gemini 4
+      // names excepted — they get the top level the model has).
       final effort = resolveReasoningEffort(
         protocol: protocol,
         effort: r.reasoningEffort,

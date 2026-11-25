@@ -9,6 +9,7 @@ import '../../chat/widgets/message_scripts_prompt_sheet.dart';
 import '../app_settings_provider.dart';
 import 'settings_group_base.dart';
 import 'settings_highlight.dart';
+import 'reveal_hidden_hotkey_item.dart';
 import 'settings_pickers.dart';
 
 /// The behaviour half of the settings screen: what the app does, as opposed to
@@ -84,6 +85,23 @@ class ChatGroup extends SettingsGroup {
           onChanged: (v) => notifierOf(
             ref,
           ).save(settings.copyWith(disableSwipeRegeneration: !v)),
+        ),
+        toggle(
+          id: 'stream_auto_scroll',
+          label: 'menu_stream_auto_scroll'.tr(),
+          description: 'desc_stream_auto_scroll'.tr(),
+          value: !settings.disableStreamAutoScroll,
+          onChanged: (v) => notifierOf(
+            ref,
+          ).save(settings.copyWith(disableStreamAutoScroll: !v)),
+        ),
+        toggle(
+          id: 'follow_composer_resize',
+          label: 'menu_follow_composer_resize'.tr(),
+          description: 'desc_follow_composer_resize'.tr(),
+          value: settings.followComposerResize,
+          onChanged: (v) =>
+              notifierOf(ref).save(settings.copyWith(followComposerResize: v)),
         ),
         toggle(
           id: 'show_msg_id',
@@ -337,6 +355,11 @@ class DesktopGroup extends SettingsGroup {
           value: settings.forceMobileLayout,
           onChanged: (v) =>
               notifierOf(ref).save(settings.copyWith(forceMobileLayout: v)),
+        ),
+        highlightIf(
+          'reveal_hidden_hotkey',
+          highlightId,
+          const RevealHiddenHotkeyItem(),
         ),
       ],
     );

@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/generation_phase.dart';
 import '../../../core/models/chat_message.dart';
-import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
 import '../../../core/state/active_regex_provider.dart';
 import '../../../core/state/character_provider.dart';
@@ -17,7 +16,6 @@ import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
 import '../../extensions/providers/info_blocks_provider.dart';
 import '../../extensions/services/card_blocks.dart';
-import '../../personas/persona_list_provider.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../chat_provider.dart';
 import '../chat_state.dart';
@@ -84,7 +82,6 @@ class ChatWebViewBuildListeners {
   /// from the top of `State.build` after the `ref.watch` reads.
   void attach() {
     _listenDisplayRegexes();
-    _listenPersonaRoster();
     _listenEditingMessage();
     _listenGenerationPhase();
     _listenContextWindowStart();
@@ -139,37 +136,6 @@ class ChatWebViewBuildListeners {
     );
     if (isCurrentBridge?.call(b) == false || !ready()) return;
     await onReconcileActiveGeneration(b);
-  }
-
-  /// Keeps rendered messages in step with the persona roster. A user message
-  /// stores the id of the persona it was sent as, and the WebView resolves that
-  /// id when it renders: renaming a persona must rename its own past messages,
-  /// and deleting one must drop those messages back to a letter avatar while
-  /// keeping the name stored on them. Neither reaches the page on its own —
-  /// the maps are built in Dart — so the roster is re-pushed and the messages
-  /// re-rendered here.
-  void _listenPersonaRoster() {
-    ref.listen<AsyncValue<List<Persona>>>(personaListProvider, (prev, next) {
-      final b = bridge;
-      if (b == null || !ready()) return;
-      final oldList = prev?.value ?? const <Persona>[];
-      final newList = next.value ?? const <Persona>[];
-      if (!_personaRosterChanged(oldList, newList)) return;
-      b.setPersonaRoster(newList);
-      // Same reasoning as the display-regex re-render above: every message map
-      // is affected, so the batch is a full re-render that keeps the scroll
-      // position.
-      unawaited(() async {
-        onDomReset();
-        await b.setMessages(
-          messages,
-          visibleStartIndex: visibleStartIndex,
-          preserveScroll: true,
-        );
-        if (isCurrentBridge?.call(b) == false || !ready()) return;
-        await onReconcileActiveGeneration(b);
-      }());
-    });
   }
 
   void _listenEditingMessage() {
@@ -385,9 +351,17 @@ class ChatWebViewBuildListeners {
         for (final b in next) b.messageId,
       };
       final allIds = assistantIds.union(blockIds.intersection(assistantIds));
-      for (final msgId in allIds) {
-        unawaited(onRefreshExtBlocksPanel(sid, msgId));
-      }
+      // Deferred by a microtask: listeners are notified in subscription
+      // order, so when this one was added before the panel providers watched
+      // the blocks, reading them right away returns the list from before
+      // this change. The card then missed states such as "running" after a
+      // redraw tap, depending on when the chat last rebuilt (issue #839).
+      scheduleMicrotask(() {
+        if (bridge == null || !ready()) return;
+        for (final msgId in allIds) {
+          unawaited(onRefreshExtBlocksPanel(sid, msgId));
+        }
+      });
       // A block shown inside the message changes the message's own text.
       final b = bridge!;
       for (final message in messagesWithChangedInlineBlocks(
@@ -470,21 +444,6 @@ class ChatWebViewBuildListeners {
       },
     );
   }
-
-  /// True when the roster changed in a way a rendered message can show: which
-  /// personas exist, their names, or their avatars. Anything else about a
-  /// persona (its prompt, say) never reaches the chat bubble.
-  static bool _personaRosterChanged(List<Persona> a, List<Persona> b) {
-    if (a.length != b.length) return true;
-    final byId = {for (final p in a) p.id: p};
-    for (final p in b) {
-      final old = byId[p.id];
-      if (old == null || old.name != p.name || old.avatarPath != p.avatarPath) {
-        return true;
-      }
-    }
-    return false;
-  }
 }
 
 /// True when the two display-regex lists differ in a way a rendered message can
@@ -493,7 +452,9 @@ class ChatWebViewBuildListeners {
 bool displayRegexListsDiffer(List<PresetRegex> a, List<PresetRegex> b) {
   if (a.length != b.length) return true;
   for (int i = 0; i < a.length; i++) {
-    if (a[i].id != b[i].id || a[i].disabled != b[i].disabled) return true;
+    // The whole script, not only its id and switch: an edited pattern or
+    // replacement changes what the chat shows just as much.
+    if (a[i] != b[i]) return true;
   }
   return false;
 }

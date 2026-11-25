@@ -9,7 +9,6 @@ import '../../../core/state/active_regex_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
-import '../../personas/persona_list_provider.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_overlay_blur_region.dart';
 import '../chat_provider.dart';
@@ -47,12 +46,14 @@ class ChatWebViewInitInput {
     required this.disableSwipeRegeneration,
     required this.studioEnabled,
     this.translationEnabled = false,
+    this.disableStreamAutoScroll = false,
     required this.messages,
     required this.visibleStartIndex,
     required this.memoryEntries,
     required this.memoryDrafts,
     required this.bottomInset,
     this.viewportHeight = 0,
+    this.nonScrollingInset = 0,
     required this.topInset,
     this.blurRegions = const [],
     required this.searchQuery,
@@ -88,6 +89,7 @@ class ChatWebViewInitInput {
   final bool disableSwipeRegeneration;
   final bool studioEnabled;
   final bool translationEnabled;
+  final bool disableStreamAutoScroll;
   final List<ChatMessage> messages;
   final int visibleStartIndex;
   final List<dynamic> memoryEntries;
@@ -97,6 +99,10 @@ class ChatWebViewInitInput {
   /// Height of the WebView box, so the page can tell how much of
   /// [bottomInset] its own viewport already absorbed.
   final double viewportHeight;
+
+  /// The part of [bottomInset] whose changes leave the reading position alone
+  /// (see LayoutBridgeCommands.setBottomPadding).
+  final double nonScrollingInset;
   final double topInset;
   final List<ChatOverlayBlurRegion> blurRegions;
   final String? searchQuery;
@@ -156,10 +162,6 @@ class ChatWebViewInitializer {
         sessionId: input.sessionId,
       )),
     );
-    // Before the first setMessages: user messages resolve their stored
-    // `personaId` against this roster, and one that arrives late would render
-    // the whole chat with letter avatars first.
-    bridge.setPersonaRoster(ref.read(personaListProvider).value ?? const []);
     bridge.setRegexContext(
       await _displayRegexes(),
       character,
@@ -196,6 +198,7 @@ class ChatWebViewInitializer {
       disableSwipeRegeneration: input.disableSwipeRegeneration,
       studioEnabled: input.studioEnabled,
       translationEnabled: input.translationEnabled,
+      disableStreamAutoScroll: input.disableStreamAutoScroll,
     );
     // Persona/char identity can resolve while theme and assets load above.
     await _setIdentity();
@@ -290,6 +293,7 @@ class ChatWebViewInitializer {
       await bridge.setBottomPadding(
         input.bottomInset,
         viewportHeight: input.viewportHeight,
+        nonScrollingInset: input.nonScrollingInset,
       );
     }
     if (input.topInset > 0) {

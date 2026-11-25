@@ -792,13 +792,14 @@ class StreamGenerationService {
         // Whether this round streamed anything, rather than whether the reply
         // has text: an earlier tool round may already have filled it.
         var roundGotDeltas = false;
+        // When this round's first chunk arrived, for the outcome log line: it
+        // tells a server that never answered from one that stalled mid-reply.
+        int? firstChunkMs;
 
         // Idle timeout: cancel the timer on the first chunk (text OR reasoning)
         // so a long (but progressing) generation is never cut off. Mirrors
         // AgentStreamRunner and AuxLlmClient patterns.
-        final idleTimeoutMs = apiConfig.firstChunkTimeoutMs > 0
-            ? apiConfig.firstChunkTimeoutMs
-            : 120000;
+        final idleTimeoutMs = apiConfig.effectiveFirstChunkTimeoutMs;
         bool idleTimedOut = false;
         final idleGuard = IdleTimeoutGuard(idleTimeoutMs, () {
           idleTimedOut = true;
@@ -835,6 +836,7 @@ class StreamGenerationService {
           apiConfig,
           messages: requestMessages,
           sessionId: session.id,
+          receiveTimeoutMs: apiConfig.transportReceiveTimeoutMs,
           previousMessages: previousApiMessages,
           charName: inputs.character.name,
           userName: inputs.persona?.name ?? 'User',
@@ -859,6 +861,9 @@ class StreamGenerationService {
             if (delta.isNotEmpty || reasoningDelta?.isNotEmpty == true) {
               idleGuard.cancel();
               roundGotDeltas = true;
+              firstChunkMs ??= DateTime.now()
+                  .difference(startGenTime)
+                  .inMilliseconds;
             }
             accumulator.consumeDelta(delta, reasoningDelta: reasoningDelta);
             // Reasoning-only output keeps the typing bubble on screen (the
@@ -936,6 +941,12 @@ class StreamGenerationService {
                 .inMilliseconds;
             final timeStr = '${(elapsed / 1000).toStringAsFixed(1)}s';
             final tokenCount = estimateTokens(finalText);
+            _log(
+              'generation done char=$_charId session=${session.id} '
+              'round=$round host=${_endpointHost(apiConfig.endpoint)} '
+              'elapsedMs=$elapsed firstChunkMs=${firstChunkMs ?? '-'} '
+              'chars=${finalText.length}',
+            );
             // Read off what the model produced, before the reasoning markers
             // and beauty-state blocks were stripped: all of it counted against
             // the cap.
@@ -1026,6 +1037,13 @@ class StreamGenerationService {
           onError: (error) {
             closeStreamPublishing();
             idleGuard.dispose();
+            _log(
+              'generation failed char=$_charId session=${session.id} '
+              'round=$round host=${_endpointHost(apiConfig.endpoint)} '
+              'elapsedMs=${DateTime.now().difference(startGenTime).inMilliseconds} '
+              'firstChunkMs=${firstChunkMs ?? '-'} '
+              'error=${idleTimedOut ? 'firstChunkTimeout(${idleTimeoutMs}ms)' : describeErrorForLog(error)}',
+            );
             if (idleTimedOut) {
               final msg = 'error_first_chunk_timeout'.tr(
                 namedArgs: {'seconds': '${idleTimeoutMs ~/ 1000}'},
@@ -1288,6 +1306,12 @@ class StreamGenerationService {
 
   static void _log(String message) {
     debugPrint('[StudioGen] $message');
+  }
+
+  /// Only the host: the path and query of a custom endpoint can carry a key.
+  static String _endpointHost(String endpoint) {
+    final host = Uri.tryParse(endpoint.trim())?.host ?? '';
+    return host.isEmpty ? '?' : host;
   }
 
   /// Record one successful generation against [model] for the global "Top

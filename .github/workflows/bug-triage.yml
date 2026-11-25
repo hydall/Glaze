@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
 
       # The audited source is always nightly, whatever branch started the run.
-      # Scheduled runs only fire from the default branch (stable), which trails
+      # Scheduled runs only fire from the default branch (main), which trails
       # nightly by hundreds of commits — auditing that would judge reports
       # against code the fix has long since left.
       - name: Checkout nightly (the source the agent reads)

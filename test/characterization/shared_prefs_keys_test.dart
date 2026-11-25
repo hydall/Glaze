@@ -17,6 +17,8 @@ void main() {
       'batterySaverMode': String,
       'hideTooltips': bool,
       'disableSwipeRegeneration': bool,
+      'disableStreamAutoScroll': bool,
+      'followComposerResize': bool,
       'allowMessageScripts': bool,
       'allowExternalMedia': bool,
       'confirmMessageDelete': bool,
@@ -318,6 +320,10 @@ bool _getBoolDefault(AppSettings s, String key) {
       return s.hideTooltips;
     case 'disableSwipeRegeneration':
       return s.disableSwipeRegeneration;
+    case 'disableStreamAutoScroll':
+      return s.disableStreamAutoScroll;
+    case 'followComposerResize':
+      return s.followComposerResize;
     case 'confirmMessageDelete':
       return s.confirmMessageDelete;
     case 'allowExternalMedia':

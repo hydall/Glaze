@@ -333,13 +333,6 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                     header: 'menu_dev_header'.tr(),
                     headerIcon: Icons.developer_mode_rounded,
                     items: [
-                      MenuSwitchItem(
-                        label: 'menu_hide_build_date_watermark'.tr(),
-                        value: ref.watch(hideBuildWatermarkProvider),
-                        onChanged: (v) => ref
-                            .read(hideBuildWatermarkProvider.notifier)
-                            .set(v),
-                      ),
                       MenuItem(
                         icon: Icons.widgets_outlined,
                         label: 'menu_menu_group_demo'.tr(),

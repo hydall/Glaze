@@ -97,11 +97,21 @@ export class PanelHost {
     const section = document.querySelector(`[data-message-id="${messageId}"]`);
     if (!section) return null;
 
+    // A keyed panel (one per ext block) replaces the one an earlier run of the
+    // same block left under this message instead of stacking another frame.
+    const key = typeof options.key === 'string' ? options.key : '';
+    if (key) {
+      for (const [id, existing] of [...this._panels]) {
+        if (existing.messageId === messageId && existing.key === key) this.close(id);
+      }
+    }
+
     const panelId = `panel_${this._nextId++}_${Date.now()}`;
     const host = document.createElement('div');
     host.className = 'interactive-panel';
     host.dataset.panelId = panelId;
     host.dataset.messageId = messageId;
+    if (key) host.dataset.panelKey = key;
 
     const placeholderHeight = Math.max(
       60,
@@ -127,6 +137,7 @@ export class PanelHost {
     const panel = {
       panelId,
       messageId,
+      key,
       host,
       iframe,
       ready: false,

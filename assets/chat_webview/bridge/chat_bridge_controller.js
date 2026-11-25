@@ -13,7 +13,7 @@ import { PanelHost } from './panel_host.js';
 import { sanitizeExtBlockHtml } from './html_sanitizer.js';
 import { stripExternalMedia } from './external_media.js';
 import { dropExternalHoists } from '../renderer/message_document.js';
-import { parseImageResultElement, parseImagePendingPayload } from '../formatter/formatter.js';
+import { parseImageResultElement, parseImagePendingPayload, parseImageResultPayload } from '../formatter/formatter.js';
 
 /* Breathing room the caret keeps from the chrome it is being revealed past.
  * Landing the caret exactly on the input bar's edge reads as though it is
@@ -115,6 +115,11 @@ export class Bridge {
     this._personaAvatarUrl = null;
     this.batterySaver = false;
     this.disableSwipeRegeneration = false;
+    // Settings → Chat → "Auto-scroll while streaming", stored inverted. Only
+    // the follow during a generation is gated; a send still jumps down.
+    this.disableStreamAutoScroll = false;
+    virtualList.isFollowSuppressed = () =>
+      this.disableStreamAutoScroll && !!this.isGenerating;
     // One "a message tried to run JS" report per WebView load — see
     // notifyMessageScriptBlocked().
     this._messageScriptBlockedNotified = false;
@@ -143,6 +148,10 @@ export class Bridge {
     // embedder already removed by shrinking the WebView's own viewport.
     this._bottomInsetPx = 0;
     this._viewportFullH = 0;
+    // The part of `_bottomInsetPx` whose changes must not move the reading
+    // position — the composer's height while the "follow the composer" setting
+    // is off, otherwise 0. See setBottomPadding().
+    this._nonScrollingInsetPx = 0;
     // Re-pin glide state (see _glideScrollTo). `_atBottom` is the live
     // parked-at-bottom flag kept by the scroll listener; the very first inset
     // application lands instantly so the chat doesn't slide into place on open.
@@ -174,18 +183,12 @@ export class Bridge {
     sections.forEach(section => {
       const isUser = section.classList.contains('user');
       const stored = section.dataset.personaName || '';
-      const storedPersonaName = stored === 'You' ? '' : stored;
-      // A message pinned to the persona it was sent as keeps that persona's
-      // name and avatar — the letter included, when the persona was deleted.
-      // Only unpinned messages follow the active identity.
-      const pinned = section.dataset.avatarPinned === '1';
-      // Per-message stored persona wins; otherwise use the active identity.
+      // Every user message wears the active persona, so a switch re-faces the
+      // whole chat at once.
       const newName = isUser
-        ? ((pinned ? stored : storedPersonaName) || this._personaName || 'You')
+        ? (this._personaName || 'You')
         : (this._charName || stored || 'Character');
-      const newAvatarUrl = pinned
-        ? (section.dataset.avatarUrl || null)
-        : (isUser ? this._personaAvatarUrl : this._charAvatarUrl);
+      const newAvatarUrl = isUser ? this._personaAvatarUrl : this._charAvatarUrl;
 
       const label = section.querySelector('.msg-name-label');
       if (label) label.textContent = newName;
@@ -514,6 +517,9 @@ export class Bridge {
       lastShowScrollToBottom = show;
       this._sendToFlutter('onScrollToBottomVisibility', [show]);
     };
+    // A reply that grows below a reader who turned the streaming follow off
+    // fires no scroll event, so updateMessage re-checks the button itself.
+    this._emitScrollToBottomVisibility = emitScrollToBottomVisibility;
 
     // Content that grows or shrinks *above* the reader moves `scrollTop` with
     // it — a page of older messages prepended, rows mounting above the viewport
@@ -720,11 +726,36 @@ export class Bridge {
     };
     window.addEventListener('scroll', pin, { passive: true });
     document.addEventListener('scroll', pin, { passive: true });
+    // The events above miss a pan now and then: between the tap that focuses
+    // the composer and the keyboard settling, the browser can pan in a frame
+    // that fires no visual viewport scroll of its own (or fires it before the
+    // offset reads back), and the composer is then lifted to the top of the
+    // screen until the keyboard closes. So for a short while after a field
+    // takes focus or the viewport resizes, the lock also checks every frame.
+    // Outside that window it costs nothing.
+    let watchUntil = 0;
+    let watching = false;
+    const watchFrame = () => {
+      pin();
+      if (performance.now() < watchUntil) {
+        requestAnimationFrame(watchFrame);
+      } else {
+        watching = false;
+      }
+    };
+    const watch = () => {
+      watchUntil = performance.now() + 1500;
+      if (watching) return;
+      watching = true;
+      requestAnimationFrame(watchFrame);
+    };
+    this._watchDocumentScrollLock = watch;
+    document.addEventListener('focusin', watch, true);
     if (vv) {
       vv.addEventListener('scroll', pin, { passive: true });
       // The keyboard arriving is a resize; a pan made in the same step may not
       // announce itself with a scroll of its own.
-      vv.addEventListener('resize', pin, { passive: true });
+      vv.addEventListener('resize', () => { pin(); watch(); }, { passive: true });
     }
   }
 
@@ -1158,7 +1189,12 @@ export class Bridge {
   }
 
   _executeUpdateMessage(msg) {
-    const section = document.querySelector(`[data-message-id="${msg.id}"]`);
+    // A row scrolled out of the virtual window is detached from the document
+    // but kept in `itemMap`; patch that element too, or the change (a hide, an
+    // edit) is lost and the row comes back stale when it scrolls into view.
+    const section = document.querySelector(`[data-message-id="${msg.id}"]`)
+      || this.virtualList?.itemMap?.get(msg.id)?.el
+      || null;
     if (!section) {
       // Last line of defence for the virtual placeholder: while Flutter still
       // believes one is on screen, a node the list lost has to be re-created
@@ -1244,6 +1280,7 @@ export class Bridge {
     // yanking a user who scrolled up.
     if (msg.isTyping && !(this.renderer && this.renderer.searchQuery)) {
       this.virtualList.smartScroll();
+      if (this.disableStreamAutoScroll) this._emitScrollToBottomVisibility?.();
     }
   }
 
@@ -1271,42 +1308,44 @@ export class Bridge {
     const hasGreetings = isChar && messageIndex === 0 && greetingTotal > 1;
     const showRegen = ((!isChar && isLast) || isError) && !isGenerating && !isEditing;
 
-    center.innerHTML = '';
+    // Built off-DOM and then reconciled, so taps on the arrows survive an
+    // update landing mid-press (see _reconcileControls).
+    const fresh = document.createElement('div');
 
     if (hasSwipes) {
-      center.appendChild(this.renderer._createSwitcher(section.dataset.messageId, swipeIndex || 0, swipeTotal, 'swipe'));
+      fresh.appendChild(this.renderer._createSwitcher(section.dataset.messageId, swipeIndex || 0, swipeTotal, 'swipe'));
     } else if (hasGreetings) {
-      center.appendChild(this.renderer._createSwitcher(section.dataset.messageId, greetingIndex || 0, greetingTotal, 'greeting'));
+      fresh.appendChild(this.renderer._createSwitcher(section.dataset.messageId, greetingIndex || 0, greetingTotal, 'greeting'));
     }
 
     // Nested swipes: blue sub-swipe switcher.
     if (hasAgentSwipes) {
-      center.appendChild(this.renderer._createSwitcher(section.dataset.messageId, agentSwipeIndex || 0, agentSwipeTotal, 'agent-swipe'));
+      fresh.appendChild(this.renderer._createSwitcher(section.dataset.messageId, agentSwipeIndex || 0, agentSwipeTotal, 'agent-swipe'));
     }
 
     if (isChar && isLast && !isGenerating && !isEditing && agentSwipeTotal >= 1) {
       const rerun = document.createElement('div');
-      rerun.className = 'msg-rerun-cleaner';
+      rerun.className = 'msg-rerun-cleaner tavo-action-bar-button';
       rerun.dataset.action = 'rerun-cleaner';
       rerun.dataset.messageId = section.dataset.messageId;
       rerun.title = 'Re-run cleaner';
       rerun.innerHTML = ICON.rerunCleaner;
-      center.appendChild(rerun);
+      fresh.appendChild(rerun);
     }
 
     if (isChar && isLast && !isGenerating && !isEditing) {
       const guided = document.createElement('div');
-      guided.className = 'msg-guided-swipe-btn';
+      guided.className = 'msg-guided-swipe-btn tavo-action-bar-button';
       guided.dataset.action = 'toggle-guided';
       guided.dataset.messageId = section.dataset.messageId;
       guided.title = 'Guided swipe';
       guided.innerHTML = ICON.guided;
-      center.appendChild(guided);
+      fresh.appendChild(guided);
     }
 
     if (showRegen) {
       const regen = document.createElement('div');
-      regen.className = 'msg-regenerate';
+      regen.className = 'msg-regenerate tavo-action-bar-button';
       if (hasSwipes || hasGreetings || hasAgentSwipes) regen.classList.add('icon-only');
       regen.dataset.action = 'regenerate';
       regen.dataset.messageId = section.dataset.messageId;
@@ -1318,8 +1357,31 @@ export class Bridge {
         span.textContent = 'Regenerate';
         regen.appendChild(span);
       }
-      center.appendChild(regen);
+      fresh.appendChild(regen);
     }
+
+    this._reconcileControls(center, fresh);
+  }
+
+  /* Puts the freshly built footer controls into `center`. When the set of
+   * controls is the same as what is on screen — the common case while the
+   * reader flips through variations — only the counters are rewritten and the
+   * existing buttons stay. Replacing them on every update meant a tap that was
+   * pressed on one arrow and released on its replacement never became a click,
+   * so quick taps on the switcher were silently dropped. */
+  _reconcileControls(center, fresh) {
+    const signature = (el) => [...el.children].map((child) =>
+      `${child.className}|${child.dataset.kind || ''}|${child.dataset.action || ''}|${child.childElementCount}`
+    ).join(';');
+    if (signature(center) !== signature(fresh)) {
+      center.replaceChildren(...fresh.children);
+      return;
+    }
+    const nextCounts = fresh.querySelectorAll('.msg-switcher-count');
+    center.querySelectorAll('.msg-switcher-count').forEach((count, i) => {
+      const text = nextCounts[i]?.textContent ?? '';
+      if (count.textContent !== text) count.textContent = text;
+    });
   }
 
   setLastMessage(newLastId) {
@@ -1514,11 +1576,37 @@ export class Bridge {
   // The keyboard moves the content by exactly [px]'s delta either way; only how
   // much of it has to be *padding* differs, so the scroll compensation below is
   // driven by the inset and stays independent of the split.
-  setBottomPadding(px, viewportHeight) {
+  //
+  // [nonScrollingInset] is the part of [px] whose changes leave the reading
+  // position alone: the composer's height when the reader turned off following
+  // it as it grows, otherwise 0. A push in which only that part moved (a long
+  // message wrapping onto another line) re-pads the list without scrolling it;
+  // the keyboard and drawer keep the usual follow.
+  setBottomPadding(px, viewportHeight, nonScrollingInset) {
     const next = Number(px) || 0;
     const insetDiff = next - this._bottomInsetPx;
     this._bottomInsetPx = next;
     if (viewportHeight != null) this._viewportFullH = Number(viewportHeight) || 0;
+    const hold = Number(nonScrollingInset) || 0;
+    const holdDiff = hold - this._nonScrollingInsetPx;
+    this._nonScrollingInsetPx = hold;
+    // Only a push the held part fully accounts for skips the follow. One that
+    // also carries a keyboard move — or a settings toggle, where the held part
+    // jumps while the inset stays put — takes the ordinary path.
+    if (
+      this._bottomInsetApplied &&
+      Math.abs(insetDiff) >= 0.1 &&
+      Math.abs(insetDiff - holdDiff) < 0.1
+    ) {
+      this._repadWithoutScroll();
+      return;
+    }
+    // A moving inset is the keyboard (or drawer) on its way: the one window in
+    // which the browser pans the page, even when the keyboard overlays the
+    // WebView and the visual viewport never reports a resize.
+    if (Math.abs(insetDiff) >= 0.1 && this._watchDocumentScrollLock) {
+      this._watchDocumentScrollLock();
+    }
     this._reconcileBottomInset(insetDiff);
   }
 
@@ -1597,6 +1685,27 @@ export class Bridge {
     }
 
     this._glideScrollTo(container, targetScrollTop);
+  }
+
+  // Applies the target padding and leaves scrollTop where it is: the list stays
+  // put while the composer grows over it. A reduction under a list parked at the
+  // bottom still lets the engine clamp scrollTop, which is the list following a
+  // composer that shrank back — nothing is left to reveal below it.
+  _repadWithoutScroll() {
+    const container = document.getElementById('chat-container') || document.body;
+    const target = this._targetBottomPadding();
+    const prevPadding = parseFloat(container.style.paddingBottom) || 0;
+    if (Math.abs(target - prevPadding) < 0.1) return;
+    // Mid-glide a reduction could clamp the glide's own target; let it wait
+    // for the transition to settle like any other reduction.
+    if (target < prevPadding && this._repinAnimating) {
+      this._scheduleShrink(container);
+      return;
+    }
+    this._applyBottomPadding(container, target);
+    // No scroll event fires when only the padding moves, so refresh the
+    // parked-at-bottom flag and the scroll-down button here.
+    this._emitScrollToBottomVisibility?.();
   }
 
   // A padding REDUCTION waits until both sides of the transition have stopped
@@ -1805,6 +1914,7 @@ export class Bridge {
     catch (_) { s = {}; }
     this.batterySaver = !!s.batterySaver;
     this.disableSwipeRegeneration = !!s.disableSwipeRegeneration;
+    this.disableStreamAutoScroll = !!s.disableStreamAutoScroll;
     applyMessageSettingsClasses(s);
     this.translationEnabled = !!s.translationEnabled;
     const container = document.getElementById('chat-container') || document.body;
@@ -2108,7 +2218,10 @@ export class Bridge {
       };
 
       // Pending entries are preset placeholders and have no persisted row yet.
-      if (block.id) {
+      // A running block shows Stop alone: with Edit and Delete still there,
+      // Delete slid into the spot "Regenerate image" had a moment before, and
+      // a quick second tap asked to delete the block (issue #839).
+      if (block.id && block.status !== 'running') {
         btnGroup.appendChild(makeButton('ext-block-edit', ICON.edit, 'Редактировать'));
         btnGroup.appendChild(makeButton('ext-block-delete', ICON.trash, 'Удалить', true));
       }
@@ -2232,7 +2345,28 @@ export class Bridge {
     return normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`;
   }
 
-  _renderExtBlockImageHtml(payload) {
+  /**
+   * One picture of a card. [payload] is an `[IMG:RESULT:…]` payload, which may
+   * list every image of the block (see `_extBlockLegacyImageTokens`); [at] is
+   * the block's position among the image blocks of the content, the numbering
+   * Flutter addresses it by. A block holding more than one image gets the same
+   * ‹ n/m › switcher a message shows (issue #839).
+   */
+  _renderExtBlockImageHtml(payload, at = 0) {
+    const parsed = parseImageResultPayload(payload);
+    const variants = parsed.paths.map((p) => this._extBlockImageSrc(p));
+    if (variants.length < 2) return this._renderExtBlockSingleImageHtml(payload);
+    const active = Math.min(Math.max(parsed.activeIndex || 0, 0), variants.length - 1);
+    const src = this._escapeAttr(variants[active]);
+    const list = this._escapeAttr(variants.join(';;'));
+    const index = Number.isInteger(at) && at >= 0 ? at : 0;
+    const button = (action, icon, title) =>
+      `<button class="ext-block-variant-btn" type="button" data-action="${action}" data-img-index="${index}" title="${title}">${icon}</button>`;
+    const switcher = `<span class="ext-block-variants">${button('ext-block-img-variant-prev', ICON.swipeLeft, 'Previous image')}<span class="ext-block-variant-count">${active + 1}/${variants.length}</span>${button('ext-block-img-variant-next', ICON.swipeRight, 'Next image')}</span>`;
+    return `<span class="ext-block-image-wrapper img-result-wrapper" data-variants="${list}" data-variant-index="${active}"><img src="${src}" class="ext-block-image" loading="eager" decoding="sync" data-action="image-click" data-src="${src}"><button class="img-download-btn" data-action="img-download" data-src="${src}" title="Save image">⤓</button>${switcher}</span>`;
+  }
+
+  _renderExtBlockSingleImageHtml(payload) {
     const src = this._escapeAttr(this._extBlockImageSrc(payload));
     // loading="eager" (not "lazy"): the ext-block panel hangs off the last
     // assistant message, i.e. at the very bottom edge of the WebView next to
@@ -2259,8 +2393,14 @@ export class Bridge {
       (tag) => {
         const parsed = parseImageResultElement(tag);
         if (!parsed) return tag;
-        const src = parsed.paths[parsed.activeIndex] || parsed.paths[0] || '';
-        return src ? `[IMG:RESULT:${src}]` : tag;
+        const paths = parsed.paths.filter(Boolean);
+        if (!paths.length) return tag;
+        // Every image of the block is kept, the visible one marked, so the
+        // card can page through them like a message does.
+        if (paths.length === 1) return `[IMG:RESULT:${paths[0]}]`;
+        const active = Math.min(Math.max(parsed.activeIndex || 0, 0), paths.length - 1);
+        const list = paths.map((p, i) => (i === active ? `*${p}` : p)).join(';;');
+        return `[IMG:RESULT:${list}]`;
       },
     );
   }
@@ -2334,7 +2474,7 @@ export class Bridge {
     if (hasImgResult && !hasImgGen && !hasImgError && !hasHtmlMarkup) {
       const imgMatch = content.match(imgResultRegex);
       const wrapper = document.createElement('span');
-      wrapper.innerHTML = this._extBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
+      wrapper.innerHTML = this._extBlockHtml(this._renderExtBlockImageHtml(imgMatch[1], 0));
       body.appendChild(wrapper.firstElementChild);
       retryFailedLocalImages(body);
       return;
@@ -2344,14 +2484,21 @@ export class Bridge {
     // branch: a block's content goes through the same pipeline a message's
     // does, so it can hold a finished picture, one still generating and one
     // that failed, all at the same time.
+    //
+    // One pass over all three kinds, in document order, so each picture knows
+    // its position among the block's images — the index its switcher reports.
+    let imageAt = 0;
     const html = content
       .replace(/<p class="ext-block-image-pending">[\s\S]*?<\/p>/g, '')
-      .replace(/\[IMG:ERROR:([\s\S]*?)\]/g, (match, payload) =>
-        this._extBlockImageErrorMarkup(payload))
-      .replace(/\[IMG:GEN(?::([\s\S]*?))?\]/g, (match, instruction) =>
-        this._extBlockImageGenMarkup(instruction || ''))
-      .replace(/\[IMG:RESULT:([^\]]+)\]/g, (match, payload) =>
-        this._renderExtBlockImageHtml(payload));
+      .replace(
+        /\[IMG:ERROR:([\s\S]*?)\]|\[IMG:GEN(?::([\s\S]*?))?\]|\[IMG:RESULT:([^\]]+)\]/g,
+        (match, error, instruction, result) => {
+          const at = imageAt++;
+          if (error !== undefined) return this._extBlockImageErrorMarkup(error);
+          if (result !== undefined) return this._renderExtBlockImageHtml(result, at);
+          return this._extBlockImageGenMarkup(instruction || '');
+        },
+      );
 
     const htmlEl = document.createElement('div');
     htmlEl.className = 'ext-block-content';

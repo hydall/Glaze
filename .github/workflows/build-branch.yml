@@ -93,7 +93,10 @@ jobs:
       - name: Compute metadata
         id: meta
         run: |
-          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | sed 's/+.*//')
+          # Branch builds carry the newest released version; the build date,
+          # branch and commit tell them apart (.github/scripts/calver.sh).
+          git fetch --tags --force
+          VERSION=$(bash .github/scripts/calver.sh current)
           BUILD_DATE=$(date -u '+%d/%m/%Y %H:%M')
           BUILD_BRANCH="${{ github.ref_name }}"
           # Branch names may contain "/" or spaces which are unsafe in file
@@ -103,10 +106,10 @@ jobs:
 
           # Release channel drives the in-app dev-tooling defaults (developer
           # mode + build watermark) via --dart-define=BUILD_CHANNEL. Only the
-          # stable branch gets a non-nightly channel; every other branch builds
+          # main branch gets the stable channel; every other branch builds
           # as nightly, i.e. with dev tooling on.
           case "$BUILD_BRANCH" in
-            stable)  BUILD_CHANNEL=stable  ;;
+            main)    BUILD_CHANNEL=stable  ;;
             *)       BUILD_CHANNEL=nightly ;;
           esac
 
@@ -155,6 +158,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+
+      - name: Stamp version
+        shell: bash
+        run: bash .github/scripts/stamp_version.sh "${{ needs.metadata.outputs.version }}"
 
       - name: Create .env from secrets
         env:
@@ -359,6 +366,10 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
+      - name: Stamp version
+        shell: bash
+        run: bash .github/scripts/stamp_version.sh "${{ needs.metadata.outputs.version }}"
+
       - name: Create .env from secrets
         shell: bash
         env:
@@ -472,6 +483,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+
+      - name: Stamp version
+        shell: bash
+        run: bash .github/scripts/stamp_version.sh "${{ needs.metadata.outputs.version }}"
 
       - name: Create .env from secrets
         env:
@@ -618,6 +633,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+
+      - name: Stamp version
+        shell: bash
+        run: bash .github/scripts/stamp_version.sh "${{ needs.metadata.outputs.version }}"
 
       - name: Create .env from secrets
         env:

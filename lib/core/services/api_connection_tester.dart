@@ -113,7 +113,11 @@ class ApiConnectionTester {
         model: model,
         maxChunkTokens: maxChunkTokens,
       );
-      final result = await EmbeddingService().getEmbeddings(['test'], config);
+      final result = await EmbeddingService().getEmbeddings(
+        ['test'],
+        config,
+        foreground: true,
+      );
       if (result.isNotEmpty && result.first.isNotEmpty) {
         return ApiTestSuccess('Connected (dim: ${result.first.length})');
       }

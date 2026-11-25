@@ -64,7 +64,7 @@ void main() {
     // Reveal via the same 10-tap gesture the My Characters list uses.
     final reveal = container.read(revealHiddenCharactersProvider.notifier);
     for (var i = 0; i < kRevealHiddenTapCount; i++) {
-      reveal.registerCharactersTabTap();
+      reveal.registerHeaderTap();
     }
     expect(container.read(revealHiddenCharactersProvider), isTrue);
 

@@ -16,12 +16,32 @@ import '../state/cached_token_breakdown.dart';
 import '../state/context_window_marker.dart';
 import '../../../core/llm/regex_service.dart';
 import '../../../core/state/active_selection_provider.dart';
+import '../../../core/state/summary_providers.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../extensions/state/message_variables_notifier.dart';
 import '../../personas/persona_list_provider.dart';
 
+/// What became of an edit the reader saved
+/// ([ChatMessageOpsController.editMessage]). Said, not swallowed: an edit
+/// refused in silence closed the editor over the old text, and the reader
+/// could not tell a lost edit from a saved one.
+enum MessageEditOutcome {
+  /// The new text is in the chat.
+  saved,
+
+  /// The text was the message's text already: nothing to write.
+  unchanged,
+
+  /// A reply, an image or post-generation work is in flight and the edit
+  /// would race it. The reader's text is for the editor to keep.
+  busy,
+
+  /// The message is no longer in the chat, or the chat moved on.
+  gone,
+}
+
 class ChatMessageOpsController {
-  final Ref _ref;
+  Ref _ref;
   final String _charId;
   final void Function(AsyncValue<ChatState>) _setState;
   final AsyncValue<ChatState> Function() _getState;
@@ -49,25 +69,48 @@ class ChatMessageOpsController {
        _invalidateHistory = invalidateHistory,
        _writes = writes;
 
+  /// Hands over the Ref of the provider build under way. The chat notifier
+  /// outlives a rebuild of its provider — an invalidation: the author's note
+  /// saved, the history screen, cloud sync — and the Ref it was built on does
+  /// not: every operation on the stale one found it unmounted and returned in
+  /// silence, until the app was restarted. Called from every build.
+  void rebind(Ref ref) => _ref = ref;
+
   ChatMessageService get _messageSvc => ChatMessageService(_ref);
 
-  Future<void> editMessage(
+  /// Puts [newContent] in the message at [index] — reasoning between
+  /// [tagStart] and [tagEnd] set apart — and says what became of it. A
+  /// refusal is logged with its reason, so a chat where saving stopped
+  /// working leaves a trace in the session log.
+  Future<MessageEditOutcome> editMessage(
     int index,
     String newContent, {
     String? tagStart,
     String? tagEnd,
   }) async {
-    if (!_ref.mounted) return;
+    if (!_ref.mounted) return MessageEditOutcome.gone;
     final current = _getState().value;
-    if (current == null ||
-        current.session == null ||
-        current.isGenerating ||
-        current.isGeneratingImage ||
-        current.isPostGenRunning) {
-      return;
+    if (current == null || current.session == null) {
+      debugPrint('[edit] refused: no chat is open');
+      return MessageEditOutcome.gone;
     }
-    if (index < 0 || index >= current.session!.messages.length) return;
-    final token = _writes.beginPublication();
+    if (current.isGenerating ||
+        current.isGeneratingImage ||
+        current.isPostGenRunning ||
+        current.isStopping) {
+      debugPrint(
+        '[edit] refused: busy (generating=${current.isGenerating} '
+        'image=${current.isGeneratingImage} '
+        'postGen=${current.isPostGenRunning})',
+      );
+      return MessageEditOutcome.busy;
+    }
+    final messages = current.session!.messages;
+    if (index < 0 || index >= messages.length) {
+      debugPrint('[edit] refused: index $index of ${messages.length}');
+      return MessageEditOutcome.gone;
+    }
+    final messageId = messages[index].id;
     var edited = _messageSvc.editMessage(
       current.session!,
       index,
@@ -75,7 +118,19 @@ class ChatMessageOpsController {
       tagStart: tagStart,
       tagEnd: tagEnd,
     );
+    // A save with the text left as it was still runs the "run on edit"
+    // scripts: saving is how the reader applies them to a message. Only a
+    // save that neither the text nor a script changed is nothing to write.
+    // The publication is claimed before the script pass when the text
+    // changed, as every edit did, and only once there is something to commit
+    // otherwise, so a no-op save never claims a turn it does not publish.
+    final textChanged = !identical(edited, current.session);
+    final claimed = textChanged ? _writes.beginPublication() : null;
     edited = await _applyRunOnEditRegexes(edited, index);
+    if (identical(edited, current.session)) {
+      return MessageEditOutcome.unchanged;
+    }
+    final token = claimed ?? _writes.beginPublication();
     final updated = await _writes.run(
       () => _messageSvc.commitMessageMutation(current.session!, index, (
         latest,
@@ -95,10 +150,18 @@ class ChatMessageOpsController {
         return result;
       }),
     );
-    if (!_ref.mounted) return;
+    if (!_ref.mounted) return MessageEditOutcome.gone;
+    // The row read back without the message: deleted under the editor, or
+    // the chat it was in is gone. Nothing was written for it.
+    if (identical(updated, current.session) ||
+        !updated.messages.any((m) => m.id == messageId)) {
+      debugPrint('[edit] refused: $messageId is no longer in the chat');
+      return MessageEditOutcome.gone;
+    }
     _ref.read(cachedTokenBreakdownProvider(_charId).notifier).state = null;
     _ref.read(lastVectorLoreTokensProvider(_charId).notifier).state = 0;
     _publish(updated, token: token);
+    return MessageEditOutcome.saved;
   }
 
   /// Replaces the text of [messageId] (and its active swipe) with [text] on
@@ -216,7 +279,9 @@ class ChatMessageOpsController {
     _invalidateHistory();
 
     try {
-      await _writes.run(() => svc.commitDeleteMessages(original, plan));
+      // The service of the build under way, not [svc]: a rebuild while this
+      // waits its turn leaves the one above on an unmounted Ref.
+      await _writes.run(() => _messageSvc.commitDeleteMessages(original, plan));
     } catch (e) {
       debugPrint('[ChatMessageOps] delete failed, restoring messages: $e');
       if (!_ref.mounted) return;
@@ -262,17 +327,59 @@ class ChatMessageOpsController {
   }
 
   Future<void> toggleMessageHidden(int index) async {
-    if (!_ref.mounted) return;
+    final messages = _getState().value?.session?.messages;
+    if (messages == null || index < 0 || index >= messages.length) return;
+    final message = messages[index];
+    await setMessagesHidden({message.id}, hidden: !message.isHidden);
+  }
+
+  /// Hides (or shows) every message in [ids] at once.
+  ///
+  /// Optimistic: the bubbles change on the frame of the tap and the whole set
+  /// goes to the database in one write. Sets the flag rather than flipping
+  /// it, so a selection that mixes hidden and shown messages ends up all
+  /// one way instead of swapping.
+  Future<void> setMessagesHidden(
+    Set<String> ids, {
+    required bool hidden,
+  }) async {
+    if (!_ref.mounted || ids.isEmpty) return;
     final current = _getState().value;
-    if (current == null || current.session == null) return;
+    final original = current?.session;
+    if (current == null || original == null) return;
+    final optimistic = _messageSvc.setMessagesHidden(original, ids, hidden);
+    if (identical(optimistic, original)) return;
+
     final token = _writes.beginPublication();
-    final updated = await _writes.run(
-      () => _messageSvc.commitMessageMutation(
-        current.session!,
-        index,
-        _messageSvc.toggleMessageHidden,
-      ),
-    );
+    ChatSessionService.updateCache(optimistic);
+    _setState(AsyncData(current.copyWith(session: optimistic)));
+    _invalidateHistory();
+    _dropTokenBreakdown();
+
+    final ChatSession updated;
+    try {
+      updated = await _writes.run(
+        () => _messageSvc.commitMessagesMutation(
+          original,
+          (latest) => _messageSvc.setMessagesHidden(latest, ids, hidden),
+        ),
+      );
+    } catch (e) {
+      debugPrint('[ChatMessageOps] hide failed, restoring messages: $e');
+      if (!_ref.mounted) return;
+      final after = _getState().value;
+      if (after != null && identical(after.session, optimistic)) {
+        ChatSessionService.updateCache(original);
+        _setState(AsyncData(after.copyWith(session: original)));
+        _invalidateHistory();
+      }
+      GlazeToast.showWithoutContext(
+        'error_hide_message_failed'.tr(namedArgs: {'error': '$e'}),
+        isError: true,
+        duration: 5000,
+      );
+      return;
+    }
     if (!_ref.mounted) return;
     _dropTokenBreakdown();
     _publish(updated, token: token);
@@ -343,6 +450,20 @@ class ChatMessageOpsController {
     final message = session.messages[index];
     // A hidden message is not in the prompt, so the trim could not find it.
     if (message.isHidden) return;
+    // Nor is one the summary stands in for: after a run the oldest raw
+    // message is the first the history can start at, and the one before it
+    // is in a block. Said so, not as "too far back", which no window fixes.
+    final view = await _ref
+        .read(summaryServiceProvider)
+        .getPromptView(session.id, session.messages);
+    if (!_ref.mounted) return;
+    // The chat may have moved to another session over the await: the pin
+    // belongs to the session it was asked on, and so does the check below.
+    if (_getState().value?.session?.id != session.id) return;
+    if (view?.coveredMessageIds.contains(message.id) ?? false) {
+      GlazeToast.warningWithoutContext('history_anchor_pin_summarized'.tr());
+      return;
+    }
     final previousAnchor = session.historyAnchorId;
     final previousPinned = session.historyAnchorPinned;
     await _writeHistoryAnchor(session.id, message.id, pinned: true);
@@ -457,6 +578,9 @@ class ChatMessageOpsController {
     if (!_writes.isCurrentPublication(token)) return;
     _ref.read(messageVariablesProvider.notifier).clearSession(cleared.id);
     _invalidateHistory();
+    // The chat moved on while the clear was committing: the cleared session
+    // is not the one on screen.
+    if (_getState().value?.session?.id != current.session!.id) return;
     _setState(AsyncData(ChatState(session: cleared)));
   }
 }

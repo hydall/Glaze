@@ -895,18 +895,12 @@ class Bridge {
     sections.forEach(section => {
       const isUser = section.classList.contains('user');
       const stored = section.dataset.personaName || '';
-      const storedPersonaName = stored === 'You' ? '' : stored;
-      // A message pinned to the persona it was sent as keeps that persona's
-      // name and avatar — the letter included, when the persona was deleted.
-      // Only unpinned messages follow the active identity.
-      const pinned = section.dataset.avatarPinned === '1';
-      // Per-message stored persona wins; otherwise use the active identity.
+      // Every user message wears the active persona, so a switch re-faces the
+      // whole chat at once.
       const newName = isUser
-        ? ((pinned ? stored : storedPersonaName) || this._personaName || 'You')
+        ? (this._personaName || 'You')
         : (this._charName || stored || 'Character');
-      const newAvatarUrl = pinned
-        ? (section.dataset.avatarUrl || null)
-        : (isUser ? this._personaAvatarUrl : this._charAvatarUrl);
+      const newAvatarUrl = isUser ? this._personaAvatarUrl : this._charAvatarUrl;
 
       const label = section.querySelector('.msg-name-label');
       if (label) label.textContent = newName;
@@ -1207,7 +1201,12 @@ class Bridge {
   }
 
   _executeUpdateMessage(msg) {
-    const section = document.querySelector(`[data-message-id="${msg.id}"]`);
+    // A row scrolled out of the virtual window is detached from the document
+    // but kept in `itemMap`; patch that element too, or the change (a hide, an
+    // edit) is lost and the row comes back stale when it scrolls into view.
+    const section = document.querySelector(`[data-message-id="${msg.id}"]`)
+      || this.virtualList?.itemMap?.get(msg.id)?.el
+      || null;
     if (!section) return;
 
     const animate = !!msg.swipeDirection;

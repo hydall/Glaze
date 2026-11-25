@@ -65,9 +65,20 @@ In CI:
 ## What it does
 
 - Installs per user, no administrator rights, into
-  `%LOCALAPPDATA%\Programs\com.glaze\<name>` (`Glaze`, `Glaze Nightly`). Not
-  `%LOCALAPPDATA%\Programs\Glaze`: the legacy Electron build already lives
-  there and its uninstaller deletes that whole folder.
+  `%LOCALAPPDATA%\Programs\com.glaze\<name>` (`Glaze`, `Glaze Nightly`) by
+  default. Not `%LOCALAPPDATA%\Programs\Glaze`: the legacy Electron build
+  already lives there and its uninstaller deletes that whole folder.
+- A fresh install may go elsewhere (**Change…** on the first page). Glaze gets
+  a folder of its own inside the one picked (`D:\Apps` → `D:\Apps\Glaze
+  Nightly`), because uninstall empties the install folder. A folder holding
+  other files, or one the setup cannot write to without administrator rights
+  (Program Files), is refused with a reason. An update or reinstall always
+  goes to the folder the Apps entry records (`InstallLocation`); to move it,
+  uninstall first. Uninstall removes the empty `com.glaze` folder above a
+  default install, but never the folder around one the reader picked.
+- Glaze and the setup window both carry the Visual C++ runtime next to their
+  executables (see [`BUILD_NOTES.md`](./BUILD_NOTES.md)), so neither depends on
+  the one in System32.
 - Each channel is a separate app — own entry in Settings → Apps, own shortcut,
   own folder — matching the per-channel data folders in
   [`RELEASE_CHANNELS.md`](./RELEASE_CHANNELS.md).

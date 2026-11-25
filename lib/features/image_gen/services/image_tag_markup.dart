@@ -698,8 +698,15 @@ class ImageTagMarkup {
   /// `<img>` element with `[IMG:GEN]` in its `src` and its images in
   /// [variantsAttribute]: the bracket tag has nowhere to keep them, and the
   /// picture the regeneration brings would lose the card's layout.
-  static String pendingTag(ImageBlockPayload payload) {
-    if (payload.presentation.isEmpty) {
+  ///
+  /// [asElement] keeps the element spelling even without presentation, for a
+  /// block that was written as an element: its instruction is JSON that may
+  /// hold a `]`, which would end the bracket tag early.
+  static String pendingTag(
+    ImageBlockPayload payload, {
+    bool asElement = false,
+  }) {
+    if (payload.presentation.isEmpty && !asElement) {
       final encoded = payload.encodePending();
       return encoded.isEmpty ? '[IMG:GEN]' : '[IMG:GEN:$encoded]';
     }
@@ -874,6 +881,50 @@ class ImageTagMarkup {
     return result;
   }
 
+  /// [fresh] with the images of [previous] handed to its pending blocks, the
+  /// [i]-th image block of one to the [i]-th of the other.
+  ///
+  /// A block regenerated as a whole gets new content from the model, which
+  /// knows nothing of the pictures the old content had. Without this every
+  /// earlier file stays on disk with nothing pointing at it; with it the new
+  /// picture is added to the block's switcher next to them, the way redrawing
+  /// a single picture does (issue #839).
+  static String carryImagesFrom(String fresh, String previous) {
+    if (previous.isEmpty) return fresh;
+    final old = scanImageBlocks(previous);
+    if (old.isEmpty) return fresh;
+    final current = scanImageBlocks(fresh);
+    var result = fresh;
+    // Right to left: rewriting one block must not move the spans of the rest.
+    for (var i = current.length - 1; i >= 0; i--) {
+      if (i >= old.length) continue;
+      final block = current[i];
+      if (block.kind != ImageBlockKind.pending) continue;
+      final carried = old[i].paths;
+      if (carried.isEmpty) continue;
+      final paths = [
+        ...carried,
+        for (final path in block.paths)
+          if (!carried.contains(path)) path,
+      ];
+      final source = fresh.substring(block.start, block.end);
+      result = result.replaceRange(
+        block.start,
+        block.end,
+        pendingTag(
+          ImageBlockPayload(
+            paths: paths,
+            activeIndex: paths.length - 1,
+            instruction: block.instruction,
+            presentation: block.presentation,
+          ),
+          asElement: source.startsWith('<'),
+        ),
+      );
+    }
+    return result;
+  }
+
   static ImageBlock _pendingBlock(PendingImageTag tag) {
     final payload = ImageBlockPayload.parsePending(tag.payload);
     return ImageBlock(
@@ -936,6 +987,59 @@ class ImageTagMarkup {
       block.end,
       encodeResultElement(block.payload.withActiveIndex(variantIndex)),
     );
+  }
+
+  /// [after] with every block that had a finished image in [before] but came
+  /// back as an error card put back to its finished form, plus the error text
+  /// of each block put back.
+  ///
+  /// A redraw that fails must not take away the picture the reader already
+  /// had: the error card keeps the old path only inside its JSON, and a card
+  /// rendered in place of the picture reads as "the image was deleted". The
+  /// caller shows the returned errors some other way (a toast).
+  ///
+  /// Blocks are matched by position in [scanImageBlocks], which counts every
+  /// block once whatever state it is in, so a redraw never shifts the
+  /// numbering. When the counts differ the texts are not comparable and
+  /// [after] is returned as is.
+  static ({String text, List<String> errors}) restoreFailedRedraws(
+    String before,
+    String after,
+  ) {
+    final old = scanImageBlocks(before);
+    final current = scanImageBlocks(after);
+    if (old.length != current.length) return (text: after, errors: const []);
+
+    var result = after;
+    final errors = <String>[];
+    // Right to left: restoring one block must not move the spans of the rest.
+    for (var i = current.length - 1; i >= 0; i--) {
+      if (old[i].kind != ImageBlockKind.result ||
+          current[i].kind != ImageBlockKind.error) {
+        continue;
+      }
+      final card = after.substring(current[i].start, current[i].end);
+      errors.add(_errorTextOf(card));
+      result = result.replaceRange(
+        current[i].start,
+        current[i].end,
+        before.substring(old[i].start, old[i].end),
+      );
+    }
+    return (text: result, errors: errors.reversed.toList());
+  }
+
+  /// The `error` field of one `[IMG:ERROR:…]` card, or empty when it has none.
+  static String _errorTextOf(String card) {
+    final json = ImgGenPatterns.imgErrorRegex.firstMatch(card)?.group(1);
+    if (json == null) return '';
+    try {
+      final parsed = jsonDecode(json);
+      if (parsed is Map && parsed['error'] is String) {
+        return parsed['error'] as String;
+      }
+    } catch (_) {}
+    return '';
   }
 
   /// The visible image of every finished block, in document order — both the

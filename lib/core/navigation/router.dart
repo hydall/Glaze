@@ -14,7 +14,7 @@ import '../../features/character_gallery/gallery_screen.dart';
 import '../../features/chat/chat_screen.dart';
 import '../../features/chat_history/chat_history_screen.dart';
 import '../../features/lorebooks/lorebook_list_screen.dart';
-import '../../features/lorebooks/embedding_settings_screen.dart';
+import '../../features/embeddings/embeddings_screen.dart';
 import '../../features/diagnostics/log_viewer_screen.dart';
 import '../../features/diagnostics/logs_screen.dart';
 import '../../features/menu/about_screen.dart';
@@ -223,7 +223,7 @@ GoRouter buildRouter(
                       path: 'embeddings',
                       pageBuilder: (_, state) => _fadePage(
                         state: state,
-                        child: const EmbeddingSettingsScreen(),
+                        child: const EmbeddingsScreen(startExpanded: true),
                       ),
                     ),
                   ],

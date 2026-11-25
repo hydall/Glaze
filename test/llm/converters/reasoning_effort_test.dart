@@ -79,6 +79,23 @@ void main() {
     expect(_resolve(LlmProtocol.customChatCompletion, 'high'), 'high');
   });
 
+  test('Custom Chat Completion sends Gemini 4 only the levels it has', () {
+    String? custom(String effort, String model) =>
+        _resolve(LlmProtocol.customChatCompletion, effort, model: model);
+
+    for (final model in const ['gemini-4-carbon', 'google/gemini-4-argon']) {
+      expect(custom('min', model), 'low', reason: model);
+      expect(custom('low', model), 'low', reason: model);
+      expect(custom('medium', model), 'medium', reason: model);
+      expect(custom('high', model), 'high', reason: model);
+      expect(custom('max', model), 'high', reason: model);
+      expect(custom('auto', model), isNull, reason: model);
+    }
+    expect(custom('max', 'gemini-4-hydrogen'), 'xhigh');
+    // Earlier Gemini families keep the generic passthrough.
+    expect(custom('max', 'gemini-3-pro'), 'max');
+  });
+
   test('Anthropic and Gemini keep the full scale as a budget share', () {
     for (final protocol in const [LlmProtocol.anthropic, LlmProtocol.gemini]) {
       for (final step in const ['min', 'low', 'medium', 'high', 'max']) {

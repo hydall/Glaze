@@ -1,4 +1,5 @@
-// The chat chrome — header, composer and drawer — drawn in the chat page.
+// The chat chrome — header, composer, drawer, the scroll buttons and the cards
+// under the header — drawn in the chat page.
 //
 // The chrome floats over the messages, so it lives in the page beside them:
 // its glass then blurs the messages with an ordinary backdrop-filter, and the
@@ -29,6 +30,9 @@ import { createHeader } from './header.js';
 import { createComposer } from './composer.js';
 import { createDrawer } from './drawer.js';
 import { createStrip } from './strip.js';
+import { createScroll } from './scroll.js';
+import { createCards } from './cards.js';
+import { createBusy } from './busy.js';
 import { compile, sanitizeCss, themeValueEntries } from './template.js';
 
 const KEY_IN = S.randomToken(32);
@@ -151,10 +155,16 @@ S.on(document, 'toggle', (e) => {
 
 const layers = {
   fades: h('div', '', rootEl),
+  // Under the header, which they hide with, and under the composer, which
+  // fills the screen over them while typing on a phone held sideways.
+  cards: h('div', '', rootEl),
+  scroll: h('div', '', rootEl),
   drawer: h('div', '', rootEl),
   strip: h('div', '', rootEl),
   composer: h('div', '', rootEl),
   header: h('div', '', rootEl),
+  // Over everything: it takes the taps while the chat switches sessions.
+  busy: h('div', '', rootEl),
 };
 for (const name in layers) css(layers[name], 'display', 'contents');
 
@@ -165,6 +175,8 @@ const DEFAULT_THEME = {
   outlineVariant: [73, 69, 79, 1],
   text: [230, 225, 229, 1],
   text2: [202, 196, 208, 1],
+  surface: [20, 18, 24, 1],
+  error: [242, 184, 181, 1],
   uiBorder: { c: [255, 255, 255, 0.1], w: 1 },
   fillHeader: [43, 41, 48, 0.8],
   fillSurface: [20, 18, 24, 0.8],
@@ -240,7 +252,8 @@ const fadeTop = h('div', 'gc-fade-top gc-hidden', layers.fades);
 const fadeBottom = h('div', 'gc-fade-bottom gc-hidden', layers.fades);
 
 // Factories append to ctx.root; reparent each into its layer so the paint
-// order matches Flutter's: fades, drawer, composer, header.
+// order is: fades, cards, scroll buttons, drawer, strip, composer, header,
+// and the busy spinner over all of them.
 function inLayer(layer, make) {
   const prev = ctx.root;
   ctx.root = layer;
@@ -254,6 +267,9 @@ const header = inLayer(layers.header, () => createHeader(ctx));
 ctx.strip = inLayer(layers.strip, () => createStrip(ctx));
 const composer = inLayer(layers.composer, () => createComposer(ctx));
 const drawer = inLayer(layers.drawer, () => createDrawer(ctx, composer));
+const scroll = inLayer(layers.scroll, () => createScroll(ctx, composer));
+const cards = inLayer(layers.cards, () => createCards(ctx));
+const busy = inLayer(layers.busy, () => createBusy(ctx));
 ctx.root = rootEl;
 
 let composerHeight = 0;
@@ -265,7 +281,9 @@ function report() {
   composer.report(out);
   drawer.report(out);
   ctx.strip.report(out);
+  cards.report(out);
   composerHeight = out.composerHeight || 0;
+  scroll.place(composerHeight);
   placeFades();
   const key = S.jsonStringify(out);
   if (key === lastReport) return;
@@ -274,6 +292,8 @@ function report() {
 }
 
 S.observeResize(composer.root, () => ctx.scheduleReport());
+// The coverage card's collapsed height insets the message list.
+S.observeResize(cards.root, () => ctx.scheduleReport());
 S.on(window, 'resize', () => {
   placeBottom();
   ctx.scheduleReport();
@@ -332,6 +352,7 @@ function applyTheme(t) {
   const v = (name, value) => css(rootEl, name, value);
   v('--gc-accent', rgba(theme.accent));
   v('--gc-accent-08', rgba(theme.accent, 0.08));
+  v('--gc-accent-15', rgba(theme.accent, 0.15));
   v('--gc-accent-22', rgba(theme.accent, 0.22));
   v('--gc-accent-35', rgba(theme.accent, 0.35));
   v('--gc-accent-38', rgba(theme.accent, 0.38));
@@ -341,6 +362,7 @@ function applyTheme(t) {
   v('--gc-on-45', rgba(theme.onSurface, 0.45));
   v('--gc-on-55', rgba(theme.onSurface, 0.55));
   v('--gc-on-60', rgba(theme.onSurface, 0.6));
+  v('--gc-onvar', rgba(theme.onSurfaceVariant));
   v('--gc-onvar-50', rgba(theme.onSurfaceVariant, 0.5));
   v('--gc-onvar-95', rgba(theme.onSurfaceVariant, 0.95));
   v('--gc-outline-var', rgba(theme.outlineVariant));
@@ -370,6 +392,8 @@ function applyTheme(t) {
 
   composer.themeChanged();
   drawer.themeChanged();
+  cards.themeChanged();
+  busy.themeChanged();
   header.render();
 }
 
@@ -433,6 +457,8 @@ function placeBottom() {
   composer.placeTyping();
   drawer.render();
   ctx.strip.place(composer.stripVisible());
+  scroll.place(composerHeight);
+  cards.place();
   placeFades();
 }
 
@@ -486,6 +512,13 @@ function handle(msg) {
   if ('sendHover' in msg) composer.setSendHover(!!msg.sendHover);
   if (msg.attachments) composer.apply({ attachments: S.isArray(msg.attachments) ? msg.attachments : [] });
   if (msg.drawer) drawer.apply(msg.drawer);
+  if (msg.scroll) scroll.apply(msg.scroll);
+  if ('coverage' in msg) cards.apply('coverage', msg.coverage);
+  for (let i = 0; i < cards.sections.length; i++) {
+    const key = cards.sections[i];
+    if (key in msg) cards.apply(key, msg[key]);
+  }
+  if ('busy' in msg) busy.apply(msg.busy);
   if (msg.text) composer.setText(S.stringFn(msg.text.v == null ? '' : msg.text.v), msg.text.rev);
   if (msg.guidanceText) {
     composer.setGuidanceText(S.stringFn(msg.guidanceText.v == null ? '' : msg.guidanceText.v), msg.guidanceText.rev);

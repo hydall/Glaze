@@ -5,7 +5,6 @@ import '../../core/llm/generation_phase.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/plugins/plugin_hooks.dart';
 import '../../core/state/card_rewriter_providers.dart';
-import '../../core/utils/id_generator.dart';
 import '../extensions/services/extension_post_gen_service.dart';
 import 'chat_provider.dart' show streamingStateProvider;
 import 'state/generation_phase_provider.dart';
@@ -14,7 +13,7 @@ import 'state/post_cleaner_state_provider.dart'
 import 'state/studio_cycle_state_provider.dart';
 import 'chat_session_service.dart';
 import 'chat_state.dart';
-import 'services/continuation_message_merger.dart';
+import 'services/abort_planner.dart';
 
 typedef AbortSessionMutation =
     Future<ChatSession?> Function(
@@ -23,7 +22,7 @@ typedef AbortSessionMutation =
     );
 
 class AbortHandler {
-  final Ref _ref;
+  Ref _ref;
   final String _charId;
   final void Function(AsyncValue<ChatState>) _setState;
   final AsyncValue<ChatState> Function() _getState;
@@ -44,6 +43,25 @@ class AbortHandler {
     required this._mutateSession,
     required this._loadSession,
   });
+
+  /// The Ref of the provider build under way; the notifier outlives a
+  /// rebuild, the Ref it was built on does not — on the stale one a stop
+  /// found it unmounted and did nothing. Called from every build.
+  void rebind(Ref ref) => _ref = ref;
+
+  /// The state as it is now, while the chat is still on the session
+  /// [snapshot] was taken of. Null once it moved on — the provider was rebuilt
+  /// onto another session, the session was deleted — and what the stop saved
+  /// belongs to a chat no longer on screen: painting it would bring that chat
+  /// back. A rebuild no longer ends a stop under way ([rebind]), so the
+  /// session is what says whose state this is.
+  ChatState? _sameSession(ChatState snapshot) {
+    final latest = _getState().value;
+    if (latest == null || latest.session?.id != snapshot.session?.id) {
+      return null;
+    }
+    return latest;
+  }
 
   int nextGenId() => ++_activeGenId;
   bool isCurrentGen(int genId) => _activeGenId == genId;
@@ -92,6 +110,17 @@ class AbortHandler {
     }
   }
 
+  /// Completes once no stop is being made durable — immediately when none is.
+  /// New runs await this so a send tapped right after Stop is queued behind
+  /// the stop's write instead of racing it.
+  Future<void> get settled {
+    final active = _abortFuture;
+    if (active == null) return Future<void>.value();
+    // A stop that failed to save already reported it on the chat state; the
+    // run waiting behind it goes ahead regardless.
+    return active.catchError((Object _) {});
+  }
+
   Future<void> abortGeneration() {
     final active = _abortFuture;
     if (active != null) return active;
@@ -126,12 +155,6 @@ class AbortHandler {
     }
     _ref.read(postCleanerStateProvider.notifier).state =
         const PostCleanerState.idle();
-    clearStreaming();
-    clearStudioCycle();
-    // The bubble stays up until the partial reply is durable; name that wait
-    // instead of letting it fall back to "Generating…", which reads as the
-    // run carrying on rather than stopping.
-    setGenerationPhase(_ref, _charId, GenerationPhase.aborting);
     final abortGenId = _activeGenId;
 
     final current = _getState().value;
@@ -143,28 +166,48 @@ class AbortHandler {
     }
     if (current != null && (current.isGenerating || current.isPostGenRunning)) {
       final restorationSnapshot = _restorationMessage;
+      // A stop cannot fail, so the UI does not wait for it: the run is shown
+      // as stopped — partial reply in place, a regenerated variation put
+      // back — on the tap. Only the write is left, and `isStopping` holds the
+      // message-mutating actions off until it lands.
+      final plan = AbortPlanner(
+        mutateSession: _mutateSession,
+        loadSession: _loadSession,
+      ).plan(current, partialStreaming, restorationSnapshot);
+      _setState(
+        AsyncData(
+          current.copyWith(
+            session: plan?.optimistic ?? current.session,
+            isGenerating: false,
+            isGeneratingImage: false,
+            isPostGenRunning: false,
+            isSendPending: false,
+            isStopping: true,
+            regenTargetId: null,
+            continuationTargetId: null,
+          ),
+        ),
+      );
+      clearStreaming();
+      clearStudioCycle();
+      setGenerationPhase(_ref, _charId, GenerationPhase.idle);
       try {
-        final durableSession = await _finalizeAbortWithPartial(
-          current,
-          partialStreaming,
-          restorationSnapshot,
-        );
+        final durableSession = plan == null ? null : await plan.persist();
         if (!_ref.mounted || _activeGenId != abortGenId) return;
         if (durableSession != null) {
           ChatSessionService.updateCache(durableSession);
         }
-        _setState(
-          AsyncData(
-            current.copyWith(
-              session: durableSession ?? current.session,
-              isGenerating: false,
-              isGeneratingImage: false,
-              isPostGenRunning: false,
-              regenTargetId: null,
-              continuationTargetId: null,
+        final latest = _sameSession(current);
+        if (latest != null) {
+          _setState(
+            AsyncData(
+              latest.copyWith(
+                session: durableSession ?? latest.session,
+                isStopping: false,
+              ),
             ),
-          ),
-        );
+          );
+        }
       } catch (error) {
         if (!_ref.mounted || _activeGenId != abortGenId) return;
         final sessionId = current.session?.id;
@@ -175,22 +218,34 @@ class AbortHandler {
         if (durableSession != null) {
           ChatSessionService.updateCache(durableSession);
         }
-        _setState(
-          AsyncData(
-            current.copyWith(
-              session: durableSession ?? current.session,
-              isGenerating: false,
-              isGeneratingImage: false,
-              isPostGenRunning: false,
-              regenTargetId: null,
-              continuationTargetId: null,
-              error: 'Failed to save the aborted response: $error',
+        final latest = _sameSession(current);
+        if (latest != null) {
+          _setState(
+            AsyncData(
+              latest.copyWith(
+                session: durableSession ?? latest.session,
+                isStopping: false,
+                error: 'Failed to save the aborted response: $error',
+              ),
             ),
-          ),
-        );
+          );
+        }
+      } finally {
+        // Whatever path left early, the stop is over: never leave the
+        // mutating actions locked out behind it.
+        if (_ref.mounted) {
+          final latest = _getState().value;
+          if (latest != null && latest.isStopping) {
+            _setState(AsyncData(latest.copyWith(isStopping: false)));
+          }
+        }
       }
-    } else if (current != null && current.isGeneratingImage) {
-      _setState(AsyncData(current.copyWith(isGeneratingImage: false)));
+    } else {
+      clearStreaming();
+      clearStudioCycle();
+      if (current != null && current.isGeneratingImage) {
+        _setState(AsyncData(current.copyWith(isGeneratingImage: false)));
+      }
     }
     _restorationMessage = null;
     // A run started meanwhile owns the phase now; the early returns above
@@ -198,192 +253,5 @@ class AbortHandler {
     if (_ref.mounted && _activeGenId == abortGenId) {
       setGenerationPhase(_ref, _charId, GenerationPhase.idle);
     }
-  }
-
-  /// Stop pressed while `continueMessage()` was streaming. The partial text
-  /// belongs to the message being continued — merge it in place (exactly what
-  /// the completed run would have done) instead of appending a separate
-  /// assistant bubble, which would contradict what the WebView already shows.
-  Future<ChatSession?> _finalizeContinuationAbort(
-    ChatState current,
-    StreamingState partialStreaming,
-    String continuationId,
-  ) async {
-    final messages = current.session?.messages ?? const <ChatMessage>[];
-    final idx = messages.indexWhere((m) => m.id == continuationId);
-    final partialText = partialStreaming.text.trim();
-    final session = current.session;
-    if (session == null) return null;
-    if (idx < 0 || partialText.isEmpty) return _loadSession(session.id);
-
-    final expected = messages[idx];
-    return _mutateSession(session.id, (latest) {
-      final latestIdx = latest.messages.indexWhere(
-        (m) => m.id == continuationId,
-      );
-      if (latestIdx < 0 || latestIdx != latest.messages.length - 1) return null;
-      final target = latest.messages[latestIdx];
-      if (target.content != expected.content ||
-          target.swipeId != expected.swipeId ||
-          target.agentSwipeId != expected.agentSwipeId) {
-        return null;
-      }
-      final merged = mergeContinuationMessage(
-        target,
-        ChatMessage(
-          id: continuationId,
-          role: 'assistant',
-          content: partialText,
-          reasoning: partialStreaming.reasoning,
-        ),
-      );
-      final updatedMessages = [...latest.messages]..[latestIdx] = merged;
-      return latest.copyWith(messages: updatedMessages);
-    }).then((updated) async => updated ?? await _loadSession(session.id));
-  }
-
-  Future<ChatSession?> _finalizeAbortWithPartial(
-    ChatState current,
-    StreamingState partialStreaming,
-    ChatMessage? restoration,
-  ) async {
-    final session = current.session;
-    if (session == null) return null;
-
-    final continuationId = current.continuationTargetId;
-    if (continuationId != null) {
-      return _finalizeContinuationAbort(
-        current,
-        partialStreaming,
-        continuationId,
-      );
-    }
-
-    final regenId = current.regenTargetId;
-
-    if (regenId != null && restoration != null) {
-      final String partialText = partialStreaming.text;
-      if (partialText.isEmpty) return _loadSession(session.id);
-      final updatedSession = await _mutateSession(session.id, (latest) {
-        final idx = latest.messages.indexWhere((m) => m.id == regenId);
-        if (idx < 0) return null;
-        final target = latest.messages[idx];
-        if (target.content != restoration.content ||
-            target.swipeId != restoration.swipeId ||
-            target.agentSwipeId != restoration.agentSwipeId) {
-          return null;
-        }
-        final keptSwipes = List<String>.from(
-          restoration.swipes.isNotEmpty
-              ? restoration.swipes
-              : [restoration.content],
-        );
-        final keptSwipesMeta = List<Map<String, dynamic>>.from(
-          restoration.swipesMeta.isNotEmpty
-              ? restoration.swipesMeta
-              : [
-                  <String, dynamic>{
-                    'genTime': restoration.genTime,
-                    'reasoning': restoration.reasoning,
-                    'tokens': restoration.tokens,
-                    'time': restoration.time,
-                  },
-                ],
-        );
-        keptSwipes.add(partialText);
-        final partialAgentSwipe = AgentSwipe(
-          content: partialText,
-          reasoning: partialStreaming.reasoning,
-          parentSwipeId: keptSwipes.length - 1,
-        );
-        keptSwipesMeta.add(<String, dynamic>{
-          'agentSwipes': [partialAgentSwipe.toJson()],
-          'agentSwipeId': 0,
-        });
-        final newSwipeId = keptSwipes.length - 1;
-        final updated = target.copyWith(
-          content: partialText,
-          swipeId: newSwipeId,
-          swipes: keptSwipes,
-          swipesMeta: keptSwipesMeta,
-          reasoning: partialStreaming.reasoning,
-          genTime: null,
-          tokens: null,
-          time: null,
-          agentSwipes: [partialAgentSwipe],
-          agentSwipeId: 0,
-          isTyping: false,
-          // Partial text becomes a fresh (healthy) swipe; with nothing
-          // streamed we put the pre-regen variation back untouched — an
-          // errored one included, so cancelling a regen over an error does
-          // not launder the error away.
-          isError: false,
-          swipeDirection: 'right',
-        );
-        final updatedMessages = [...latest.messages];
-        updatedMessages[idx] = updated;
-        return latest.copyWith(messages: updatedMessages);
-      });
-      return updatedSession ?? _loadSession(session.id);
-    }
-
-    if (restoration != null) {
-      final updatedSession = await _mutateSession(session.id, (latest) {
-        if (latest.messages.any((message) => message.id == restoration.id)) {
-          return latest;
-        }
-        final expectedTailId = session.messages.isEmpty
-            ? null
-            : session.messages.last.id;
-        final latestTailId = latest.messages.isEmpty
-            ? null
-            : latest.messages.last.id;
-        if (latestTailId != expectedTailId) return null;
-        return latest.copyWith(messages: [...latest.messages, restoration]);
-      });
-      return updatedSession ?? _loadSession(session.id);
-    }
-
-    final String partialText = partialStreaming.text;
-    final String? partialReasoning = partialStreaming.reasoning;
-    final bool hasPartial =
-        partialText.isNotEmpty ||
-        (partialReasoning != null && partialReasoning.isNotEmpty);
-
-    final currentMessages = session.messages;
-    final lastMsg = currentMessages.isNotEmpty ? currentMessages.last : null;
-    final bool lastIsEmptyAssistant =
-        lastMsg != null &&
-        lastMsg.role == 'assistant' &&
-        lastMsg.content.isEmpty &&
-        (lastMsg.reasoning == null || lastMsg.reasoning!.isEmpty);
-
-    if (hasPartial) {
-      final partialMsg = ChatMessage(
-        id: generateId(),
-        role: 'assistant',
-        content: partialText,
-        reasoning: partialReasoning,
-        isTyping: false,
-        timestamp: DateTime.now().millisecondsSinceEpoch,
-        swipes: [partialText],
-        swipeId: 0,
-        swipesMeta: [<String, dynamic>{}],
-      );
-      final baseMessages = lastIsEmptyAssistant
-          ? currentMessages.sublist(0, currentMessages.length - 1)
-          : currentMessages;
-      final expectedTailId = baseMessages.isEmpty ? null : baseMessages.last.id;
-      final updatedSession = await _mutateSession(session.id, (latest) {
-        final latestTailId = latest.messages.isEmpty
-            ? null
-            : latest.messages.last.id;
-        if (latestTailId != expectedTailId) return null;
-        return latest.copyWith(messages: [...latest.messages, partialMsg]);
-      });
-      return updatedSession ?? _loadSession(session.id);
-    }
-
-    return _loadSession(session.id);
   }
 }

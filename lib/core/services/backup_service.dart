@@ -115,6 +115,19 @@ class BackupService {
     return TavoBackupInspection.fromData(data);
   }
 
+  /// Whether [filePath] is a Glaze backup written by a newer app version, so
+  /// the UI can warn that part of it may be lost before the restore starts.
+  Future<bool> isBackupFromNewerApp(String filePath) async {
+    try {
+      if (await _detectFormat(filePath) != BackupFormat.flutterZip) {
+        return false;
+      }
+    } catch (_) {
+      return false;
+    }
+    return FlutterBackupImporter.isFromNewerApp(filePath);
+  }
+
   /// The backup [inspectTavoBackup] decoded last, with the size and time
   /// stamp of the file it was decoded from.
   (String, int, DateTime, TavoBackupData)? _inspectedTavo;

@@ -1,63 +1,68 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:glaze_flutter/features/chat/chrome/chat_chrome_channel.dart';
+import 'package:glaze_flutter/features/chat/chrome/chrome_json.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_status_card_shell.dart';
-import 'package:glaze_flutter/shared/widgets/glaze_spinner.dart';
 
+/// The status cards are drawn by the chat page (chrome/cards.js); the shell
+/// hands each one to it as a chrome section.
 void main() {
-  testWidgets('renders the shared decoration and spinner/action slots', (
+  testWidgets('hands the page the card with its spinner and action', (
     tester,
   ) async {
+    final channel = ChatChromeChannel();
+    var stopped = 0;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: ChatStatusCardShell(
+            channel: channel,
+            slot: 'statusCleaner',
             label: 'Working',
             icon: Icons.sync,
             accent: Colors.orange,
             showSpinner: true,
-            action: IconButton(
-              onPressed: () {},
+            action: ChatStatusCardAction(
+              onPressed: () => stopped++,
               tooltip: 'Stop work',
-              icon: const Icon(Icons.stop_circle_outlined),
+              icon: Icons.stop_circle_outlined,
+              color: Colors.red,
             ),
           ),
         ),
       ),
     );
 
-    expect(find.text('Working'), findsOneWidget);
-    expect(find.byType(GlazeSpinner), findsOneWidget);
-    expect(find.byIcon(Icons.sync), findsNothing);
-    expect(find.byTooltip('Stop work'), findsOneWidget);
-    expect(
-      tester.getSize(find.byType(GlazeSpinner)),
-      const Size.square(18),
-    );
+    final card = channel.debugSections['statusCleaner']! as Map;
+    expect(card['label'], 'Working');
+    expect(card['spinner'], isTrue);
+    expect(card['accent'], chromeColor(Colors.orange));
+    final action = card['action'] as Map;
+    expect(action['tip'], 'Stop work');
+    expect(action['icon'], chromeIcon(Icons.stop_circle_outlined));
+    expect(action['color'], chromeColor(Colors.red));
 
-    final container = tester.widget<Container>(
-      find.ancestor(of: find.text('Working'), matching: find.byType(Container)),
-    );
-    expect(
-      container.padding,
-      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-    );
-    final decoration = container.decoration! as BoxDecoration;
-    expect(decoration.borderRadius, BorderRadius.circular(14));
-    expect(
-      decoration.border,
-      Border.all(color: Colors.orange.withValues(alpha: 0.35)),
-    );
-    expect(decoration.boxShadow, hasLength(1));
-    expect(decoration.boxShadow!.single.blurRadius, 18);
-    expect(decoration.boxShadow!.single.offset, const Offset(0, 8));
+    // Nothing of it is laid out in Flutter.
+    expect(find.text('Working'), findsNothing);
+
+    // The page's tap comes back as an intent naming the card.
+    channel.debugIntent('statusAction', {'id': 'statusStudio'});
+    expect(stopped, 0);
+    channel.debugIntent('statusAction', {'id': 'statusCleaner'});
+    expect(stopped, 1);
   });
 
-  testWidgets('renders the icon slot without an action', (tester) async {
+  testWidgets('a card without an action, and taking it off the page', (
+    tester,
+  ) async {
+    final channel = ChatChromeChannel();
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
         home: Scaffold(
           body: ChatStatusCardShell(
+            channel: channel,
+            slot: 'statusStudio',
             label: 'Complete',
             icon: Icons.check_circle_outline,
             accent: Colors.green,
@@ -67,13 +72,14 @@ void main() {
       ),
     );
 
-    expect(find.text('Complete'), findsOneWidget);
-    expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
-    expect(find.byType(GlazeSpinner), findsNothing);
+    final card = channel.debugSections['statusStudio']! as Map;
+    expect(card['label'], 'Complete');
+    expect(card['spinner'], isFalse);
+    expect(card['icon'], chromeIcon(Icons.check_circle_outline));
+    expect(card['action'], isNull);
 
-    final text = tester.widget<Text>(find.text('Complete'));
-    expect(text.maxLines, 1);
-    expect(text.overflow, TextOverflow.ellipsis);
-    expect(text.style!.fontWeight, FontWeight.w600);
+    // Unmounting the shell takes the card off the page.
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    expect(channel.debugSections['statusStudio'], isNull);
   });
 }

@@ -83,13 +83,6 @@ class ChatBridgeController {
   final Map<String, String> _blockStatusByMessageId = {};
   final Map<String, List<TriggeredEntry>> _triggeredRegexesByMessageId = {};
 
-  /// Every persona that still exists, by id, with its avatar already resolved
-  /// to a WebView URL. User messages carry the id of the persona they were
-  /// sent as; this is what that id is resolved against, so a renamed persona
-  /// renames its own past messages and a deleted one leaves them with their
-  /// stored name and a letter avatar. Refreshed from `personaListProvider`.
-  Map<String, PersonaIdentity> _personasById = const {};
-
   List<PresetRegex> _displayRegexes = [];
   Character? _regexCharacter;
   Persona? _regexPersona;
@@ -179,7 +172,6 @@ class ChatBridgeController {
     isGenerating: isGenerating,
     isPostGenRunning: isPostGenRunning,
     isSendPending: isSendPending,
-    personasById: _personasById,
     coveredMemoryIds: _coveredMemoryIds,
     pendingMemoryIds: _pendingMemoryIds,
     draftMemoryIds: _draftMemoryIds,
@@ -203,28 +195,6 @@ class ChatBridgeController {
           : 'created',
       'timestamp': event.timestampMs,
     };
-  }
-
-  /// Replaces the persona roster the message mapper resolves `personaId`
-  /// against. Avatar paths are resolved here, once per roster change, rather
-  /// than per message.
-  void setPersonaRoster(List<Persona> personas) {
-    _personasById = {
-      for (final p in personas)
-        p.id: PersonaIdentity(
-          name: p.name,
-          avatarUrl: _rosterAvatarUrl(p.avatarPath),
-        ),
-    };
-  }
-
-  /// Null unless [path] resolves to a URL the page can actually load — an
-  /// empty string would reach the renderer as a present-but-blank avatar and
-  /// suppress the letter fallback the persona is owed.
-  String? _rosterAvatarUrl(String? path) {
-    if (path == null || path.isEmpty) return null;
-    final url = resolveLocalFileUrl(path);
-    return (url == null || url.isEmpty) ? null : url;
   }
 
   void setRegexContext(
@@ -363,6 +333,10 @@ class ChatBridgeController {
   void Function(String id, String direction)? onSwipe;
   void Function(String id, String direction)? onAgentSwipe;
   void Function(String id, int direction)? onChangeGreeting;
+
+  /// The variation counter between a switcher's arrows was tapped. [kind] is
+  /// the switcher it belongs to: `swipe`, `agent-swipe` or `greeting`.
+  void Function(String id, String kind)? onOpenVariants;
   void Function(String id, String mode)? onRegenerate;
 
   /// Called when the user taps the "Re-run cleaner" icon on an assistant
@@ -418,6 +392,17 @@ class ChatBridgeController {
   void Function(String blockId, String messageId)? onExtBlockRegenImage;
   void Function(String blockId, String messageId)? onExtBlockEdit;
   void Function(String blockId, String messageId)? onExtBlockDelete;
+
+  /// The reader paged an ext-block card's picture to another image of its
+  /// block: [imageIndex] is the picture among the block's image blocks,
+  /// [variantIndex] the image now on screen.
+  void Function(
+    String blockId,
+    String messageId,
+    int imageIndex,
+    int variantIndex,
+  )?
+  onExtBlockImgVariant;
 
   /// Called when an interactive panel reports its content height changed.
   /// `panelId` identifies the panel, `messageId` the assistant message it
@@ -795,6 +780,23 @@ class ChatBridgeController {
             return;
           }
           onImgVariant?.call(messageId, blockIndex, variantIndex);
+        case 'onExtBlockImgVariant':
+          final blockId = data['blockId'] as String? ?? '';
+          final messageId = data['messageId'] as String? ?? '';
+          final imageIndex = _blockIndex(data['imgIndex']);
+          final variantIndex = _blockIndex(data['variantIndex']);
+          if (blockId.isEmpty ||
+              messageId.isEmpty ||
+              imageIndex == null ||
+              variantIndex == null) {
+            return;
+          }
+          onExtBlockImgVariant?.call(
+            blockId,
+            messageId,
+            imageIndex,
+            variantIndex,
+          );
         case 'onPanelEvent':
           final panelId = data['panelId'] as String? ?? '';
           final event = data['event'] as String? ?? 'action';
@@ -817,6 +819,8 @@ class ChatBridgeController {
         onEditSave?.call(id, restoreImgResults(s));
       case 'onRegenerate':
         onRegenerate?.call(id, s);
+      case 'onOpenVariants':
+        onOpenVariants?.call(id, s);
     }
   }
 
@@ -1009,8 +1013,15 @@ class ChatBridgeController {
     bool scroll = true,
   }) =>
       layout.setSearch(query: query, activeIndex: activeIndex, scroll: scroll);
-  Future<void> setBottomPadding(double px, {double viewportHeight = 0}) =>
-      layout.setBottomPadding(px, viewportHeight: viewportHeight);
+  Future<void> setBottomPadding(
+    double px, {
+    double viewportHeight = 0,
+    double nonScrollingInset = 0,
+  }) => layout.setBottomPadding(
+    px,
+    viewportHeight: viewportHeight,
+    nonScrollingInset: nonScrollingInset,
+  );
   Future<void> setTopPadding(double px) => layout.setTopPadding(px);
   Future<void> setOverlayBlurRegions(List<ChatOverlayBlurRegion> regions) =>
       layout.setOverlayBlurRegions(regions);
@@ -1024,6 +1035,7 @@ class ChatBridgeController {
     required bool disableSwipeRegeneration,
     required bool studioEnabled,
     bool translationEnabled = false,
+    bool disableStreamAutoScroll = false,
   }) => layout.setMessageSettings(
     batterySaver: batterySaver,
     hideMessageId: hideMessageId,
@@ -1032,6 +1044,7 @@ class ChatBridgeController {
     disableSwipeRegeneration: disableSwipeRegeneration,
     studioEnabled: studioEnabled,
     translationEnabled: translationEnabled,
+    disableStreamAutoScroll: disableStreamAutoScroll,
   );
 
   // Display-only translation. None of these touch the section's stored text:
@@ -1182,6 +1195,8 @@ class ChatBridgeController {
   /// [options] is a free-form JSON object. Recognised keys:
   ///   - `title`: aria-label / accessibility hint for the iframe
   ///   - `minHeight`: starting height in pixels (default 120, clamped 60..2000)
+  ///   - `key`: opening a panel with the key of one already open under the
+  ///     same message replaces that panel
   Future<String?> openInteractivePanel({
     required String messageId,
     required String html,

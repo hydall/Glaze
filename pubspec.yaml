@@ -1,7 +1,9 @@
 name: glaze_flutter
 description: "Glaze — AI chat client (Flutter)"
 publish_to: 'none'
-version: 0.10.1
+# YY.M.N. CI writes the real version here at build time from the release tags
+# (.github/scripts/calver.sh) — do not bump it by hand.
+version: 26.11.0
 
 environment:
   sdk: ^3.12.0

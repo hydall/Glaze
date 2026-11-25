@@ -120,6 +120,46 @@ test('a visual viewport pan is undone', async ({ page }) => {
   expect(panned.settled).toBe(0);
 });
 
+// Between the tap that focuses the composer and the keyboard settling, a pan
+// can land in a frame that announces itself with no visual viewport scroll the
+// lock hears. The page's own scroll/resize listeners on the visual viewport are
+// dropped here to stand in for that, so only the per-frame watch armed by the
+// focus is left to undo the pan.
+test('a pan right after a field takes focus is undone without viewport events', async ({ page }) => {
+  await page.addInitScript(() => {
+    const add = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function (type, fn, opts) {
+      if (window.visualViewport && this === window.visualViewport &&
+          (type === 'scroll' || type === 'resize')) return;
+      return add.call(this, type, fn, opts);
+    };
+  });
+  await openChat(page);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+  await page.waitForTimeout(100);
+
+  const panned = await page.evaluate(async () => {
+    const vv = window.visualViewport;
+    const input = document.createElement('input');
+    input.style.cssText = 'position: fixed; left: 0; bottom: 0; width: 10px; height: 10px;';
+    document.body.appendChild(input);
+    input.focus({ preventScroll: true });
+    await new Promise((r) => setTimeout(r, 50));
+    const field = document.createElement('div');
+    field.style.cssText = 'position: fixed; left: 0; bottom: 0; width: 10px; height: 10px;';
+    document.body.appendChild(field);
+    field.scrollIntoView({ block: 'end', behavior: 'instant' });
+    const atOnce = vv.offsetTop;
+    await new Promise((r) => setTimeout(r, 200));
+    return { atOnce, settled: vv.offsetTop, scale: vv.scale };
+  });
+
+  expect(panned.scale).toBe(2);
+  expect(panned.atOnce).toBeGreaterThan(50);
+  expect(panned.settled).toBe(0);
+});
+
 test('a document scroll is undone and handed to the container', async ({ page }) => {
   await openChat(page);
 

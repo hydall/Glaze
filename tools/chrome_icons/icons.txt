@@ -47,6 +47,7 @@ account_box
 library_books
 code
 cloud
+hub_outlined
 description
 manage_accounts
 image
@@ -87,3 +88,26 @@ fast_forward_outlined
 outlined_flag
 warning_amber_outlined
 local_cafe_outlined
+
+# Scroll buttons (chrome/scroll.js)
+keyboard_arrow_down_rounded
+keyboard_arrow_up_rounded
+
+# Cards under the header (chrome/cards.js, context_coverage_card.dart,
+# the status cards)
+layers_outlined
+expand_less_rounded
+expand_more_rounded
+warning_amber_rounded
+psychology_alt_outlined
+refresh_rounded
+open_in_full_rounded
+account_tree_outlined
+check_circle_outline
+cancel_outlined
+fact_check_outlined
+cleaning_services_outlined
+error_outline
+skip_next_outlined
+stop_circle_outlined
+manage_search_outlined

@@ -437,7 +437,8 @@ class ChatWebViewSyncDispatcher {
         current.hideTokenCount != old.hideTokenCount ||
         current.disableSwipeRegeneration != old.disableSwipeRegeneration ||
         current.studioEnabled != old.studioEnabled ||
-        current.translationEnabled != old.translationEnabled) {
+        current.translationEnabled != old.translationEnabled ||
+        current.disableStreamAutoScroll != old.disableStreamAutoScroll) {
       bridge.setMessageSettings(
         batterySaver: current.batterySaver,
         hideMessageId: current.hideMessageId,
@@ -446,6 +447,7 @@ class ChatWebViewSyncDispatcher {
         disableSwipeRegeneration: current.disableSwipeRegeneration,
         studioEnabled: current.studioEnabled,
         translationEnabled: current.translationEnabled,
+        disableStreamAutoScroll: current.disableStreamAutoScroll,
       );
     }
   }
@@ -524,10 +526,12 @@ class ChatWebViewSyncDispatcher {
     // viewport shrink it measures against it, so a stale height would mis-split
     // the inset (see LayoutBridgeCommands.setBottomPadding).
     if (current.bottomInset != old.bottomInset ||
-        current.viewportHeight != old.viewportHeight) {
+        current.viewportHeight != old.viewportHeight ||
+        current.nonScrollingInset != old.nonScrollingInset) {
       bridge.setBottomPadding(
         current.bottomInset,
         viewportHeight: current.viewportHeight,
+        nonScrollingInset: current.nonScrollingInset,
       );
     }
     if (current.topInset != old.topInset) {
@@ -735,6 +739,7 @@ class ChatWebViewWidgetFields {
     required this.bgNoiseIntensity,
     required this.bottomInset,
     this.viewportHeight = 0,
+    this.nonScrollingInset = 0,
     required this.topInset,
     this.blurRegions = const [],
     required this.searchQuery,
@@ -770,6 +775,7 @@ class ChatWebViewWidgetFields {
     required this.disableSwipeRegeneration,
     required this.studioEnabled,
     this.translationEnabled = false,
+    this.disableStreamAutoScroll = false,
     required this.memoryEntries,
     required this.memoryDrafts,
     required this.sessionId,
@@ -801,6 +807,10 @@ class ChatWebViewWidgetFields {
   /// subtract the part of the inset its own viewport already absorbed when the
   /// soft keyboard shrank it.
   final double viewportHeight;
+
+  /// The part of [bottomInset] whose changes leave the reading position alone
+  /// (see LayoutBridgeCommands.setBottomPadding).
+  final double nonScrollingInset;
   final double topInset;
 
   /// Rects of Flutter glass overlays (header, input pill, buttons) mirrored
@@ -851,6 +861,7 @@ class ChatWebViewWidgetFields {
   final bool disableSwipeRegeneration;
   final bool studioEnabled;
   final bool translationEnabled;
+  final bool disableStreamAutoScroll;
   final List<dynamic> memoryEntries;
   final List<dynamic> memoryDrafts;
   final String? sessionId;

@@ -140,18 +140,21 @@ void bumpAvatarVersion(dynamic ref) {
   ref.read(avatarVersionProvider.notifier).state++;
 }
 
-/// Number of taps on the Characters tab required to toggle reveal-hidden mode.
-const int kRevealHiddenTapCount = 10;
+/// Number of taps on the "Characters" header title required to toggle
+/// reveal-hidden mode.
+const int kRevealHiddenTapCount = 3;
 
 /// Window in which those taps must occur.
-const Duration kRevealHiddenTapWindow = Duration(milliseconds: 1500);
+const Duration kRevealHiddenTapWindow = Duration(milliseconds: 1000);
 
 /// Whether hidden characters are currently revealed in the My Characters list.
 ///
 /// Session-only (resets to `false` on app restart) so hidden characters re-hide
 /// themselves automatically — the gesture must be repeated to reveal them again.
-/// Toggled by [RevealHiddenNotifier.registerCharactersTabTap] when the user taps
-/// the Characters tab [kRevealHiddenTapCount] times within [kRevealHiddenTapWindow].
+/// Toggled by [RevealHiddenNotifier.registerHeaderTap] when the user taps the
+/// "Characters" header title [kRevealHiddenTapCount] times within
+/// [kRevealHiddenTapWindow], or by [RevealHiddenNotifier.toggle] from the
+/// desktop hotkey.
 final revealHiddenCharactersProvider =
     NotifierProvider<RevealHiddenNotifier, bool>(RevealHiddenNotifier.new);
 
@@ -161,20 +164,26 @@ class RevealHiddenNotifier extends Notifier<bool> {
   @override
   bool build() => false;
 
-  /// Records a tap on the Characters tab. Returns the new reveal state when the
-  /// gesture completes (toggle happened), or `null` when it didn't.
-  bool? registerCharactersTabTap() {
+  /// Records a tap on the "Characters" header title. Returns the new reveal
+  /// state when the gesture completes (toggle happened), or `null` when it
+  /// didn't.
+  bool? registerHeaderTap() {
     final now = DateTime.now().millisecondsSinceEpoch;
     _tapTimes.add(now);
     _tapTimes.removeWhere(
       (t) => now - t > kRevealHiddenTapWindow.inMilliseconds,
     );
     if (_tapTimes.length >= kRevealHiddenTapCount) {
-      _tapTimes.clear();
-      state = !state;
-      return state;
+      return toggle();
     }
     return null;
+  }
+
+  /// Flips reveal-hidden mode and returns the new state.
+  bool toggle() {
+    _tapTimes.clear();
+    state = !state;
+    return state;
   }
 }
 

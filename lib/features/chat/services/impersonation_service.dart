@@ -14,6 +14,7 @@ import '../../../core/llm/stream_accumulator.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/transport_factory.dart';
+import '../../../core/models/api_config.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/services/preset_defaults.dart';
 import '../../../core/state/db_provider.dart';
@@ -164,9 +165,7 @@ class ImpersonationService {
     var frameScheduled = false;
     ImpersonationOutcome outcome = ImpersonationOutcome.ok;
 
-    final idleTimeoutMs = apiConfig.firstChunkTimeoutMs > 0
-        ? apiConfig.firstChunkTimeoutMs
-        : 120000;
+    final idleTimeoutMs = apiConfig.effectiveFirstChunkTimeoutMs;
     var idleTimedOut = false;
     final idleGuard = IdleTimeoutGuard(idleTimeoutMs, () {
       idleTimedOut = true;
@@ -178,6 +177,7 @@ class ImpersonationService {
         apiConfig,
         messages: apiMessages,
         sessionId: session.id,
+        receiveTimeoutMs: apiConfig.transportReceiveTimeoutMs,
         charName: character?.name ?? 'Character',
         userName: persona?.name ?? 'User',
         stop: noAssistant?.stop ?? const [],

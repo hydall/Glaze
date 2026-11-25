@@ -9,6 +9,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/debug/perf_debug.dart';
+import '../../../core/diagnostics/app_log.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_bridge_registry.dart';
@@ -129,6 +130,10 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     if (Platform.isWindows) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) debugPrint('[perf] chat view: native view mounting');
+        // Creating the WebView2 view is where a native crash takes the
+        // process down; write the log out first so the report shows how far
+        // the chat got instead of losing the last second.
+        AppLog.flush();
         if (mounted) setState(() => _mountNativeView = true);
       });
     }
@@ -216,6 +221,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     bridge.onMessageContext = callbacks.onMessageContext;
     bridge.onSwipe = callbacks.onSwipe;
     bridge.onChangeGreeting = callbacks.onChangeGreeting;
+    bridge.onOpenVariants = callbacks.onOpenVariants;
     bridge.onHeaderScroll = callbacks.onHeaderScroll;
     bridge.onScrollToBottomVisibility = callbacks.onScrollToBottomVisibility;
     bridge.onScrollToTopVisibility = callbacks.onScrollToTopVisibility;
@@ -268,6 +274,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     bridge.onExtBlockRegenImage = extBlocks.onRegenImage();
     bridge.onExtBlockEdit = extBlocks.onEdit();
     bridge.onExtBlockDelete = extBlocks.onDelete();
+    bridge.onExtBlockImgVariant = extBlocks.onImgVariant();
 
     final isAlive = await controller.isLoading() == false;
     if (isAlive && _callbackIsActive(epoch)) {

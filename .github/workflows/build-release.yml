@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release tag (e.g. v0.7.1). Leave empty for auto — v<version> from pubspec.yaml'
+        description: 'Release tag (e.g. v26.11.1). Leave empty for auto — the next YY.M.N of this month'
         required: false
         type: string
         default: ''
@@ -84,7 +84,16 @@ jobs:
       - name: Compute metadata
         id: meta
         run: |
-          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | sed 's/+.*//')
+          # Versions are YY.M.N, counted from the release tags
+          # (.github/scripts/calver.sh). A tag given by hand wins.
+          git fetch --tags --force
+          TAG_NAME="${{ github.event.inputs.tag_name }}"
+          if [ -n "$TAG_NAME" ]; then
+            VERSION="${TAG_NAME#v}"
+          else
+            VERSION=$(bash .github/scripts/calver.sh next)
+            TAG_NAME="v${VERSION}"
+          fi
           BUILD_DATE=$(date -u '+%d/%m/%Y %H:%M')
           BUILD_BRANCH="${{ github.ref_name }}"
 
@@ -92,14 +101,9 @@ jobs:
           FILE_SLUG="G-$(date -u '+%d%m%Y-%H%M')-$SAFE_BRANCH"
 
           case "$BUILD_BRANCH" in
-            stable)  BUILD_CHANNEL=stable  ;;
+            main)    BUILD_CHANNEL=stable  ;;
             *)       BUILD_CHANNEL=nightly ;;
           esac
-
-          TAG_NAME="${{ github.event.inputs.tag_name }}"
-          if [ -z "$TAG_NAME" ]; then
-            TAG_NAME="v${VERSION}"
-          fi
 
           echo "version=$VERSION"           >> $GITHUB_OUTPUT
           echo "tag_name=$TAG_NAME"          >> $GITHUB_OUTPUT
@@ -146,6 +150,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+
+      - name: Stamp version
+        shell: bash
+        run: bash .github/scripts/stamp_version.sh "${{ needs.metadata.outputs.version }}"
 
       - name: Create .env from secrets
         env:
@@ -332,6 +340,10 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
+      - name: Stamp version
+        shell: bash
+        run: bash .github/scripts/stamp_version.sh "${{ needs.metadata.outputs.version }}"
+
       - name: Create .env from secrets
         shell: bash
         env:
@@ -440,6 +452,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+
+      - name: Stamp version
+        shell: bash
+        run: bash .github/scripts/stamp_version.sh "${{ needs.metadata.outputs.version }}"
 
       - name: Create .env from secrets
         env:
@@ -571,6 +587,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
+
+      - name: Stamp version
+        shell: bash
+        run: bash .github/scripts/stamp_version.sh "${{ needs.metadata.outputs.version }}"
 
       - name: Create .env from secrets
         env:

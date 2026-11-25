@@ -132,6 +132,12 @@ class FakeSystem implements SetupSystem {
 
   @override
   Future<void> launch(String exe) async {}
+
+  /// What the folder dialog answers.
+  String? picked;
+  @override
+  Future<String?> pickFolder({String? initial}) async => picked;
+
   @override
   Future<void> deleteAfterExit(
     List<String> paths, {
@@ -404,6 +410,75 @@ void main() {
       },
     );
 
+    test('a picked folder gets a Glaze folder of its own', () {
+      final apps = p.join(tmp.path, 'Apps');
+      expect(engine.installDirFor(apps), p.join(apps, 'Glaze Nightly'));
+      expect(
+        engine.installDirFor(p.join(apps, 'glaze nightly')),
+        p.join(apps, 'glaze nightly'),
+      );
+    });
+
+    test('a folder is checked without leaving anything behind', () async {
+      final apps = p.join(tmp.path, 'Apps');
+      final fresh = p.join(apps, 'Glaze Nightly');
+      expect(await engine.checkInstallDir(fresh), isNull);
+      expect(Directory(apps).existsSync(), isFalse);
+
+      File(p.join(fresh, 'notes.txt')).createSync(recursive: true);
+      expect(await engine.checkInstallDir(fresh), FolderProblem.notEmpty);
+
+      // A copy of Glaze is fine to install over.
+      final portable = p.join(tmp.path, 'Portable');
+      File(p.join(portable, 'Glaze.exe')).createSync(recursive: true);
+      File(p.join(portable, 'data', 'app.so')).createSync(recursive: true);
+      expect(await engine.checkInstallDir(portable), isNull);
+      expect(
+        await engine.checkInstallDir('relative'),
+        FolderProblem.notWritable,
+      );
+    });
+
+    test(
+      'a picked folder holds the install, its updates and nothing more',
+      () async {
+        final apps = Directory(p.join(tmp.path, 'Apps'))..createSync();
+        File(p.join(apps.path, 'other.txt')).writeAsStringSync('theirs');
+        final dir = engine.installDirFor(apps.path);
+        await engine.install(
+          payload: payload,
+          package: package,
+          desktopShortcut: false,
+          listener: RecordingListener(),
+          installDir: dir,
+        );
+        expect(File(p.join(dir, 'Glaze.exe')).existsSync(), isTrue);
+        expect((await engine.existingInstall())!['InstallLocation'], dir);
+
+        // An update stays where the install is, whatever it is handed.
+        await engine.install(
+          payload: payload,
+          package: package,
+          desktopShortcut: false,
+          listener: RecordingListener(),
+          installDir: engine.defaultInstallDir,
+        );
+        expect((await engine.paths()).installDir, dir);
+        expect(Directory(engine.defaultInstallDir).existsSync(), isFalse);
+
+        await engine.uninstall(
+          deleteData: false,
+          listener: RecordingListener(),
+        );
+        expect(File(p.join(dir, 'Glaze.exe')).existsSync(), isFalse);
+        expect(system.thenIfEmpty, [dir]);
+        expect(
+          File(p.join(apps.path, 'other.txt')).readAsStringSync(),
+          'theirs',
+        );
+      },
+    );
+
     test(
       'a build without Glaze.exe is refused before anything changes',
       () async {
@@ -666,6 +741,32 @@ void main() {
       await c.load();
       await c.start();
       expect(c.missingPayload, isTrue);
+    });
+
+    test('a fresh install may go to another folder', () async {
+      final engine = DemoEngine(pace: 0);
+      final c = SetupController(
+        args: const SetupArgs(demo: true),
+        engine: engine,
+      );
+      await c.load();
+      expect(c.canChooseFolder, isTrue);
+      await c.chooseFolder();
+      expect(c.folderProblem, isNull);
+      expect(c.paths!.installDir, engine.installDirFor(r'D:\Apps'));
+      await c.start();
+      expect(c.phase, SetupPhase.done);
+    });
+
+    test('an installed Glaze keeps its folder', () async {
+      final c = SetupController(
+        args: const SetupArgs(demo: true),
+        engine: DemoEngine(pace: 0, previousVersion: '0.9.0'),
+      );
+      await c.load();
+      expect(c.canChooseFolder, isFalse);
+      await c.chooseFolder();
+      expect(c.paths!.installDir, isNot(contains('Apps')));
     });
 
     test('a silent uninstall needs nobody', () async {

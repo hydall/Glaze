@@ -293,6 +293,32 @@ void main() {
       expect(tc['thinkingBudget'], 2500); // 25% of 10000
     });
 
+    test('gemini-3.8-flash min → low, the model rejects minimal', () {
+      final built = GeminiChatTransport.buildRequest(
+        _req(
+          model: 'gemini-3.8-flash',
+          requestReasoning: true,
+          reasoningEffort: 'min',
+        ),
+      );
+      final cfg = built.body['generationConfig'] as Map;
+      final tc = cfg['thinkingConfig'] as Map;
+      expect(tc['thinkingLevel'], 'low');
+    });
+
+    test('gemini-3.1-pro-preview medium → medium', () {
+      final built = GeminiChatTransport.buildRequest(
+        _req(
+          model: 'gemini-3.1-pro-preview',
+          requestReasoning: true,
+          reasoningEffort: 'medium',
+        ),
+      );
+      final cfg = built.body['generationConfig'] as Map;
+      final tc = cfg['thinkingConfig'] as Map;
+      expect(tc['thinkingLevel'], 'medium');
+    });
+
     test('gemini-3-pro medium → thinkingLevel symbolic', () {
       final built = GeminiChatTransport.buildRequest(
         _req(
@@ -306,6 +332,54 @@ void main() {
       // gemini-3-pro maps medium → 'low' (per port).
       expect(tc['thinkingLevel'], 'low');
       expect(tc.containsKey('thinkingBudget'), isFalse);
+    });
+
+    test('gemini-4-carbon sends the chosen level, never a budget', () {
+      Map<dynamic, dynamic> thinking(
+        String effort, {
+        String model = 'gemini-4-carbon',
+      }) {
+        final built = GeminiChatTransport.buildRequest(
+          _req(
+            model: model,
+            requestReasoning: true,
+            reasoningEffort: effort,
+            maxTokens: 30000,
+          ),
+        );
+        final cfg = built.body['generationConfig'] as Map;
+        return cfg['thinkingConfig'] as Map;
+      }
+
+      for (final entry in const {
+        'min': 'low',
+        'low': 'low',
+        'medium': 'medium',
+        'high': 'high',
+        'max': 'high',
+      }.entries) {
+        final tc = thinking(entry.key);
+        expect(tc['thinkingLevel'], entry.value, reason: entry.key);
+        expect(tc['includeThoughts'], true, reason: entry.key);
+        expect(tc.containsKey('thinkingBudget'), isFalse, reason: entry.key);
+      }
+      expect(
+        thinking('max', model: 'gemini-4-hydrogen')['thinkingLevel'],
+        'xhigh',
+      );
+    });
+
+    test('gemini-4-carbon on auto leaves the level to the model', () {
+      final built = GeminiChatTransport.buildRequest(
+        _req(
+          model: 'gemini-4-carbon',
+          requestReasoning: true,
+          reasoningEffort: 'auto',
+        ),
+      );
+      final tc =
+          (built.body['generationConfig'] as Map)['thinkingConfig'] as Map;
+      expect(tc, {'includeThoughts': true});
     });
 
     test('non-thinking model omits thinkingConfig', () {

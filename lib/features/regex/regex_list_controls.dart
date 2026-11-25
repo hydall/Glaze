@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import '../../core/models/preset.dart';
 import '../../shared/widgets/filter_sheet.dart';
 
+export '../../shared/state/preset_sort.dart' show reanchorOrder;
+
 /// The script placements a filter can narrow the list to, in the order the
 /// editor's "Affects" group lists them.
 const List<int> regexFilterPlacements = [1, 2, 3, 5, 6];
@@ -47,35 +49,6 @@ class RegexListFilters {
     }
     return true;
   }
-}
-
-/// The full id order after the row at [oldIndex] of [visible] was dragged to
-/// [newIndex] (its final index, as `onReorderItem` reports it).
-///
-/// [visible] is what the user dragged over — one folder, or the rows a filter
-/// left; [full] is the whole list. The moved row lands right after the visible
-/// row it now follows, so rows hidden from view keep the places they had.
-List<String> reanchorOrder(
-  List<String> full,
-  List<String> visible,
-  int oldIndex,
-  int newIndex,
-) {
-  if (oldIndex == newIndex) return full;
-  final shown = List<String>.of(visible);
-  final moved = shown.removeAt(oldIndex);
-  shown.insert(newIndex, moved);
-  final result = List<String>.of(full)..remove(moved);
-  if (newIndex == 0) {
-    // Lands before the row that now follows it.
-    final next = shown.length > 1 ? shown[1] : null;
-    final at = next == null ? 0 : result.indexOf(next);
-    result.insert(at < 0 ? 0 : at, moved);
-    return result;
-  }
-  final anchor = shown[newIndex - 1];
-  result.insert(result.indexOf(anchor) + 1, moved);
-  return result;
 }
 
 /// The scripts of [preset] filed in folder [folderId], in run order. A null

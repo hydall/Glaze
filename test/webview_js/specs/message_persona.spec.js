@@ -1,10 +1,6 @@
-// A user message records the persona it was sent as (`personaId` + the name),
-// and the page renders that persona rather than whichever one is active now.
-//
-// The failure these protect against is a chat that rewrites its own history:
-// switch persona and every message you ever sent suddenly claims to be from
-// the new one — and, once a persona is deleted, wears a stranger's face while
-// still carrying the right name.
+// Every user message wears the persona the chat speaks as now. Switching
+// persona must re-face the messages already on screen at once — name and
+// avatar — without waiting for a re-render.
 import { test, expect } from '@playwright/test';
 
 const PAGE = '/assets/chat_webview/index.html';
@@ -72,133 +68,67 @@ const header = (page, id) =>
     };
   }, id);
 
-test('a message keeps the avatar of the persona it was sent as', async ({
-  page,
-}) => {
+test('a user message renders with the active persona', async ({ page }) => {
   await boot(page);
   await activeIdentity(page, RED);
-  await page.evaluate(
-    ([blue]) => {
-      window.bridge.setMessages(
-        JSON.stringify([
-          JSON.parse(
-            window.__M('u1', 'user', 'hi', {
-              displayName: 'Mara',
-              personaId: 'p-mara',
-              personaName: 'Mara',
-              avatarUrl: blue,
-            }),
-          ),
-        ]),
-      );
-    },
-    [BLUE],
-  );
-
-  expect(await header(page, 'u1')).toEqual({
-    name: 'Mara',
-    src: BLUE,
-    letter: null,
-  });
-});
-
-test('switching persona does not repaint the messages already sent', async ({
-  page,
-}) => {
-  await boot(page);
-  await activeIdentity(page, RED);
-  await page.evaluate(
-    ([blue]) => {
-      window.bridge.setMessages(
-        JSON.stringify([
-          JSON.parse(
-            window.__M('u1', 'user', 'hi', {
-              displayName: 'Mara',
-              personaId: 'p-mara',
-              personaName: 'Mara',
-              avatarUrl: blue,
-            }),
-          ),
-        ]),
-      );
-    },
-    [BLUE],
-  );
-
-  // The reader switches to another persona, with another picture. Only the
-  // active identity changed — the message was sent as Mara and stays hers.
-  await activeIdentity(page, RED, 'Kai');
-
-  expect(await header(page, 'u1')).toEqual({
-    name: 'Mara',
-    src: BLUE,
-    letter: null,
-  });
-});
-
-test('a deleted persona keeps its name and falls back to its letter', async ({
-  page,
-}) => {
-  await boot(page);
-  await activeIdentity(page, RED);
-  // `avatarFallback` is what Dart sends when the stored `personaId` no longer
-  // resolves — the persona was deleted, or never had a picture.
   await page.evaluate(() => {
     window.bridge.setMessages(
       JSON.stringify([
-        JSON.parse(
-          window.__M('u1', 'user', 'hi', {
-            displayName: 'Mara',
-            personaId: 'p-mara',
-            personaName: 'Mara',
-            avatarFallback: true,
-          }),
-        ),
+        JSON.parse(window.__M('u1', 'user', 'hi', { displayName: 'Nyx' })),
       ]),
     );
   });
 
   expect(await header(page, 'u1')).toEqual({
-    name: 'Mara',
-    src: null,
-    letter: 'M',
-  });
-
-  // An identity push must not hand the deleted persona the active one's face.
-  await activeIdentity(page, RED, 'Kai');
-
-  expect(await header(page, 'u1')).toEqual({
-    name: 'Mara',
-    src: null,
-    letter: 'M',
+    name: 'Nyx',
+    src: RED,
+    letter: null,
   });
 });
 
-test('a message with no stored persona still follows the active one', async ({
+test('switching persona re-faces the messages already sent', async ({
   page,
 }) => {
   await boot(page);
   await activeIdentity(page, RED);
   await page.evaluate(() => {
     window.bridge.setMessages(
-      JSON.stringify([JSON.parse(window.__M('u1', 'user', 'hi'))]),
+      JSON.stringify([
+        JSON.parse(window.__M('u1', 'user', 'hi', { displayName: 'Nyx' })),
+        JSON.parse(window.__M('a1', 'assistant', 'hello')),
+      ]),
     );
   });
 
-  // Chats written before messages carried a persona: the active identity is
-  // all there is to go on, and it must still reach them — the avatar on the
-  // first render, and the name on the next identity push.
+  await activeIdentity(page, BLUE, 'Kai');
+
   expect(await header(page, 'u1')).toEqual({
-    name: 'You',
-    src: RED,
+    name: 'Kai',
+    src: BLUE,
     letter: null,
   });
+  // The character's side is untouched by a persona switch.
+  expect((await header(page, 'a1')).name).toBe('Alice');
+});
 
+test('a persona with no avatar shows its letter after the switch', async ({
+  page,
+}) => {
+  await boot(page);
   await activeIdentity(page, RED);
+  await page.evaluate(() => {
+    window.bridge.setMessages(
+      JSON.stringify([
+        JSON.parse(window.__M('u1', 'user', 'hi', { displayName: 'Nyx' })),
+      ]),
+    );
+  });
+
+  await activeIdentity(page, null, 'Kai');
 
   expect(await header(page, 'u1')).toEqual({
-    name: 'Nyx',
-    src: RED,
-    letter: null,
+    name: 'Kai',
+    src: null,
+    letter: 'K',
   });
 });

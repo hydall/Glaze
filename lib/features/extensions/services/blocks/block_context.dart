@@ -29,6 +29,14 @@ class BlockContext {
   /// included; empty when it asks alone.
   final List<BlockConfig> group;
 
+  /// What the block's row held before this run cleared it, when the run
+  /// reuses an existing row (a manual regenerate). Empty for a first run.
+  ///
+  /// The pictures it carries are handed on to the new content, so a
+  /// regenerate adds to the block's image switcher instead of orphaning every
+  /// earlier file (issue #839).
+  final String previousContent;
+
   const BlockContext({
     required this.charId,
     required this.sessionId,
@@ -46,5 +54,6 @@ class BlockContext {
     required this.placeholder,
     this.mainModelContextSnapshot,
     this.group = const [],
+    this.previousContent = '',
   });
 }

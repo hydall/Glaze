@@ -343,6 +343,21 @@ class _ShellHeaderPublisherState extends ConsumerState<_ShellHeaderPublisher> {
   Widget build(BuildContext context) => widget.child;
 }
 
+/// Wraps a header's title text so [onTap] fires on the text itself, not the
+/// whole row it is expanded into. Returns [child] untouched when [onTap] is
+/// null.
+Widget tappableHeaderTitle({required Widget child, VoidCallback? onTap}) {
+  if (onTap == null) return child;
+  return Align(
+    alignment: Alignment.centerLeft,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: child,
+    ),
+  );
+}
+
 /// Standalone floating glassmorphic app bar — use this directly when you
 /// need to embed the header inside a body Column (e.g. shell-tab screens).
 class GlazeAppBar extends ConsumerWidget {
@@ -374,10 +389,14 @@ class GlazeAppBar extends ConsumerWidget {
   /// beside it: a desktop sidebar panel's, at the top of the strip.
   final bool showLeading;
 
+  /// Called on a tap on the plain-text [title]; ignored with [titleWidget].
+  final VoidCallback? onTitleTap;
+
   const GlazeAppBar({
     super.key,
     this.title,
     this.titleWidget,
+    this.onTitleTap,
     this.actions,
     this.showBack = false,
     this.onBack,
@@ -427,14 +446,17 @@ class GlazeAppBar extends ConsumerWidget {
               child:
                   titleWidget ??
                   (title != null
-                      ? Text(
-                          title!,
-                          style: TextStyle(
-                            color: context.cs.onSurface,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
+                      ? tappableHeaderTitle(
+                          onTap: onTitleTap,
+                          child: Text(
+                            title!,
+                            style: TextStyle(
+                              color: context.cs.onSurface,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          overflow: TextOverflow.ellipsis,
                         )
                       : const SizedBox.shrink()),
             ),
@@ -484,32 +506,37 @@ class GlazePillButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        decoration: BoxDecoration(
-          color: context.cs.primary.withValues(alpha: 0.15),
-          borderRadius: context.glazeBorderRadius(20),
-          border: Border.all(color: context.cs.primary.withValues(alpha: 0.2)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: context.cs.primary),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: context.cs.primary,
-              ),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: context.cs.primary.withValues(alpha: 0.15),
+            borderRadius: context.glazeBorderRadius(20),
+            border: Border.all(
+              color: context.cs.primary.withValues(alpha: 0.2),
             ),
-          ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: context.cs.primary),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: context.cs.primary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-    ));
+    );
   }
 }

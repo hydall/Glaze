@@ -136,13 +136,6 @@ export class Renderer {
     if (reasoning) section.dataset.reasoning = reasoning;
     if (isLast && this._roleKey(role) === 'char') section.dataset.isLast = 'true';
     if (messageData.personaName) section.dataset.personaName = messageData.personaName;
-    // Sent as a named persona: the message keeps that persona's avatar (or, if
-    // it was deleted or has no picture, its letter) instead of following the
-    // currently active persona. `avatarPinned` is what setIdentity checks
-    // before it repaints avatars.
-    if (messageData.personaId) section.dataset.personaId = messageData.personaId;
-    if (messageData.avatarUrl) section.dataset.avatarUrl = messageData.avatarUrl;
-    if (messageData.avatarUrl || messageData.avatarFallback) section.dataset.avatarPinned = '1';
     if (messageData.messageIndex != null) section.dataset.messageIndex = String(messageData.messageIndex);
     if (messageData.swipeIndex != null) section.dataset.swipeId = String(messageData.swipeIndex);
     if (messageData.swipeTotal != null) section.dataset.swipeTotal = String(messageData.swipeTotal);
@@ -271,15 +264,13 @@ if (messageData.isEditing) classes.push('editing');
     else if (roleKey === 'char') avatar.classList.add('tavo-character-avatar', 'tavo-group-character-avatar');
     const finalName = m.displayName || m.personaName || this._getDefaultName(m.role);
     const identity = window.bridge || null;
-    // `avatarFallback` means the message names a persona with no avatar to
-    // show — deleted, or never given a picture. It renders the letter rather
-    // than borrowing the active persona's avatar.
-    const pinnedAvatar = !!(m.avatarUrl || m.avatarFallback);
-    const avatarUrl = m.avatarUrl || (pinnedAvatar ? null : (roleKey === 'user'
+    // Avatars follow the active identity: a persona switch re-faces every
+    // user message (setIdentity repaints the ones already on screen).
+    const avatarUrl = roleKey === 'user'
       ? (identity && identity._personaAvatarUrl)
       : roleKey === 'char'
         ? (identity && identity._charAvatarUrl)
-        : null));
+        : null;
     if (avatarUrl) {
       const img = document.createElement('img');
       img.src = avatarUrl;
@@ -599,6 +590,20 @@ if (messageData.isEditing) classes.push('editing');
     stat.insertBefore(this._buildGenTime(genTime, clockMargin), stat.firstChild);
   }
 
+  /* Drops the clock icon and badge from the gen-stat row in `meta`, and the
+     row itself when nothing else is left in it. */
+  _removeGenTime(meta) {
+    const stat = meta?.querySelector('.gen-stat:not(.msg-index)');
+    const wrapper = stat?.querySelector('.gen-time-wrapper');
+    if (!wrapper) return;
+    const icon = wrapper.previousElementSibling;
+    if (icon && icon.tagName.toLowerCase() === 'svg') icon.remove();
+    wrapper.remove();
+    const tokens = stat.querySelector('.token-count-inline');
+    if (tokens) tokens.style.marginLeft = '';
+    if (!stat.firstElementChild) stat.remove();
+  }
+
   /* ----- Bubble meta (inside body) ----- */
   _createBubbleMeta(m) {
     const meta = document.createElement('div');
@@ -775,6 +780,10 @@ if (messageData.isEditing) classes.push('editing');
 
     const count = document.createElement('div');
     count.className = 'msg-switcher-count';
+    // Tapping the counter opens a picker over every variation (Flutter sheet).
+    count.dataset.action = 'open-variants';
+    count.dataset.kind = kind;
+    count.dataset.messageId = messageId;
     count.textContent = `${index + 1}/${total}`;
     wrap.appendChild(count);
 
@@ -1054,6 +1063,16 @@ if (messageData.isEditing) classes.push('editing');
 
     let bubbleMeta = sectionEl.querySelector('.bubble-meta');
     let footerMeta = sectionEl.querySelector('.msg-meta');
+
+    // A full message map (`role` present) that is no longer typing and carries
+    // no time has no clock to show. The one left on the row is the live
+    // GenTimer's, frozen wherever it last ticked — WebView timers stop while
+    // the app is in the background, so a request that failed there left
+    // "49.6s" on an error card that had waited two minutes.
+    if (msg.role !== undefined && !msg.isTyping && !hasGen) {
+      this._removeGenTime(bubbleMeta);
+      this._removeGenTime(footerMeta);
+    }
 
     if (hasGen || hasTokens) {
       // `:not(.msg-index)`: the bubble meta's `#N` chip shares the gen-stat

@@ -17,6 +17,7 @@ typedef ChromeIntentHandler = void Function(Map<String, dynamic> data);
 class ChromeLayoutReport {
   const ChromeLayoutReport({
     this.composerHeight = 0,
+    this.coverageHeight = 0,
     this.header,
     this.headerBlock,
     this.searchButton,
@@ -32,6 +33,10 @@ class ChromeLayoutReport {
   /// The composer's whole box: attachments, pill, button row and the bottom
   /// gap — what the message list keeps clear above the keyboard.
   final double composerHeight;
+
+  /// The context coverage card's collapsed height, 0 while it is not shown —
+  /// what the message list keeps clear of under the header.
+  final double coverageHeight;
   final Rect? header;
   final Rect? headerBlock;
   final Rect? searchButton;
@@ -62,8 +67,10 @@ class ChromeLayoutReport {
       }
     }
     final height = json['composerHeight'];
+    final coverage = json['coverageHeight'];
     return ChromeLayoutReport(
       composerHeight: height is num ? height.toDouble() : 0,
+      coverageHeight: coverage is num ? coverage.toDouble() : 0,
       header: _rect(json['header']),
       headerBlock: _rect(json['headerBlock']),
       searchButton: _rect(json['searchButton']),
@@ -76,8 +83,9 @@ class ChromeLayoutReport {
   }
 }
 
-/// The Dart end of the chat chrome — the header, composer and drawer drawn in
-/// the chat WebView (`assets/chat_webview/chrome/`).
+/// The Dart end of the chat chrome — the header, composer, drawer, scroll
+/// buttons and the cards under the header, drawn in the chat WebView
+/// (`assets/chat_webview/chrome/`).
 ///
 /// Hosts set *sections* of state ([set]): each is sent when it changes, and
 /// all of them again when the chrome is attached to a new page. One-off
@@ -234,6 +242,12 @@ class ChatChromeChannel {
             'header': {'show': false},
             'composer': {'show': false},
             'drawer': {'show': false},
+            'scroll': {'down': false, 'up': false},
+            'coverage': null,
+            'statusCleaner': null,
+            'statusStudio': null,
+            'statusPostGen': null,
+            'busy': false,
             'layout': {'fades': false},
             'cmd': {'blur': true, 'cancelDrag': true},
           }),

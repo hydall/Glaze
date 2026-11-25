@@ -178,6 +178,10 @@ class UseVirtualScroll {
         // following the bottom while this holds. Defaults to true because chats
         // open pinned to the bottom. Maintained by _onContainerScroll().
         this._pinnedToBottom = true;
+        // Optional `() => bool` set by the bridge: true while a reply streams
+        // and the reader has turned the streaming auto-scroll off. smartScroll
+        // then leaves the list where it is.
+        this.isFollowSuppressed = null;
         this._lastScrollTop = 0;
         this._selfPinTop = null;
         this._smartScrollUnlock = null;
@@ -467,6 +471,14 @@ class UseVirtualScroll {
     // call on every streamed chunk.
     smartScroll() {
         if (!this._pinnedToBottom) return;
+        if (this.isFollowSuppressed && this.isFollowSuppressed()) {
+            // The reader turned the streaming follow off: they keep their
+            // place. Once the reply grows past the end of the screen they are
+            // no longer resting at the bottom, so drop the pin too — otherwise
+            // the first reflow after the stream ends would snap them down.
+            if (!this.isNearBottom(BOTTOM_PIN_EPSILON)) this._pinnedToBottom = false;
+            return;
+        }
         this._pinToBottom();
     }
 

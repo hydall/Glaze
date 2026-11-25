@@ -112,11 +112,13 @@ ChatNotifier.abortGeneration()
       → _cancelToken?.cancel()      ← propagates to Dio / SSE
       → _imgGenCancelToken?.cancel()
       → cancel cleaner / extension work
-      → capture partial stream and clear transient streaming indicators
-      → atomically persist partial/restoration against latest durable session
+      → capture partial stream, plan the result (AbortPlanner)
+      → publish the planned session optimistically:
+        isGenerating / isPostGenRunning / isGeneratingImage → false,
+        isStopping → true; clear transient streaming indicators
+      → atomically persist the same plan against latest durable session
       → re-check generation/ref ownership
-      → publish the durable session to cache/state
-      → isGenerating / isPostGenRunning / isGeneratingImage → false
+      → publish the durable session to cache/state, isStopping → false
       → clear restoration snapshot
 
 Separately:
@@ -127,10 +129,21 @@ Separately:
 **Never break this chain.** If `CancelToken` doesn't reach `Dio`, stop only clears UI
 while the TCP stream continues.
 
-Partial/restoration persistence lives in `AbortHandler`, not in `ChatNotifier`
-directly. On a conflict or persistence failure, reload the durable row; never
-publish a speculative restoration. The generation mutex remains held until
-this durable settlement completes. See INV-C3 in `docs/INVARIANTS.md`.
+Partial/restoration persistence lives in `AbortHandler` (the plan in
+`services/abort_planner.dart`), not in `ChatNotifier` directly. A stop cannot
+fail, so the UI shows it as done on the tap; only the write is left. On a
+conflict or persistence failure, reload the durable row and publish that in
+place of the optimistic session. New runs (send, regenerate, continue,
+impersonate) `await AbortHandler.settled` before they start, so a send tapped
+right after Stop is queued, not refused; edit, swipe and plugin writes refuse
+on `ChatState.isStopping`. See INV-C3 in `docs/INVARIANTS.md`.
+
+**Stop during a send.** The composer shows Stop from the tap of Send
+(`ChatState.isSendPending`, and the composer's own hand-over), and
+`ChatNotifier.abortGeneration` calls off every send still on its way to the
+pipeline. Before the durable append the send is rolled back — the bubble comes
+down and the refused acceptance puts the text back in the composer; after it,
+the message stays and no reply runs.
 
 ---
 
@@ -335,6 +348,7 @@ Provider notes:
 - OpenAI-compatible/custom transports omit `reasoning_effort` when reasoning is omitted.
 - Anthropic/Gemini transports omit their native thinking config when reasoning is omitted.
 - Gemini 3.x may still think internally by default and may report/bill thought tokens. Gemini 3.1 Pro documents thinking levels, not a guaranteed full off switch.
+- Gemini 4 (`gemini-4-*`) takes thinking levels only — `low | medium | high`, plus `xhigh` on Hydrogen; `thinkingBudget` is deprecated and thinking cannot be turned off. `gemini4ThinkingLevel` maps the six steps for both the native `thinkingLevel` and `reasoning_effort` on Custom Chat Completion. Thought tokens count toward `maxOutputTokens`.
 - Avoid sending undocumented fields such as `reasoning: { exclude: true }` globally. Add provider-specific body fields only behind explicit protocol/provider support and tests.
 
 Studio Mode (tracker-around-generator, Phase 5+):

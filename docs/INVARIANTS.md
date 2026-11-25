@@ -26,14 +26,23 @@ Note: `ChatNotifier` uses `ref.keepAlive()`, so provider disposal is not a clean
 
 When the user aborts mid-stream and partial text exists, the partial response is
 saved as a completed message, not discarded. `AbortHandler.abortGeneration()`
-captures the stream and atomically mutates the latest durable session. Generation
-remains blocked until persistence (or durable reload after a conflict/failure)
-settles; cache and reactive session state never receive a speculative snapshot.
+captures the stream and atomically mutates the latest durable session.
+
+The stop is optimistic in the UI: `AbortPlanner` works out the result once (the
+partial reply, the merged continuation, or the regenerated variation put back)
+and the chat state shows it on the tap, with the generation flags already down
+and `ChatState.isStopping` up. The same plan is then written against the latest
+durable row (or the row is reloaded after a conflict/failure) and that durable
+session replaces the optimistic one. Until it settles, new runs wait on
+`AbortHandler.settled` and the message-mutating actions (edit, swipe, plugin
+writes) refuse on `isStopping`; the session cache only ever receives the
+durable session.
 
 ### INV-C4: `isGenerating` is consistent with actual generation activity
 
-`ChatState.isGenerating == true` while the generation owns the character,
-including durable abort finalization after the SSE request has been cancelled.
+`ChatState.isGenerating == true` while the generation owns the character. A
+stop drops it on the tap; the durable abort finalization that follows is
+covered by `ChatState.isStopping` and `AbortHandler.settled` (INV-C3).
 On app restart, `build()` creates a fresh `ChatState` where `isGenerating` defaults to `false`.
 
 ### INV-C5: Session variables are restored on abort/error ✅
@@ -1315,6 +1324,24 @@ a hard `false`. Clearing the flag there turned an errored variation into a
 normal-looking bubble whose text is an error message, and re-opened the
 post-gen chain gated on `isError` (INV-EG4). Partial text is a new, healthy
 swipe and stays `isError: false`.
+
+### INV-A2c: A regenerate over an error replaces it
+
+`regenBaseOf` (`variation_error_state.dart`) is the base every regen result
+builds on — the optimistic pending slot and `writeAssistant` in
+`ChatNotifier.regenerateLastAssistant`, `SavedMessageWriter.writeRegenError`,
+and the partial-text branch of `AbortHandler`. When the active variation is an
+error it is left out, so the new reply (or a new error) takes its place instead
+of piling up beside it. The restoration snapshot still holds the full message,
+so a cancel with nothing streamed puts the error back (INV-A2b). The base's
+meta is always aligned 1:1 with its swipes, so an `isError` marker can never
+land on another variation's index.
+
+An error variation has no blue sub-swipes of its own: `writeRegenError` clears
+`agentSwipes`, `ChatMessageService.setSwipe` neither saves sub-swipes into an
+error swipe's meta nor loads them from one, and the mapper never shows the blue
+switcher on an error. Sub-swipes left on an error swipe used to bring the
+previous healthy text back inside the error window.
 
 ### INV-A3: Regen during active generation aborts first
 

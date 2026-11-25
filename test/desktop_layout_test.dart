@@ -441,11 +441,12 @@ void main() {
       expect(container.read(rightSidebarPanelProvider)?.id, 'regex');
     });
 
-    test('the strip lists exactly the five Vue tools', () {
+    test('the strip lists exactly the Tools screens', () {
       expect(sidebarTools.map((t) => t.id).toList(), [
         'personas',
         'presets',
         'api',
+        'embeddings',
         'lorebooks',
         'regex',
       ]);

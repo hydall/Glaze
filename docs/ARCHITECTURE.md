@@ -831,7 +831,11 @@ the snapshot for the current anchor).
 
 While the Studio tracker-cycle runs, a floating `StudioStatusCard` appears
 at the top of the chat (below the POST-cleaner status card — they never
-overlap in time: Studio runs during generation, POST-cleaner after). It is
+overlap in time: Studio runs during generation, POST-cleaner after). Like the
+other status cards and the context coverage card, it is drawn by the chat page
+(`assets/chat_webview/chrome/cards.js`): the Dart widget keeps the logic and
+hands the page the resolved card through `ChatStatusCardShell` (a chrome
+section per card; its button comes back as the `statusAction` intent). It is
 driven by `studioCycleStateProvider` through phases:
 
   idle → running → writingFinal → done | error
@@ -1091,13 +1095,18 @@ for this path to run.
 per-candidate reasons include `chunk_rank_trimmed` / `chunk_budget_trimmed`;
 expanded rows show `N of M` chunks and chunk indexes. Labels like `121-135` are
 **chat message ranges** (`messageRange`), not chunk indices. The section is the
-memory half of `ContextCoverageCard` (`context_coverage_card.dart`), the panel
-under the chat header that also carries lorebook coverage; the whole card is
-switched off by `AppSettings.hideContextCard`. Only the card's *collapsed*
-height insets the message list (`_contextCardCollapsedHeight` in
-`chat_screen.dart`): that inset is the WebView's `padding-top`, and rewriting it
-on every open/close moved the chat under a scroll offset that does not move, so
-the expanded body floats over the messages instead.
+memory half of the requests screen's coverage block; the panel under the chat
+header (`ContextCoverageCard`, `context_coverage_card.dart`) reads the same
+candidates through `MemoryCandidateView` and also carries lorebook coverage.
+That card is drawn by the chat page (`chrome/cards.js`, the `coverage` chrome
+section): the Dart widget resolves every string and colour, keeps the picked
+tab and filter and answers the card's intents, while which rows are opened and
+where a list is scrolled stay in the page. The whole card is switched off by
+`AppSettings.hideContextCard`. Only the card's *collapsed* height insets the
+message list (`_contextCardCollapsedHeight` in `chat_screen.dart`, from the
+page's `coverageHeight` report): that inset is the WebView's `padding-top`, and
+rewriting it on every open/close moved the chat under a scroll offset that does
+not move, so the expanded body floats over the messages instead.
 
 Raw diagnostic codes (`chunk_rank_trimmed`, `worldInfoAfter`, `keyword`,
 `full_entry`…) are never rendered as such. `context_coverage/coverage_reasons.dart`
@@ -1865,8 +1874,10 @@ chat page, which the app routes itself on those platforms. A lone panel in
 the layer is not clipped at all; with several, each is clipped (`clip-path`)
 to its boxes so it only takes its own taps. On iOS and macOS a touch goes to
 the topmost native view and cannot be passed down, so the panels stay in the
-chat page there, clipped to their boxes, and the Flutter controls are cut out
-where they draw (`PluginHolesCutter`). Frames
+chat page there, clipped to their boxes. (The chat screen lays no Flutter
+controls over the WebView any more — header, composer, drawer, scroll buttons
+and the cards under the header are all drawn by the page — so nothing there
+needs cutting out with `PluginHolesCutter`.) Frames
 inside the page may only load `about:srcdoc`/`about:blank` and the frame
 documents the package server hands out (`chatWebViewNavigationPolicy`); iOS
 asks about those too. Message panels sit in `.msg-content-stack`, message actions in the

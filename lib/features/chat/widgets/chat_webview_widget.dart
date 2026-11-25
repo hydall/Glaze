@@ -10,7 +10,6 @@ import '../../../core/state/active_regex_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
-import '../../personas/persona_list_provider.dart';
 import '../../../../shared/theme/theme_font_provider.dart';
 import '../../../../shared/theme/theme_preset.dart';
 import '../bridge/chat_bridge_controller.dart';
@@ -83,6 +82,10 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   /// already absorbed (a soft keyboard that shrinks the WebView instead of
   /// overlaying it) and pad only the remainder.
   final double viewportHeight;
+
+  /// The part of [bottomInset] whose changes leave the reading position alone
+  /// — the composer's height while following it as it grows is off, else 0.
+  final double nonScrollingInset;
   final double topInset;
 
   /// Rects of the Flutter glass overlays (header, input pill, buttons) in
@@ -166,6 +169,9 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   /// button beside each message's menu button.
   final bool translationEnabled;
 
+  /// Whether the page stops following a streaming reply down.
+  final bool disableStreamAutoScroll;
+
   // Callback objects
   final MessageActionsCallbacks messageActions;
   final EditActionsCallbacks editActions;
@@ -196,6 +202,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.isSendPending = false,
     this.bottomInset = 0,
     this.viewportHeight = 0,
+    this.nonScrollingInset = 0,
     this.topInset = 0,
     this.blurRegions = const [],
     this.chromeChannel,
@@ -241,6 +248,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.disableSwipeRegeneration = false,
     this.studioEnabled = false,
     this.translationEnabled = false,
+    this.disableStreamAutoScroll = false,
     this.messageActions = const MessageActionsCallbacks(),
     this.editActions = const EditActionsCallbacks(),
     this.imageGenActions = const ImageGenCallbacks(),
@@ -548,12 +556,14 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           disableSwipeRegeneration: widget.disableSwipeRegeneration,
           studioEnabled: widget.studioEnabled,
           translationEnabled: widget.translationEnabled,
+          disableStreamAutoScroll: widget.disableStreamAutoScroll,
           messages: widget.messages,
           visibleStartIndex: widget.visibleStartIndex,
           memoryEntries: widget.memoryEntries,
           memoryDrafts: widget.memoryDrafts,
           bottomInset: widget.bottomInset,
           viewportHeight: widget.viewportHeight,
+          nonScrollingInset: widget.nonScrollingInset,
           topInset: widget.topInset,
           blurRegions: widget.blurRegions,
           searchQuery: widget.searchQuery,
@@ -831,6 +841,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onSwipe = callbacks.onSwipe;
     bridge.onAgentSwipe = callbacks.onAgentSwipe;
     bridge.onChangeGreeting = callbacks.onChangeGreeting;
+    bridge.onOpenVariants = callbacks.onOpenVariants;
     bridge.onHeaderScroll = callbacks.onHeaderScroll;
     bridge.onScrollToBottomVisibility = callbacks.onScrollToBottomVisibility;
     bridge.onScrollToTopVisibility = callbacks.onScrollToTopVisibility;
@@ -879,6 +890,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onExtBlockRegenImage = extBlocks.onRegenImage();
     bridge.onExtBlockEdit = extBlocks.onEdit();
     bridge.onExtBlockDelete = extBlocks.onDelete();
+    bridge.onExtBlockImgVariant = extBlocks.onImgVariant();
   }
 
   Future<void> applyIdentity({
@@ -1189,6 +1201,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       bgNoiseIntensity: w.bgNoiseIntensity,
       bottomInset: w.bottomInset,
       viewportHeight: w.viewportHeight,
+      nonScrollingInset: w.nonScrollingInset,
       topInset: w.topInset,
       blurRegions: w.blurRegions,
       searchQuery: w.searchQuery,
@@ -1224,6 +1237,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       disableSwipeRegeneration: w.disableSwipeRegeneration,
       studioEnabled: w.studioEnabled,
       translationEnabled: w.translationEnabled,
+      disableStreamAutoScroll: w.disableStreamAutoScroll,
       memoryEntries: w.memoryEntries,
       memoryDrafts: w.memoryDrafts,
       sessionId: w.sessionId,
@@ -1431,12 +1445,6 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     if (_bridge != null) {
       _bindBridgeCallbacks();
       final session = ref.watch(chatProvider(widget.charId)).value?.session;
-      // The roster a message's stored `personaId` is resolved against. Watched
-      // (not read) so a persona renamed or deleted elsewhere reaches the page:
-      // the listener in ChatWebViewBuildListeners re-renders on the same change.
-      _bridge!.setPersonaRoster(
-        ref.watch(personaListProvider).value ?? const [],
-      );
       _bridge!.setRegexContext(
         displayRegexes,
         character,
@@ -1618,10 +1626,18 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   /// backgrounded, so an inset change pushed during the background transition
   /// can be dropped. The JS side no-ops when the padding already matches, so
   /// this is cheap to call defensively.
-  Future<void> applyBottomInset(double px, {double viewportHeight = 0}) {
+  Future<void> applyBottomInset(
+    double px, {
+    double viewportHeight = 0,
+    double nonScrollingInset = 0,
+  }) {
     final b = _bridge;
     if (b == null || !_ready) return Future.value();
-    return b.setBottomPadding(px, viewportHeight: viewportHeight);
+    return b.setBottomPadding(
+      px,
+      viewportHeight: viewportHeight,
+      nonScrollingInset: nonScrollingInset,
+    );
   }
 
   /// Pushes the mirrored glass rects at the page directly, bypassing the

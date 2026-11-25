@@ -29,7 +29,6 @@ export function createComposer(ctx) {
     mode: 'compose',
     placeholder: '',
     readOnly: false,
-    locked: false,
     virtualSend: false,
     enterSend: false,
     guidance: null,
@@ -76,9 +75,7 @@ export function createComposer(ctx) {
   const guideCaption = h('div', 'gc-guide-caption', guideHead);
   const guideClose = h('button', 'gc-guide-x', guideHead);
   icon(ICON.close_rounded, 16, guideClose);
-  onTap(guideClose, () => {
-    if (!st.locked) ctx.send('guidanceClose');
-  });
+  onTap(guideClose, () => ctx.send('guidanceClose'));
   const guideBody = h('div', 'gc-guide-body', guide);
   icon(ICON.tips_and_updates_outlined, 20, h('div', 'gc-guide-prefix', guideBody));
   const guideInput = h('textarea', 'gc-guide-input', guideBody);
@@ -207,9 +204,7 @@ export function createComposer(ctx) {
     [row, [pins, sendWrap]],
   ], {
     send: () => tapSend(),
-    focus: () => {
-      if (!st.locked) S.focusRaw(input);
-    },
+    focus: () => S.focusRaw(input),
   });
   let skinHasText = null;
 
@@ -221,7 +216,6 @@ export function createComposer(ctx) {
     return {
       placeholder: st.placeholder || '',
       hasText: S.getValue(input) !== '',
-      locked: !!st.locked,
       readOnly: !!st.readOnly,
       editing: !!st.editing,
       guidance: !!st.guidance,
@@ -324,7 +318,7 @@ export function createComposer(ctx) {
   }
 
   S.on(input, 'keydown', (e) => {
-    if (!e.isTrusted || st.locked) return;
+    if (!e.isTrusted) return;
     if (S.keyOf(e) !== 'Enter' || S.shiftKeyOf(e) || S.keyIsComposing(e)) return;
     if (st.enterSend && !wantsNewline()) {
       S.preventDefault(e);
@@ -333,7 +327,7 @@ export function createComposer(ctx) {
   });
   // The soft keyboard's action key, when it is set to Send.
   S.on(input, 'beforeinput', (e) => {
-    if (!e.isTrusted || !st.virtualSend || st.locked) return;
+    if (!e.isTrusted || !st.virtualSend) return;
     const type = S.inputTypeOf(e);
     if (type !== 'insertLineBreak' && type !== 'insertParagraph') return;
     if (S.inputIsComposing(e)) return;
@@ -345,7 +339,7 @@ export function createComposer(ctx) {
   // Images on the clipboard become attachments; a paste with no text at all
   // asks Flutter, which can read clipboard images the page cannot see.
   S.on(input, 'paste', (e) => {
-    if (!e.isTrusted || st.locked) return;
+    if (!e.isTrusted) return;
     const dt = S.clipboardDataOf(e);
     const files = S.clipboardFiles(dt);
     const images = [];
@@ -397,7 +391,7 @@ export function createComposer(ctx) {
 
   /** Wraps the caret / selection in a pair of [token] — insertSurroundingText. */
   function insertSurround(token) {
-    if (!token || st.locked) return;
+    if (!token) return;
     const value = S.getValue(input);
     let start = value.length;
     let end = value.length;
@@ -630,7 +624,7 @@ export function createComposer(ctx) {
   function typing() {
     const l = ctx.layout;
     const barMode = st.mode === 'search' || st.mode === 'selection';
-    return wide && st.show && !barMode && !st.locked && focused &&
+    return wide && st.show && !barMode && focused &&
       !!l.softKeyboard && (l.keyboard || 0) > 0;
   }
 
@@ -790,22 +784,8 @@ export function createComposer(ctx) {
     css(input, 'font-size', px(16 * theme.fontScale));
     css(input, 'letter-spacing', px(theme.letterSpacing));
     S.setAttribute(input, 'enterkeyhint', st.virtualSend ? 'send' : 'enter');
-    if (st.readOnly || st.locked) S.setAttribute(input, 'readonly', '');
+    if (st.readOnly) S.setAttribute(input, 'readonly', '');
     else S.removeAttribute(input, 'readonly');
-    if (st.locked) {
-      // Editing a message: the composer can't be focused or selected into.
-      S.setAttribute(input, 'tabindex', '-1');
-      S.setAttribute(guideInput, 'readonly', '');
-      S.setAttribute(guideInput, 'tabindex', '-1');
-      S.blurRaw(input);
-      S.blurRaw(guideInput);
-    } else {
-      S.removeAttribute(input, 'tabindex');
-      S.removeAttribute(guideInput, 'readonly');
-      S.removeAttribute(guideInput, 'tabindex');
-    }
-    setClass(input, classes('gc-input', { 'gc-nocaret': st.locked }));
-    css(input, 'pointer-events', st.locked ? 'none' : null);
 
     renderPins();
     renderSend();
@@ -824,6 +804,10 @@ export function createComposer(ctx) {
     },
     render,
     stripVisible,
+    /** Whether the field fills the screen above the keyboard (or is leaving it). */
+    isFull() {
+      return shown;
+    },
     /** Re-renders when the keyboard coming or going changes typing(). */
     placeTyping() {
       if (typing() !== full) render();
@@ -865,7 +849,7 @@ export function createComposer(ctx) {
       setClass(sendWrap, on ? 'gc-send-wrap gc-candidate' : 'gc-send-wrap');
     },
     focus() {
-      if (!st.locked) S.focusRaw(input);
+      S.focusRaw(input);
     },
     blur() {
       S.blurRaw(input);

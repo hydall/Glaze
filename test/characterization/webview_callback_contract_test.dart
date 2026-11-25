@@ -44,6 +44,7 @@ void main() {
         'onMessageContext',
         'onSwipe',
         'onChangeGreeting',
+        'onOpenVariants',
         'onRegenerate',
         'onHeaderScroll',
         'onScrollToTopVisibility',
@@ -85,6 +86,7 @@ void main() {
         'onSwipe',
         'onRegenerate',
         'onChangeGreeting',
+        'onOpenVariants',
         'onSelectionAction',
         'onEditSave',
         'onEditCancel',
@@ -168,6 +170,8 @@ void main() {
           'onSwipe',
           'onRegenerate',
           'onChangeGreeting',
+          'onOpenVariants',
+          'onOpenVariants',
           'onSelectionAction',
           'onEditSave',
           'onEditCancel',
@@ -183,6 +187,7 @@ void main() {
           'onImgRegen',
           'onImgCancel',
           'onStop',
+          'onExtBlockImgVariant',
         ];
         for (final name in expectedHandlers) {
           expect(

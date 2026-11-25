@@ -39,18 +39,24 @@ class ChatMessageSelectionController {
     );
   }
 
+  /// Hides every selected message, or shows them all when every one is
+  /// already hidden, and leaves selection mode.
+  ///
+  /// Deliberately not `async`, like [deleteSelected]: the selection is dropped
+  /// synchronously and the hide itself is optimistic, so the toolbar closes
+  /// with the bubbles changing instead of after the database write.
   Future<void> hideSelected(
     WidgetRef ref,
     String charId,
     List<ChatMessage> messages,
-  ) async {
-    for (final id in selectedMessageIds) {
-      final idx = messages.indexWhere((m) => m.id == id);
-      if (idx >= 0) {
-        await ref.read(chatProvider(charId).notifier).toggleMessageHidden(idx);
-      }
-    }
+  ) {
+    final ids = selectedMessageIds.toSet();
+    final hidden = !allSelectedHidden(messages);
     clearSelection();
+    if (ids.isEmpty) return Future<void>.value();
+    return ref
+        .read(chatProvider(charId).notifier)
+        .setMessagesHidden(ids, hidden: hidden);
   }
 
   /// Deletes every selected message and leaves selection mode.

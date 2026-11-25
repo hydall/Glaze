@@ -95,6 +95,14 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       const ['tooltips', 'hints', 'подсказки'],
       groupKey: 'settings_group_appearance',
     ),
+    row(
+      'show_build_watermark',
+      'menu_show_build_watermark',
+      'desc_show_build_watermark',
+      Icons.bug_report_outlined,
+      const ['watermark', 'version', 'build', 'вотермарка', 'водяной знак', 'версия', 'сборка'],
+      groupKey: 'settings_group_appearance',
+    ),
     if (ScreenOrientation.isConfigurable)
       row(
         'nav_rail_left',
@@ -128,6 +136,37 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       'desc_swipe_regeneration',
       Icons.swipe_outlined,
       const ['swipe', 'regenerate', 'свайп', 'регенерация'],
+      groupKey: 'settings_group_chat',
+    ),
+    row(
+      'stream_auto_scroll',
+      'menu_stream_auto_scroll',
+      'desc_stream_auto_scroll',
+      Icons.vertical_align_bottom_rounded,
+      const [
+        'scroll',
+        'autoscroll',
+        'streaming',
+        'прокрутка',
+        'автопрокрутка',
+        'стриминг',
+      ],
+      groupKey: 'settings_group_chat',
+    ),
+    row(
+      'follow_composer_resize',
+      'menu_follow_composer_resize',
+      'desc_follow_composer_resize',
+      Icons.unfold_more_rounded,
+      const [
+        'scroll',
+        'input',
+        'composer',
+        'keyboard',
+        'прокрутка',
+        'поле ввода',
+        'композер',
+      ],
       groupKey: 'settings_group_chat',
     ),
     row(
@@ -276,14 +315,23 @@ List<MenuSearchEntry> buildSettingsSearchIndex() {
       const ['desktop', 'mobile', 'мобильный', 'десктоп'],
       groupKey: 'settings_group_desktop',
     ),
+    row(
+      'reveal_hidden_hotkey',
+      'menu_reveal_hidden_hotkey',
+      'desc_reveal_hidden_hotkey',
+      Icons.keyboard_outlined,
+      const ['hotkey', 'shortcut', 'hidden', 'хоткей', 'сочетание', 'скрытые'],
+      groupKey: 'settings_group_desktop',
+    ),
     // ── General ─────────────────────────────────────────────────────────────
-    row('language', 'menu_language', null, Icons.language_outlined, const [
+    row(
       'language',
-      'english',
-      'русский',
-      'язык',
-      'локаль',
-    ], groupKey: 'settings_group_general'),
+      'menu_language',
+      null,
+      Icons.language_outlined,
+      const ['language', 'english', 'русский', 'язык', 'локаль'],
+      groupKey: 'settings_group_general',
+    ),
     if (SystemSettings.canOpenNotificationSettings)
       row(
         'notifications',

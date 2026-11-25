@@ -426,36 +426,49 @@ class _WelcomePage extends StatelessWidget {
                     children: [
                       _Label(icon: Icons.folder_rounded, text: s.installTo),
                       const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.22),
-                          borderRadius: BorderRadius.circular(11),
-                        ),
-                        child: Text(
-                          c.paths?.installDir ?? '',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            height: 1.4,
-                            color: SetupColors.text,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.22),
+                                borderRadius: BorderRadius.circular(11),
+                              ),
+                              child: Text(
+                                c.paths?.installDir ?? '',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  height: 1.4,
+                                  color: SetupColors.text,
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                          if (c.canChooseFolder) ...[
+                            const SizedBox(width: 8),
+                            SetupButton(
+                              label: s.changeFolder,
+                              icon: Icons.folder_open_rounded,
+                              onTap: c.choosingFolder ? null : c.chooseFolder,
+                            ),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        previous == null
-                            ? s.dataStays
-                            : s.installedVersion(previous),
-                        style: const TextStyle(
+                        _folderNote(c, s, previous),
+                        style: TextStyle(
                           fontSize: 12,
                           height: 1.45,
-                          color: SetupColors.muted,
+                          color: c.folderProblem == null
+                              ? SetupColors.muted
+                              : SetupColors.error,
                         ),
                       ),
                     ],
@@ -515,13 +528,27 @@ class _WelcomePage extends StatelessWidget {
                 icon: Icons.download_rounded,
                 tone: SetupButtonTone.primary,
                 large: true,
-                onTap: c.start,
+                onTap: c.choosingFolder ? null : c.start,
               ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  /// Under the folder: why the last pick was refused, else what happens to
+  /// the earlier install or to the reader's data.
+  static String _folderNote(SetupController c, S s, String? previous) {
+    final refused = c.refusedDir ?? '';
+    return switch (c.folderProblem) {
+      FolderProblem.notEmpty => s.folderNotEmpty(refused),
+      FolderProblem.notWritable => s.folderNotWritable(refused),
+      null when previous != null =>
+        '${s.installedVersion(previous)} ${s.folderFixed}',
+      null when c.alreadyInstalled => '${s.dataStays} ${s.folderFixed}',
+      null => s.dataStays,
+    };
   }
 }
 

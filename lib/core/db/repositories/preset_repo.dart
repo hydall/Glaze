@@ -64,6 +64,12 @@ class PresetRepo implements SyncPresetStore {
     return (presets: presets, repaired: repaired);
   }
 
+  /// Fires after every write to the presets table, whoever made it — the
+  /// preset editor, the regex sheet, an import, a sync — without reading the
+  /// rows back.
+  Stream<void> watchWrites() =>
+      _db.tableUpdates(TableUpdateQuery.onTable(_db.presets)).map((_) {});
+
   @override
   Future<Preset?> getById(String id) async {
     final row = await (_db.select(
