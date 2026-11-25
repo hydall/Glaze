@@ -44,6 +44,7 @@ class MemoryCaptureSections {
           items: [
             MenuSwitchItem(
               label: 'label_enabled'.tr(),
+              helpTerm: 'memorybook',
               value: draft.enabled,
               onChanged: (v) {
                 draft.enabled = v;
@@ -52,6 +53,7 @@ class MemoryCaptureSections {
             ),
             MenuSelectorItem(
               label: 'memory_mode'.tr(),
+              helpTerm: 'memorybook-retrieval',
               currentValue: _modeLabel(draft.memoryMode),
               description: _modeDescription(draft.memoryMode),
               onTap: () => _pickMode(context),
@@ -60,6 +62,7 @@ class MemoryCaptureSections {
         ),
         MenuGroup(
           header: 'memory_books_section_automation'.tr(),
+          helpTerm: 'memorybook-drafts',
           items: [
             MenuSwitchItem(
               label: 'memory_books_auto_create'.tr(),
@@ -103,6 +106,7 @@ class MemoryCaptureSections {
               ),
               MenuRangeItem(
                 label: 'memory_books_auto_create_lag'.tr(),
+                helpTerm: 'memorybook-drafts',
                 // The help text used to hide behind a "?" that opened an
                 // AlertDialog; as a description it is simply readable.
                 description: 'memory_books_auto_create_lag_help'.tr(),
@@ -120,6 +124,7 @@ class MemoryCaptureSections {
             ],
             MenuRangeItem(
               label: 'memory_books_batch_size'.tr(),
+              helpTerm: 'memorybook-drafts',
               value: draft.batchSize.toDouble(),
               min: 1,
               max: 50,
@@ -135,6 +140,7 @@ class MemoryCaptureSections {
         ),
         MenuGroup(
           header: 'memory_prompt_section'.tr(),
+          helpTerm: 'memorybook-drafts',
           items: [
             MenuSelectorItem(
               label: 'memory_prompt_choose'.tr(),

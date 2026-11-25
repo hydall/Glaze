@@ -311,6 +311,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
     );
     return MenuGroup(
       header: 'summary_outlook_header'.tr(),
+      helpTerm: 'summary-compact',
       headerIcon: Icons.insights_rounded,
       description: outlook == null ? 'summary_outlook_none'.tr() : null,
       items: [
@@ -400,6 +401,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                 children: [
                   MenuGroup(
                     header: 'settings_group_general'.tr(),
+                    helpTerm: 'summary',
                     headerIcon: Icons.tune_rounded,
                     items: [
                       MenuSwitchItem(
@@ -419,11 +421,13 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                   _outlookGroup(),
                   MenuGroup(
                     header: 'summary_manual_section'.tr(),
+                    helpTerm: 'summary-compact',
                     headerIcon: Icons.compress_rounded,
                     description: 'summary_manual_tail_hint'.tr(),
                     items: [
                       MenuSelectorItem(
                         label: 'summary_manual_tail_label'.tr(),
+                        helpTerm: 'summary-compact',
                         currentValue: _tailUnitLabel(
                           _compaction.manualTailUnit,
                         ),
@@ -477,6 +481,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                   ),
                   MenuGroup(
                     header: 'summary_auto_section'.tr(),
+                    helpTerm: 'summary-auto',
                     headerIcon: Icons.autorenew_rounded,
                     items: [
                       MenuSwitchItem(
@@ -492,6 +497,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                       if (_compaction.autoEnabled) ...[
                         MenuRangeItem(
                           label: 'summary_trigger_label'.tr(),
+                          helpTerm: 'summary-auto',
                           unit: '%',
                           description: 'summary_trigger_hint'.tr(),
                           value: _compaction.triggerPercent.toDouble(),
@@ -518,6 +524,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         ),
                         MenuRangeItem(
                           label: 'summary_compact_to_label'.tr(),
+                          helpTerm: 'summary-auto',
                           unit: '%',
                           description: 'summary_compact_to_hint'.tr(),
                           value: _compaction.compactToPercent.toDouble(),
@@ -540,6 +547,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         ),
                         MenuSelectorItem(
                           label: 'summary_auto_floor_label'.tr(),
+                          helpTerm: 'summary-auto',
                           description: 'summary_auto_floor_hint'.tr(),
                           currentValue: _tailUnitLabel(
                             _compaction.autoTailFloorUnit,
@@ -593,10 +601,12 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                   ),
                   MenuGroup(
                     header: 'summary_blocks_section'.tr(),
+                    helpTerm: 'summary-merge',
                     headerIcon: Icons.view_agenda_outlined,
                     items: [
                       MenuRangeItem(
                         label: 'summary_block_target_label'.tr(),
+                        helpTerm: 'summary-merge',
                         description: 'summary_block_target_hint'.tr(),
                         value: _compaction.blockTargetTokens.toDouble(),
                         min: SummaryCompactionSettings.minBlockTargetTokens
@@ -614,6 +624,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                       ),
                       MenuRangeItem(
                         label: 'summary_merge_label'.tr(),
+                        helpTerm: 'summary-merge',
                         unit: '%',
                         description: 'summary_merge_hint'.tr(),
                         value: _compaction.mergePercent.toDouble(),
@@ -636,6 +647,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                   ),
                   MenuGroup(
                     header: 'summary_prompts_section'.tr(),
+                    helpTerm: 'summary-prompts',
                     headerIcon: Icons.edit_note_rounded,
                     items: [
                       MenuSelectorItem(
@@ -666,6 +678,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                       MenuSwitchItem(
                         key: const Key('summary_preamble'),
                         label: 'summary_preamble_label'.tr(),
+                        helpTerm: 'summary-prompts',
                         description: 'summary_preamble_hint'.tr(),
                         value: _preambleOn,
                         onChanged: (v) => setState(() => _preambleOn = v),
@@ -720,6 +733,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                   if (_presetId != null)
                     MenuGroup(
                       header: 'label_injection_point'.tr(),
+                      helpTerm: 'summary-injection',
                       headerIcon: Icons.input_rounded,
                       items: [
                         MenuSelectorItem(
@@ -730,6 +744,7 @@ class _SummarySettingsSheetState extends ConsumerState<SummarySettingsSheet> {
                         MenuSelectorItem(
                           key: const Key('summary_insertion'),
                           label: 'label_insertion'.tr(),
+                          helpTerm: 'summary-injection',
                           currentValue: _insertionLabel(_insertionMode),
                           description: 'summary_insertion_hint'.tr(),
                           onTap: _pickInsertion,

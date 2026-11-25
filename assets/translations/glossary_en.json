@@ -28,6 +28,11 @@
                     "id": "faq-which-models",
                     "name": "Which models should I use?",
                     "desc": "A few options for different tastes and budgets. Bang for the buck — DeepSeek V3.2. Middle ground — Gemini 3.1 Pro. Flagship model — Claude Sonnet 4.6 / Opus 4.6. For those tired of the rest — GLM 5.1. Others aren't really worth the attention — either because of poor context size or mediocre writing."
+                },
+                {
+                    "id": "faq-nothing-to-compact",
+                    "name": "“Compact history” says there is nothing to compact",
+                    "desc": "The button leaves the newest part of the chat alone: the latest messages within “Keep as written” (25% of the chat connection's context by default) stay as they are, and only what is older is retold. If the whole history fits in that amount, there is nothing to retell. With a large context (hundreds of thousands of tokens or more) this happens a lot.\n\nWhat to do: lower “Keep as written” in the summary settings (say, to 10% or to a fixed 30–50 thousand tokens), or press “Compact all but the newest messages” right in the note. More in [[summary-compact|Manual compaction]]."
                 }
             ]
         },
@@ -245,11 +250,6 @@
                     "desc": "A short note you can write separately for each [[chat-session]]. It's placed near the very end of the conversation in the AI's view, giving it strong influence over the next reply. Great for current plot reminders, style directions, or anything the AI should keep in mind right now."
                 },
                 {
-                    "id": "summary",
-                    "name": "Summary",
-                    "desc": "A brief recap of the earlier parts of the chat, made of blocks. When the chat fills the context, the oldest messages are retold as a block and sent in its place, so the AI remembers what happened without the full transcript. As blocks pile up, neighbouring ones are merged into larger ones. You can also compact by hand, edit blocks and add your own notes."
-                },
-                {
                     "id": "guided",
                     "name": "Guided Generation",
                     "desc": "Sends a one-time instruction alongside the next message to steer the AI's reply — for example, directing the plot, tone, or writing style. Also refers to the sampling settings that shape how the AI picks words: [[temperature]], [[top-p]], and similar parameters."
@@ -331,9 +331,98 @@
             ]
         },
         {
-            "id": "memorybook",
-            "label": "MemoryBook",
+            "id": "memory",
+            "label": "Memory",
             "terms": [
+                {
+                    "id": "memory",
+                    "name": "How the AI remembers a chat",
+                    "alt": "Memory",
+                    "desc": "A model remembers nothing between requests: every time, the whole prompt is sent again — preset, card, lorebooks and the chat history. The history grows, the [[context|context window]] does not. Once it stops fitting, the oldest messages are simply cut off ([[history-trim|history trim]]) and the model no longer knows about them.\n\nSo the old parts are not lost, Glaze has two memory tools. They work independently and complement each other:\n\n• [[summary|Summary]] — a continuous short retelling of the whole old chat. Always sent, in place of the messages it retells. Gives the model the thread of the story: who, where, what happened, where things stand.\n\n• [[memorybook|Memory Books]] — a library of separate episodes. Only the entries that fit the current scene go into the prompt. Gives the model the details: what exactly was said, what the room looked like, what promise was made.\n\nA simple rule: the summary is “what has happened so far”, Memory Books are “remember that moment”. [[lorebook|Lorebooks]] sit next to them but are something else: written by the author or by you, they hold facts about the world, not events of the chat.\n\nBoth tools are written by a separate model — the [[memory-connection|Memory slot]] connection. Everything is set up in the chat's Memory sheet."
+                },
+                {
+                    "id": "summary",
+                    "name": "Summary",
+                    "desc": "A short retelling of the earlier parts of the chat, sent to the model instead of the messages themselves. The model remembers what happened, and the prompt does not bloat.\n\nThe summary is made of [[summary-block|blocks]]. Each block retells a run of consecutive old messages. While a block is in force, its messages are not sent — the retelling takes their place. In the chat the messages stay; nothing is deleted.\n\nBlocks appear in two ways: [[summary-compact|by hand]] with “Compact history”, or [[summary-auto|automatically]] as the prompt fills up. Once there are many blocks, neighbouring ones are [[summary-merge|merged]] into broader ones, so the summary does not eat the context itself.\n\nHow to retell is up to the [[summary-prompts|summary prompts]]; where the finished text goes in the prompt is the [[summary-injection|injection point]]. The “Enabled” switch in the summary settings takes it out of the prompt without deleting the blocks.\n\nBlocks can be read and edited, deleted (their messages go back into the prompt as written), regenerated, and you can add notes of your own."
+                },
+                {
+                    "id": "summary-block",
+                    "name": "Summary block",
+                    "alt": "Block level, Note, Archive",
+                    "desc": "One part of the [[summary|summary]]: a retelling of a run of consecutive messages. The block's title is the numbers of the messages it replaces, e.g. “41-60”.\n\nLevels. A level-1 block retells the messages themselves. Once there are many blocks, adjacent blocks of one level are [[summary-merge|merged]] into one block a level up. Merged blocks go to the archive: they are not sent, but if you delete the merged block, they come back.\n\nGoing stale. If a block's source messages are edited or deleted, the block is marked stale and stops being sent, and its messages go back into the prompt. It can be regenerated from the new text.\n\nDrafts. “Regenerate” and “Shorten block” do not replace the text at once: the new version appears on the card as a draft, and you approve or discard it.\n\nNotes. Your own text, added with “Note”. It is passed to the model only when messages are retold (as a hint of what matters); it is not sent with the chat request and is never merged.\n\nSize. Every block shows how many tokens it has and how many it was made from. The desired length is the “Block size” setting."
+                },
+                {
+                    "id": "summary-compact",
+                    "name": "Manual history compaction",
+                    "alt": "Compact history, Keep as written, Fresh history",
+                    "desc": "“Compact history” in the Memory sheet retells the old part of the chat into [[summary|summary]] blocks — one block per request, until it reaches the newest part. It runs in the background: the sheet can be closed, and finished blocks are saved as they land. “Stop compaction” finishes the block under way and stops.\n\nThe newest part is left alone. Its size is “Keep as written” in the “Compact history” button section: a share of the chat connection's context (25% by default) or a fixed number of tokens. The last two messages always stay. Everything older goes into the summary, and you can play on and compact again later.\n\n“Nothing to compact” means the whole history outside the summary fits in that newest part. The note shows the numbers: how much history there is and how much is kept. Lower “Keep as written”, or press “Compact all but the newest messages” — it retells everything but the last two messages, whatever the setting says.\n\nHow much the button would retell right now is shown in the summary settings, under “This chat now”.\n\nManual compaction does not depend on [[summary-auto|auto compaction]]: it works with it off."
+                },
+                {
+                    "id": "summary-auto",
+                    "name": "Auto compaction",
+                    "alt": "Compaction threshold, Compact down to, Least fresh history",
+                    "desc": "The automatic mode of the [[summary|summary]]. Off by default; applies to all chats at once.\n\nHow it works: after each bot reply Glaze checks how full the prompt is. If it is past the threshold, the oldest messages are retold into blocks until the prompt drops to the “Compact down to” line. It runs between turns, so one run takes at most 12 steps — the rest is done after the next replies.\n\nSettings:\n\n• Compaction threshold — how much of the room the prompt may use can fill before compaction starts. For example, 75%.\n\n• Compact down to — how full to compact down to. This is the level of the whole prompt (preset, card, lorebooks, memory, summary and the history left), not a share of the history. No higher than the threshold. Set it lower and a run frees some headroom, so the next one does not start one turn later.\n\n• Least fresh history — how many of the newest messages always stay as written, even when the preset and lorebooks take nearly all the room themselves.\n\n“This chat now” shows where compaction would start and how much history it would leave. If “Compact down to” falls under the fixed part of the prompt, auto compaction can leave only the least — a warning appears there too."
+                },
+                {
+                    "id": "summary-merge",
+                    "name": "Merging and block size",
+                    "alt": "Merge threshold, Block size, Shorten a large block",
+                    "desc": "The summary takes room too. To keep it from growing, there is merging: once all [[summary|summary]] blocks together take more than the “Merge threshold” (20% of the context by default), adjacent blocks of one level are merged into one a level up. Details of old events get smoothed over while recent ones stay sharper — the way human memory works. Merged blocks go to the archive and come back if the merged block is deleted. You can merge by hand: tick two or more adjacent blocks of one level and press “Merge selected”.\n\nBlock size is the desired length of one block in tokens (1000 by default). It is a ceiling: a short run of messages gives a shorter block, about a third of the source. Merging aims at this size too.\n\nModels keep length in tokens poorly, so the prompt also gets the size in words and characters. If a block still comes out well past it, it is sent back once with the “Shorten a large block” prompt. A large block's card has a “Shorten block” button that does the same by hand.\n\nIf the model returns text no shorter than its source, the block is not saved and an error appears: lower the block size or change the model."
+                },
+                {
+                    "id": "summary-prompts",
+                    "name": "Summary prompts",
+                    "alt": "Retelling messages, Merging blocks, Refusal instruction",
+                    "desc": "The instructions the model follows to write the [[summary|summary]]. There are three, each with built-in presets, and you can save your own:\n\n• Retelling messages — how to turn a run of messages into a block.\n• Merging blocks — how to bring adjacent blocks into one a level up.\n• Shortening a large block — how to cut down a block that came out too long.\n\n[[macro|Macros]] work in your own prompts: {{char}}, {{user}}, {{getvar::…}} and special ones. {{target_tokens}}, {{target_words}} and {{target_chars}} place the size target in tokens, words and characters (if the prompt does not place them, the target in words and characters is appended). {{previous_summary}} places the blocks before the run being retold, so the model has the context. {{history}} places the transcript itself; a prompt that places it is sent as one message, as written. {{level}} places the level of the block a merge makes. The full list is under “Macros in prompts” in the settings.\n\nThe refusal instruction goes first in all three prompts. It is for models that refuse to retell harsh scenes: it asks to retell them neutrally, without detail, but leaving out nothing the story needs. Applies to all chats.\n\n“Open current prompts” shows exactly what will go to the model now."
+                },
+                {
+                    "id": "summary-injection",
+                    "name": "Summary injection point",
+                    "alt": "Where the summary goes",
+                    "desc": "Where the [[summary|summary]] text sits in the prompt. The setting is written into the Summary block of the current [[preset|preset]], so the section shows only when the preset has that block.\n\n• In place of messages — each run of blocks goes into the history where the messages it retells were, oldest first. The most natural option: the model sees the retelling exactly where the conversation was.\n\n• Relative — all of the summary as one piece where the Summary block sits in the preset.\n\n• At depth — the given number of messages from the end of the history.\n\nRole (System, User, Assistant) — who the model sees this message from. Usually System."
+                },
+                {
+                    "id": "memorybook",
+                    "name": "Memory Books",
+                    "alt": "MemoryBook, Memories",
+                    "desc": "The chat's book of memories: a set of separate entries, each describing one episode — what happened in a given stretch of the conversation. Every chat has its own book.\n\nAn entry is a title, a text, keywords and the numbers of its source messages. It can also carry an importance and a “locked” mark.\n\nWhere entries come from. The model writes drafts from stretches of the conversation; you review and approve them — only then does a draft become an entry. You can also write an entry by hand. More in [[memorybook-drafts|Memory drafts]].\n\nHow they get into the prompt. Before every reply Glaze looks for entries that fit the current scene — by keywords and, with embeddings set up, by meaning. The best of them, as many as fit the budget, go into the prompt. More in [[memorybook-retrieval|Memory retrieval]], [[memorybook-budget|Budget and packing]] and [[memorybook-injection|Where memory goes]].\n\nHow it differs from the [[summary|summary]]: the summary is always sent and retells everything in order, briefly. Book entries sit in the library and come out only when relevant, but in more detail. They work well together: the summary keeps the story's thread, the book recalls the details.\n\nWhat made it into the last request is shown in the context coverage card above the chat and in the [[request-preview|prompt inspector]]."
+                },
+                {
+                    "id": "memorybook-drafts",
+                    "name": "Memory drafts",
+                    "alt": "Scan chat, Auto-create, Auto-generate, Lag",
+                    "desc": "How [[memorybook|Memory Books]] entries come about.\n\nThe chat is cut into stretches of “Messages per draft”. For each stretch no memory covers yet, a draft is created. An empty draft is just a range of messages; the model writes a title, text and keys for it. A finished draft waits for you: approve it (it becomes an entry), edit it or discard it.\n\n• Scan chat — find every uncovered stretch and create drafts. Handy for an old chat.\n\n• Auto-create drafts — after every “Messages per draft” new messages, a draft is created by itself.\n\n• Draft lag — how many of the newest messages to keep out of drafts. The last exchange is often edited or swiped; a lag of 2–4 messages lets you do that without regenerating memory.\n\n• Auto-generate drafts — ask the model to fill new drafts at once. Off, drafts are created empty and wait until you press “Generate”.\n\n• Batch size — how many drafts are generated in one go. Requests go out with a short pause so as not to hit the provider's limits.\n\nDrafts are written by the [[memory-connection|Memory slot]] connection with the chosen memory generation prompt. If an entry's source messages change later, it is marked as needing a rebuild."
+                },
+                {
+                    "id": "memorybook-retrieval",
+                    "name": "Memory retrieval",
+                    "alt": "Memory selection, Memory mode, Search query",
+                    "desc": "How Glaze decides which [[memorybook|Memory Books]] entries to put into this request.\n\n1. The search query. Your current message and the latest turns of the chat (“Recent turns in search”), optionally the assistant's replies too (“Search assistant replies”). It is all cut to “Max search query characters”: less — sharper on the newest text, more — broader but blurrier.\n\n2. Matches. By the entry's keywords: “Text only” looks for a key as a piece of text, “Glaze keys” as a separate word, “Text and keys” either way. With embeddings set up, also by meaning ([[embeddings|vector search]]): an entry fits if its similarity to the query is above the “Similarity threshold”.\n\n3. Ranking. Candidates are sorted by relevance. You can add “Prefer recent memories” (a bonus for entries from recent messages; the “half-life” is how many messages it takes for the bonus to halve), “Prefer important memories” and “Avoid duplicates” (do not take many similar entries).\n\n4. Filter. “Skip sources already visible” does not insert an entry whose messages are still in the prompt's history — no point repeating them.\n\n5. Selection within the [[memorybook-budget|budget]].\n\nThe memory mode sets which signals are used: Legacy — a simple top-N pick; Fast — keys and vectors with modern ranking; Balanced — plus matches on entities, places and topics, emotion and importance; Deep — for now the same as Balanced. No mode makes extra requests to the model."
+                },
+                {
+                    "id": "memorybook-budget",
+                    "name": "Memory budget and packing",
+                    "alt": "Memory budget, Memory packing, Chunks",
+                    "desc": "How much room [[memorybook|memory]] may take in the prompt, and how entries are fitted in.\n\nThe budget is a share of the context (up to 35% by default) and, optionally, a hard ceiling “Max memory tokens in prompt”. The smaller of the two applies. “Max memories in prompt” caps the number of entries.\n\nPacking decides what to do when the fitting entries do not fit:\n\n• Full — whole entries only. Reliable, but fewer fit.\n• Hybrid — whole entries while they fit; the rest of the budget is filled with excerpts of the entries that were cut.\n• Chunks — entries are cut into pieces (by paragraph, up to “Tokens per chunk”), and the most relevant pieces from different entries go in, in the original order of events.\n\nIn Chunks mode, a few best entries (“Top entries”) first get their best pieces guaranteed — so something recent or found by meaning does not lose to old entries with lots of keyword hits. Then the rest of the budget is filled by overall ranking, no more than “Chunks per memory” from one entry.\n\n“Compress large memories” — allow excerpts in place of whole entries when they do not fit."
+                },
+                {
+                    "id": "memorybook-injection",
+                    "name": "Where memory goes",
+                    "alt": "Hard block, {{memory}}",
+                    "desc": "Where in the prompt the chosen [[memorybook|Memory Books]] entries end up.\n\n• Hard block (default) — Glaze adds a separate “Memory Book” system message itself. Nothing to set up.\n\n• {{memory}} — memory goes where the [[preset|preset]] has the {{memory}} [[macro|macro]] or a Memory Book block. That lets you place it where you want — say, inside your own tag next to the summary. If the preset has neither, memory is gathered but goes nowhere — a warning appears in the chat."
+                },
+                {
+                    "id": "memory-connection",
+                    "name": "Memory connection",
+                    "alt": "Memory slot, Generation connection",
+                    "desc": "The model that writes the [[summary|summary]] and [[memorybook|Memory Books]] drafts. It is a separate Memory slot in the [[api|API]] settings, shared by both. When it is not set, the chat connection is used.\n\nMemory does not need the strongest model: the job is to retell carefully, not to invent. A fast, cheap model with a large context usually fits best. If the model refuses to retell harsh scenes, turn on the refusal instruction in the [[summary-prompts|summary prompts]] or change the model.\n\nGeneration temperature — off: drafts are written at a low temperature; this is extracting facts, not prose. Output limit — off: taken from the connection; turn it on if the provider rejects the request (its ceiling counts reasoning tokens too)."
+                },
+                {
+                    "id": "embeddings",
+                    "name": "Embeddings",
+                    "alt": "Vectors, Vector search",
+                    "desc": "A way to search by meaning rather than by exact words. A separate small model (an embedding model) turns text into a list of numbers — a vector. Texts with similar meaning get vectors close to each other, so “she burst into tears” is found by the query “crying” even though they share no words.\n\nIn Glaze, embeddings power search by meaning in [[memorybook|Memory Books]], in [[lorebook|lorebooks]] with vector entries, and search through old chat messages. Without them, all of these work by keywords only.\n\nThe embeddings connection is set up separately from the chat: the address, key and model of a provider that serves vectors. It is usually cheap, and one model serves every chat. After changing the model, always [[memorybook-reindex|reindex]] — vectors from different models are not compatible."
+                },
                 {
                     "id": "memorybook-embedding-model",
                     "name": "MemoryBook Embedding Model",

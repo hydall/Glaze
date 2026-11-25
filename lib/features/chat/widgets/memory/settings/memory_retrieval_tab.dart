@@ -30,6 +30,7 @@ class MemoryRetrievalSections {
     return [
         MenuGroup(
           header: 'label_embedding_target'.tr(),
+          helpTerm: 'memorybook-injection',
           items: [
             MenuSelectorItem(
               label: 'label_embedding_target'.tr(),
@@ -43,9 +44,11 @@ class MemoryRetrievalSections {
         if (vectorAvailable)
           MenuGroup(
             header: 'memory_section_search'.tr(),
+            helpTerm: 'memorybook-retrieval',
             items: [
               MenuSwitchItem(
                 label: 'label_vector_search'.tr(),
+                helpTerm: 'embeddings',
                 value: draft.vectorSearchEnabled,
                 onChanged: (v) {
                   draft.vectorSearchEnabled = v;
@@ -66,6 +69,7 @@ class MemoryRetrievalSections {
                 ),
                 MenuSelectorItem(
                   label: 'label_search_type'.tr(),
+                  helpTerm: 'memorybook-retrieval',
                   currentValue: _keyMatchLabel(draft.keyMatchMode),
                   onTap: () => _pickKeyMatchMode(context),
                 ),
