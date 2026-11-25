@@ -124,8 +124,12 @@ offending feature on `nightly` and re-promote — that is what squash-merging bu
   `true` (Settings → Secrets and variables → Actions → Variables) — for example
   while a known-broken feature sits on `nightly`. A manual run still works and
   takes a `soak_hours` input (`0` promotes the tip of `nightly`).
-- It only merges code. Publishing a release is still the manual
-  *Build Release (Publish)* workflow.
+- After a merge it starts *Build Release (Publish)* on `main`, so every
+  promotion is a release (next `YY.M.N`), and the release's article and posts
+  follow on their own (§ Release article). A week with nothing to promote makes
+  no release. `AUTO_RELEASE=false` (repository variable) keeps the merge and
+  skips the release. The article and posts after it only run while
+  `RELEASE_ARTICLE_AUTO` is `true`.
 
 Requirements: the schedule only fires once the workflow file is on `main`
 (the default branch), and *Settings → Actions → General → Allow GitHub Actions
@@ -218,6 +222,36 @@ A successful group post moves the `build/last` tag to the built commit, which is
 the baseline for the "commits since last build" list in the next announcement.
 The developer DMs deliberately do not move it — an internal share is not an
 announcement.
+
+## Release article
+
+Once *Build Release (Publish)* finishes on `main`,
+`.github/workflows/release-article.yml` announces the release.
+
+**Off for now:** the automatic run only happens when the repository variable
+`RELEASE_ARTICLE_AUTO` is `true`. Until then releases get no article and no
+posts; the workflow can still be run by hand for a given tag.
+
+
+- `.github/scripts/release_article.py` collects the PRs since the previous
+  stable release (with their descriptions) and has the DeepSeek model the
+  bug-triage bot uses write the article in Russian and English, in the style of
+  the previous one. It writes `site/articles/<version>.{ru,en}.md`, the
+  link-preview page with its cover (`og.png`, rendered by headless Chrome from
+  `.github/scripts/release_cover.html`), the roadmap entry and the download
+  fallback in `site/assets/data.js`.
+- The article is committed straight to `main` — the site only lives there — and
+  the Pages deploy is dispatched and awaited.
+- The link then goes to the Telegram group of the build posts and to the
+  Discord channel behind the `DISCORD_RELEASE_WEBHOOK` secret. The variable
+  `RELEASE_POST_LANG` picks the language of the posts: `ru` (default), `en`
+  or `both`.
+- It runs once per release. Pre-releases get nothing. To fix an article, edit
+  the files on `main`; to post the link again, run the workflow by hand with the
+  release tag.
+
+The text is the model's: read the article after a release and correct it on
+`main` if it got something wrong.
 
 ## Trello board
 
