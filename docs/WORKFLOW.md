@@ -4,36 +4,28 @@ Git, branching, PR, and task-tracking conventions. Loaded on demand — `CLAUDE.
 
 ## Branching
 
-The repository has two long-lived release branches, one per build channel:
+All development happens on `main`, the default branch. There is no `nightly`
+branch any more: releases are cut from `main` once a week (§ Releases).
 
-| Branch    | Channel   | Role                                    |
-|-----------|-----------|-----------------------------------------|
-| `nightly` | `nightly` | integration — where features land        |
-| `main`    | `stable`  | public releases (default branch)         |
+Each feature = a branch off `main`, pushed to `origin`, then a PR into
+upstream `hydall/Glaze:main`.
 
-Work flows upward, `nightly → main`, by ordinary merges. The channel is
-derived from the branch name at build time, so a commit picks up the right build
-settings automatically as it is promoted — see `docs/RELEASE_CHANNELS.md`.
-
-Each feature = a branch off `nightly`, pushed to `origin`, then a PR into
-upstream `hydall/Glaze:nightly`.
-
-- **Always base a feature branch on `nightly`** — never on `main`, and never on whatever happened to be checked out. `main` is the repository's *default* branch, so a fresh clone (and every agent session started from one) lands there: check the base before the first commit. If a branch was already cut from the wrong base, rebase it before opening the PR — `git fetch origin nightly && git rebase origin/nightly` — so the PR carries only its own commits.
-- **No direct commits to `nightly` or `main`** — always use a feature branch.
-- **Never PR straight into `main`** — features enter through `nightly` and are promoted.
-- **Squash-merge every PR** — one feature = one commit on `nightly`, so a regression found later is a single `git revert <sha>` instead of untangling a range.
+- **Base every feature branch on an up-to-date `main`.**
+- **No direct commits to `main`** — always use a feature branch. The only
+  exception is the release article, which `release-article.yml` commits itself.
+- **Squash-merge every PR** — one feature = one commit on `main`, so a regression found later is a single `git revert <sha>` instead of untangling a range.
 - **CI must be green before merge** — see below.
-- **Stack while catching up** — if a feature depends on another not-yet-merged branch, branch off that branch instead of `nightly`.
+- **Stack while catching up** — if a feature depends on another not-yet-merged branch, branch off that branch instead of `main`.
 - **Run `dart run build_runner build`** after changing any freezed/drift model.
 
 ```bash
-git checkout nightly && git pull
+git checkout main && git pull
 git checkout -b feat/xxx
 # ... work ...
 git push -u origin feat/xxx
 ```
 
-Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use whatever is at hand: the `gh` CLI (`gh pr create --base nightly`), the GitHub MCP tools when they are connected, or the web UI.
+Open the PR against `hydall/Glaze:main`, not a fork's branch. Use whatever is at hand: the `gh` CLI (`gh pr create --base main`), the GitHub MCP tools when they are connected, or the web UI.
 
 ## PR title and body
 
@@ -58,7 +50,7 @@ Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use whatever is
 
 ## CI gate
 
-`.github/workflows/ci.yml` runs on every PR into `nightly` or `main`:
+`.github/workflows/ci.yml` runs on every PR into `main`:
 `flutter analyze`, `flutter test`, and the WebView render suite
 (`test/webview_js` — Node + Playwright, no Flutter). A red check means the PR
 is not merged — no exceptions, no "it works on my machine".
@@ -80,7 +72,7 @@ skipped or forgotten.
 ## Before starting work
 
 1. `git branch --show-current` — confirm the branch.
-2. `git checkout nightly && git pull` — sync.
+2. `git checkout main && git pull` — sync.
 3. `git checkout -b feat/xxx` — create the feature branch.
 4. `flutter analyze` — lint + typecheck.
 5. `flutter test` — run the test suite (one-shot, non-watch mode).
@@ -89,58 +81,36 @@ skipped or forgotten.
 
 - Delete local branch: `git branch -D feat/xxx`
 - Delete remote branch: `git push origin --delete feat/xxx`
-- Sync nightly: `git checkout nightly && git pull`
+- Sync main: `git checkout main && git pull`
 
-## Promoting a release
+## Releases
 
-Promotion is a merge, not a PR. A `nightly → main` diff is an aggregate of many
-features that nobody reads; opening a PR for it adds ceremony without adding a
-check.
+`.github/workflows/auto-release.yml` releases `main` every Wednesday at 12:00
+Moscow time (09:00 UTC), so releases never depend on someone remembering:
 
-**`nightly → main` is gated on a real device, not on the diff.** Promote only
-after a build of `nightly` (the *Build (Branch)* workflow) has been installed and
-actually used, and nothing obvious is broken. CI proves the code compiles and the
-tests pass; only a build on a phone or desktop proves the app still works.
-`main` means "that held up".
+- It takes the **newest `main` commit that is at least 24 hours old**, not the
+  tip: what landed in the last day waits for the next release.
+- It builds and publishes that commit with *Build Release (Publish)* (its
+  `commit` input; the tag goes on the built commit), as the next `YY.M.N`.
+- Once the build is done it starts *Release article* (§ Release article), which
+  writes the site article and posts the release to Discord and Telegram.
+- It **skips the week** — green, with the reason in the run summary — when a
+  stable release was already published since Monday 00:00 Moscow time (by hand
+  or by an earlier run), when nothing on `main` is old enough, or when the
+  picked commit adds nothing to the latest release.
+- **Pause** it with the repository variable `AUTO_RELEASE_PAUSED=true`
+  (Settings → Secrets and variables → Actions → Variables). A manual run still
+  works and takes `soak_hours` (`0` releases the tip of `main`) and
+  `ignore_week`.
 
-When a promoted build turns out to be broken, revert the squashed commit of the
-offending feature on `nightly` and re-promote — that is what squash-merging buys.
+A release by hand is still *Build Release (Publish)* on `main`; its article and
+posts follow the same way, without the "released automatically" line.
 
-### Automatic promotion
+When a release turns out to be broken, revert the squashed commit of the
+offending feature on `main` and release again — that is what squash-merging buys.
 
-`.github/workflows/promote-main.yml` does the promotion on a schedule (Wednesdays,
-12:00 Moscow / 09:00 UTC), so `main` does not fall behind when nobody remembers to merge:
-
-- It picks the **newest `nightly` commit that is at least 72 hours old**, not the
-  tip. Those days in nightly builds stand in for the device check above, and the
-  pick moves forward every run, so a `nightly` that never stays quiet still gets
-  promoted.
-- It moves the `auto/promote-main` branch to that commit, opens a PR into
-  `main` (or updates the open one), dispatches CI on it, and merges the PR with
-  a merge commit once CI is green.
-- A red CI, a conflict with `main`-only commits or a required review leaves the
-  PR open and fails the run — fix it by hand and merge, or let the next run retry.
-- **Pause** it by setting the repository variable `AUTO_PROMOTE_PAUSED` to
-  `true` (Settings → Secrets and variables → Actions → Variables) — for example
-  while a known-broken feature sits on `nightly`. A manual run still works and
-  takes a `soak_hours` input (`0` promotes the tip of `nightly`).
-- After a merge it starts *Build Release (Publish)* on `main`, so every
-  promotion is a release (next `YY.M.N`), and the release's article and posts
-  follow on their own (§ Release article). A week with nothing to promote makes
-  no release. `AUTO_RELEASE=false` (repository variable) keeps the merge and
-  skips the release. The article and posts after it only run while
-  `RELEASE_ARTICLE_AUTO` is `true`.
-
-Requirements: the schedule only fires once the workflow file is on `main`
-(the default branch), and *Settings → Actions → General → Allow GitHub Actions
-to create and approve pull requests* must be on.
-
-Promoting by hand still works the same way:
-
-```bash
-# nightly → main (ship it)
-git checkout main && git pull && git merge --no-ff nightly && git push
-```
+The schedule only fires from the default branch, so the workflow file has to be
+on `main`.
 
 ## Version numbers
 
@@ -161,7 +131,7 @@ the release tags (`v26.11.1`, …):
   the Windows installer all pick it up. The `version:` in the committed
   `pubspec.yaml` is a placeholder that only local builds show.
 
-Every published release takes a number, a nightly pre-release included, so the
+Every published release takes a number, a pre-release from another branch included, so the
 numbers seen on `main` can skip.
 
 The old `0.x` tags do not match the scheme and are ignored; `26.11.1` compares
@@ -225,13 +195,9 @@ announcement.
 
 ## Release article
 
-Once *Build Release (Publish)* finishes on `main`,
-`.github/workflows/release-article.yml` announces the release.
-
-**Off for now:** the automatic run only happens when the repository variable
-`RELEASE_ARTICLE_AUTO` is `true`. Until then releases get no article and no
-posts; the workflow can still be run by hand for a given tag.
-
+Once a release is published from `main`, `.github/workflows/release-article.yml`
+announces it (started by `auto-release.yml` for its releases, by its own
+`workflow_run` trigger for one built by hand):
 
 - `.github/scripts/release_article.py` collects the PRs since the previous
   stable release (with their descriptions) and has the DeepSeek model the
@@ -240,15 +206,25 @@ posts; the workflow can still be run by hand for a given tag.
   link-preview page with its cover (`og.png`, rendered by headless Chrome from
   `.github/scripts/release_cover.html`), the roadmap entry and the download
   fallback in `site/assets/data.js`.
-- The article is committed straight to `main` — the site only lives there — and
-  the Pages deploy is dispatched and awaited.
-- The link then goes to the Telegram group of the build posts and to the
-  Discord channel behind the `DISCORD_RELEASE_WEBHOOK` secret. The variable
-  `RELEASE_POST_LANG` picks the language of the posts: `ru` (default), `en`
-  or `both`.
+- The article is committed straight to `main` and the Pages deploy is
+  dispatched and awaited.
+- Then `.github/scripts/post_release.sh` posts to the Telegram channel
+  (`TG_RELEASE_CHAT_ID`, the bot must be an admin there) and the Discord channel
+  (`DISCORD_RELEASE_WEBHOOK`):
+
+  ```
+  **Glaze** `26.11.1`
+
+  СКАЧАТЬ                      → the site's download page
+  СТАТЬЯ С ОПИСАНИЕМ РЕЛИЗА    → the article, whose card shows under the post
+
+  Релиз был сделан автоматически на основе ветки main с GitHub
+  (за исключением изменений за последние 24 часа)   ← auto-releases only
+  ```
+
 - It runs once per release. Pre-releases get nothing. To fix an article, edit
-  the files on `main`; to post the link again, run the workflow by hand with the
-  release tag.
+  the files on `main`; to post a release again, run the workflow by hand with
+  its tag.
 
 The text is the model's: read the article after a release and correct it on
 `main` if it got something wrong.

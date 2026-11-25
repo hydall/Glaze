@@ -91,12 +91,10 @@ information, not a verdict". That line is what pass 2 reads to find its work.
 Comments written before the marker existed are recognised by their headline, so
 the existing backlog is picked up too.
 
-**The audited source is always `nightly`.** The workflow checks the triage code
-out from the branch the run was started on, and `nightly` separately into
-`audit-src/`, which is what the agent greps and reads (`AUDIT_REPO_ROOT`).
-Scheduled runs fire only from the default branch (`stable`), which trails
-nightly by hundreds of commits — auditing that tree would judge reports against
-code the fix has long since left.
+**The audited source is always `main`.** The workflow checks the triage code
+out from the branch the run was started on, and `main` — where all development
+happens — separately into `audit-src/`, which is what the agent greps and reads
+(`AUDIT_REPO_ROOT`). A run dispatched from a feature branch still audits `main`.
 
 ## Architecture
 
@@ -206,7 +204,6 @@ python -m unittest discover -p 'test_*.py'
 Daily at 18:00 UTC (`.github/workflows/bug-triage.yml`). Trigger manually from
 the Actions tab ("Run workflow"), optionally with **dry run** checked.
 
-> **Scheduled runs only fire from the repository's default branch** (`stable`).
-> On `nightly` or a feature branch the cron is inert — only `workflow_dispatch`
-> works there. The daily 18:00 UTC run starts once this file reaches `stable`
-> through the normal `nightly` → `stable` promotion.
+> **Scheduled runs only fire from the repository's default branch** (`main`).
+> On a feature branch the cron is inert — only `workflow_dispatch` works there.
+> A change to the schedule takes effect once its PR is merged into `main`.

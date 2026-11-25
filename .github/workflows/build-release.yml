@@ -3,6 +3,14 @@ name: Build Release (Publish)
 on:
   workflow_dispatch:
     inputs:
+      # Build this commit of the branch instead of its tip. The auto-release
+      # passes the newest main commit that is at least a day old. The channel
+      # still comes from the branch picked in "Use workflow from".
+      commit:
+        description: 'Commit to build (empty = the tip of the selected branch)'
+        required: false
+        type: string
+        default: ''
       tag_name:
         description: 'Release tag (e.g. v26.11.1). Leave empty for auto — the next YY.M.N of this month'
         required: false
@@ -78,7 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ inputs.commit || github.ref_name }}
           fetch-depth: 0
 
       - name: Compute metadata
@@ -149,7 +157,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ inputs.commit || github.ref_name }}
 
       - name: Stamp version
         shell: bash
@@ -338,7 +346,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ inputs.commit || github.ref_name }}
 
       - name: Stamp version
         shell: bash
@@ -451,7 +459,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ inputs.commit || github.ref_name }}
 
       - name: Stamp version
         shell: bash
@@ -586,7 +594,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ inputs.commit || github.ref_name }}
 
       - name: Stamp version
         shell: bash
@@ -705,7 +713,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ inputs.commit || github.ref_name }}
           fetch-depth: 0
 
       - name: Download built artifacts
@@ -751,6 +759,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.metadata.outputs.tag_name }}
+          # The tag goes on the commit that was built, not on the branch tip
+          # the run was started from — they differ when `commit` is given.
+          target_commitish: ${{ needs.metadata.outputs.git_sha }}
           name: ${{ needs.metadata.outputs.tag_name }}
           body: ${{ steps.notes.outputs.notes }}
           draft: false
@@ -855,5 +866,8 @@ jobs:
       - name: Advance build/last tag
         if: ${{ github.event.inputs.post_to_telegram == 'true' }}
         run: |
-          git tag -f build/last
+          # The built commit, which is not this checkout's when `commit` is set.
+          SHA="${{ needs.metadata.outputs.git_sha }}"
+          git fetch --no-tags --depth=1 origin "$SHA"
+          git tag -f build/last "$SHA"
           git push origin refs/tags/build/last --force
