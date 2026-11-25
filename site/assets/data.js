@@ -9,20 +9,21 @@ window.GLAZE = {
 
   // Shown until the GitHub API answers (or when it is rate-limited).
   fallbackRelease: {
-    tag: 'v0.10.0',
-    date: '2026-11-13',
+    tag: 'v26.11.1',
+    date: '2026-11-25',
     assets: [
-      { name: 'v0.10.0.apk', size: 107056262 },
-      { name: 'v0.10.0-arm64-v8a.apk', size: 58008705 },
-      { name: 'v0.10.0-armeabi-v7a.apk', size: 57151731 },
-      { name: 'v0.10.0.ipa', size: 26869509 },
-      { name: 'v0.10.0-windows.zip', size: 29721949 },
-      { name: 'v0.10.0-linux.pkg.tar.zst', size: 26659574 },
-      { name: 'v0.10.0-linux.tar.zst', size: 25556840 },
+      { name: 'v26.11.1-arm64-v8a.apk', size: 58171974 },
+      { name: 'v26.11.1-armeabi-v7a.apk', size: 57364152 },
+      { name: 'v26.11.1-linux.pkg.tar.zst', size: 26751459 },
+      { name: 'v26.11.1-linux.tar.zst', size: 25640731 },
+      { name: 'v26.11.1-windows-setup.exe', size: 42839528 },
+      { name: 'v26.11.1-windows.zip', size: 30441380 },
+      { name: 'v26.11.1.apk', size: 107399755 },
+      { name: 'v26.11.1.ipa', size: 27010385 },
     ],
   },
 
-  devVersion: '0.10.0',
+  devVersion: '26.11.1',
 
   // Where the Download page's Nightly channel looks for builds.
   nightly: { workflow: 'build-branch.yml', branch: 'nightly' },
@@ -137,7 +138,7 @@ window.GLAZE = {
       },
       dl_all: 'Все релизы',
       dl_loading: 'Загружаем данные релиза…',
-      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v0.10.0.',
+      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v26.11.1.',
       dl_missing: 'В этом релизе нет',
       dl_how: {
         android: 'Скачайте APK и откройте его. Разрешите установку из этого источника, если система спросит. Есть универсальная сборка, а также отдельные под arm64 и arm32.',
@@ -289,7 +290,7 @@ window.GLAZE = {
       },
       dl_all: 'All releases',
       dl_loading: 'Loading release data…',
-      dl_api_failed: 'Could not reach GitHub. Showing links for v0.10.0.',
+      dl_api_failed: 'Could not reach GitHub. Showing links for v26.11.1.',
       dl_missing: 'Not in this release',
       dl_how: {
         android: 'Download the APK and open it. Allow installs from this source if the system asks. There is a universal build, plus separate arm64 and arm32 ones.',
@@ -600,6 +601,19 @@ window.GLAZE = {
   // languages it is written in; any other shows the first one with a notice.
   articles: [
     {
+      slug: '26.11.1',
+      kind: 'changelog',
+      date: '2026-11-25',
+      author: 'hydall',
+      langs: ['ru', 'en'],
+      download: 'v26.11.1',
+      title: { ru: 'Glaze 26.11.1', en: 'Glaze 26.11.1' },
+      lead: {
+        ru: 'У сжатия истории появились понятные настройки и спокойная заметка вместо ошибки, поле ввода больше не блокируется во время правки сообщения, счётчик вариаций открывает список, а Regex, лорбуки и персоны переехали на экран списка пресетов.',
+        en: 'History compaction gets clear grouped settings and a calm note instead of an error, the composer stays usable while you edit a message, the variation counter opens a list, and Regex, lorebooks and personas move to the presets list screen.',
+      },
+    },
+    {
       slug: '0.10.0',
       kind: 'changelog',
       date: '2026-11-13',
@@ -745,9 +759,67 @@ window.GLAZE = {
       ],
     },
     {
+      version: '26.11.1',
+      date: '2026-11-25',
+      status: 'latest',
+      tag: 'v26.11.1',
+      article: '26.11.1',
+      title: { ru: 'Саммари, списки и векторы', en: 'Summary, lists and vectors' },
+      groups: [
+        {
+          title: { ru: 'Новое', en: 'New' },
+          items: {
+            ru: [
+              'сжатие истории: заметка вместо ошибки, группы настроек и раздел справки «Память»',
+              'поле ввода работает во время правки сообщения и Stop сразу по нажатию',
+              'список вариаций по тапу на счётчик',
+              'скрытые персонажи по тройному тапу и горячей клавише',
+              'списки Regex, лорбуков и персон как у пресетов; выбор привязок из обычных списков',
+              'отдельный экран «Векторы» и приоритет запросов из чата',
+              'настройки прокрутки: автопрокрутка при стриме и следование за полем ввода',
+              'Gemini 4 и Gemini 3: уровни рассуждений по модели',
+              'бэкап из более новой версии; установщик Windows с рантаймом и выбором папки',
+            ],
+            en: [
+              'history compaction: a note instead of an error, grouped settings and a Memory glossary',
+              'the composer works while a message is edited, Stop on the tap of Send',
+              'variation list on tapping the counter',
+              'hidden characters by triple tap and a desktop hotkey',
+              'Regex, lorebooks and personas lists like presets; bindings picked from the regular lists',
+              'a standalone Vectors screen and chat requests first in the queue',
+              'scroll settings: auto-scroll while streaming and following the composer',
+              'Gemini 4 and Gemini 3: reasoning levels per model',
+              'backups from a newer version; a Windows setup with the runtime and a folder pick',
+            ],
+          },
+        },
+        {
+          title: { ru: 'Исправления', en: 'Fixes' },
+          items: {
+            ru: [
+              'ветка ручной вариации остаётся на ней',
+              'скрытие выделенных сообщений срабатывает сразу и достаёт строки за пределами экрана',
+              'регенерация поверх ошибки заменяет её',
+              'клавиатура больше не поднимает поле ввода; кнопки прокрутки не перекрывают поле ввода',
+              'уведомления на iOS и macOS больше не забирают аватары',
+              'каталог JanitorAI на Windows больше не падает',
+            ],
+            en: [
+              'a branch of a hand-made variation stays on that variation',
+              'hiding a selection applies at once and reaches off-screen rows',
+              'a regenerate over an error replaces it',
+              'the keyboard no longer lifts the composer; scroll buttons stay out of the composer',
+              'notifications on iOS and macOS no longer take avatars',
+              'the JanitorAI catalog on Windows no longer crashes',
+            ],
+          },
+        },
+      ],
+    },
+    {
       version: '0.10.0',
       date: '2026-11-13',
-      status: 'latest',
+      status: 'released',
       channel: 'beta',
       tag: 'v0.10.0',
       article: '0.10.0',
