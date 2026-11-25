@@ -192,6 +192,45 @@ void main() {
     );
   });
 
+  test('a tail covering the whole chat is reported with its numbers, and '
+      'compacting all but the newest messages still runs', () async {
+    final h = await _harness();
+    // A manual tail past the whole history: nothing older than it is left.
+    await h.container
+        .read(summaryCompactionSettingsProvider.notifier)
+        .save(
+          const SummaryCompactionSettings(
+            manualTailUnit: SummaryManualTailUnit.tokens,
+            manualTailTokens: 10000000,
+          ),
+        );
+    final notifier = h.container.read(summaryCompactionProvider.notifier);
+    SummaryCompactionState state() =>
+        h.container.read(summaryCompactionProvider);
+
+    await notifier.compact(charId: 'char', session: _session);
+    final nothing = state().lastFailure?.error;
+    expect(nothing, isA<SummaryNothingToCompact>());
+    nothing as SummaryNothingToCompact;
+    expect(nothing.tailTokens, 10000000);
+    expect(nothing.historyTokens, greaterThan(0));
+    expect(nothing.historyTokens, lessThan(nothing.tailTokens));
+    expect(nothing.canCompactNewestOnly, isTrue);
+    expect(h.llm.calls, 0);
+
+    // A run that retells something reports no new failure.
+    final seq = state().lastFailure!.seq;
+    await notifier.compact(charId: 'char', session: _session, newestOnly: true);
+    expect(state().lastFailure?.seq, seq);
+    expect((await _blocks(h.container)).length, expectedBlocks);
+
+    // Once everything but the newest messages is retold, nothing is offered.
+    await notifier.compact(charId: 'char', session: _session, newestOnly: true);
+    final after = state().lastFailure?.error;
+    expect(after, isA<SummaryNothingToCompact>());
+    expect((after as SummaryNothingToCompact).canCompactNewestOnly, isFalse);
+  });
+
   test('cancel through the notifier keeps what was written', () async {
     final h = await _harness();
     final notifier = h.container.read(summaryCompactionProvider.notifier);

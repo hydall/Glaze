@@ -4,8 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/summary_service.dart'
-    show summaryShortenSlackPercent;
+import '../../../core/llm/summary_service.dart' show summaryShortenSlackPercent;
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/summary_block.dart';
@@ -22,6 +21,7 @@ import '../state/summary_compaction_provider.dart';
 import '../state/summary_regeneration_provider.dart';
 import 'summary_block_card.dart';
 import 'summary_block_editor_sheet.dart';
+import 'summary_nothing_to_compact_note.dart';
 
 /// Summary tab of the Memory sheet.
 ///
@@ -55,6 +55,10 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
   bool _loading = true;
   bool _busy = false;
   Object? _error;
+
+  /// The last manual run found nothing to retell. Not an error: shown as a
+  /// note with the numbers, and the way to retell more.
+  SummaryNothingToCompact? _nothing;
 
   @override
   void initState() {
@@ -135,11 +139,20 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
   /// landing and the progress keeps counting whether or not the sheet stays
   /// open. Each block written bumps `summaryRevisionProvider`, and the list
   /// follows.
-  void _compact() {
+  void _compact({bool newestOnly = false}) {
     final session = _session;
     if (session == null) return;
-    setState(() => _error = null);
-    unawaited(_compaction.compact(charId: widget.charId, session: session));
+    setState(() {
+      _error = null;
+      _nothing = null;
+    });
+    unawaited(
+      _compaction.compact(
+        charId: widget.charId,
+        session: session,
+        newestOnly: newestOnly,
+      ),
+    );
   }
 
   void _stopCompaction() {
@@ -363,7 +376,16 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
       failure,
     ) {
       if (failure == null || failure.sessionId != _session?.id) return;
-      setState(() => _error = _describe(failure.error));
+      final error = failure.error;
+      setState(() {
+        if (error is SummaryNothingToCompact) {
+          _nothing = error;
+          _error = null;
+        } else {
+          _nothing = null;
+          _error = _describe(error);
+        }
+      });
     });
     final session = ref.watch(chatProvider(widget.charId)).value?.session;
     final messages = session?.messages ?? const <ChatMessage>[];
@@ -497,6 +519,7 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
     required SummaryCompactionRun? compacting,
   }) {
     final error = _error;
+    final nothing = compacting == null ? _nothing : null;
     final canMerge = _selected.length >= 2 && compacting == null;
     return Container(
       padding: EdgeInsets.fromLTRB(
@@ -554,7 +577,7 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                             : GlazeActionTone.primary,
                         expand: true,
                         busy: _busy && !canMerge,
-                        onTap: regenerating ? null : _compact,
+                        onTap: regenerating ? null : () => _compact(),
                       ),
               ),
               const SizedBox(width: 8),
@@ -565,6 +588,16 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
               ),
             ],
           ),
+          if (nothing != null) ...[
+            const SizedBox(height: 12),
+            SummaryNothingToCompactNote(
+              result: nothing,
+              onCompactNewest: regenerating || _busy
+                  ? null
+                  : () => _compact(newestOnly: true),
+              onDismiss: () => setState(() => _nothing = null),
+            ),
+          ],
           if (error != null) ...[
             const SizedBox(height: 12),
             GlazeErrorBlock.fromError(error),

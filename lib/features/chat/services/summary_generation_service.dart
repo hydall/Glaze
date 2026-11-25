@@ -30,7 +30,18 @@ class SummaryCompactionResult {
   final int created;
   final int merged;
 
-  const SummaryCompactionResult({this.created = 0, this.merged = 0});
+  /// Fresh history no block stands in for, and the raw tail the run kept, as
+  /// counted at its first step — what a reader is told when a run found
+  /// nothing to do.
+  final int historyTokens;
+  final int tailTokens;
+
+  const SummaryCompactionResult({
+    this.created = 0,
+    this.merged = 0,
+    this.historyTokens = 0,
+    this.tailTokens = 0,
+  });
 
   bool get changed => created > 0 || merged > 0;
 }
@@ -192,7 +203,9 @@ class SummaryGenerationService {
   /// (`manualTailBudget`) as raw history rather than the rest of the window,
   /// and keeps going, one block at a time, until everything older is
   /// summarized — the whole backlog of a long chat, however many blocks it
-  /// takes.
+  /// takes. [newestOnly], with [force], ignores the manual tail as well and
+  /// retells everything but the last [SummaryChain.minTailMessages]
+  /// messages: for a reader whose tail setting covers the whole chat.
   ///
   /// [onProgress] hears where the run stands before each request. A
   /// cancelled [cancelToken] ends the run after the step under way: the
@@ -205,6 +218,7 @@ class SummaryGenerationService {
     required String charId,
     required ChatSession session,
     bool force = false,
+    bool newestOnly = false,
     CancelToken? cancelToken,
     void Function(SummaryCompactionProgress progress)? onProgress,
   }) {
@@ -226,6 +240,8 @@ class SummaryGenerationService {
       var created = 0;
       var merged = 0;
       var idle = 0;
+      int? firstHistory;
+      int? firstTail;
 
       for (var step = 0; force || step < _maxSteps; step++) {
         if (cancelToken?.isCancelled == true) break;
@@ -233,8 +249,7 @@ class SummaryGenerationService {
         final blocks = await _cleanBlocks(session.id, messages);
         final counts = _count(blocks, messages);
         final summaryTokens = counts.summaryTokens;
-        final used =
-            budget.fixedTokens + summaryTokens + counts.historyTokens;
+        final used = budget.fixedTokens + summaryTokens + counts.historyTokens;
 
         if (summaryTokens > budget.total * settings.mergePercent ~/ 100) {
           final parts = SummaryChain.mergeCandidate(
@@ -278,12 +293,17 @@ class SummaryGenerationService {
           fixedTokens: budget.fixedTokens,
           summaryTokens: summaryTokens,
         );
+        final tailBudget = !force
+            ? tail
+            : newestOnly
+            ? 0
+            : settings.manualTailBudget(_contextSize(budget));
+        firstHistory ??= counts.historyTokens;
+        firstTail ??= tailBudget;
         final plan = SummaryChain.planSource(
           blocks: blocks,
           messages: messages,
-          tailBudgetTokens: force
-              ? settings.manualTailBudget(_contextSize(budget))
-              : tail,
+          tailBudgetTokens: tailBudget,
           maxSourceTokens: inputCap,
         );
         if (plan.source.isEmpty) break;
@@ -349,7 +369,12 @@ class SummaryGenerationService {
         idle = 0;
         created++;
       }
-      return SummaryCompactionResult(created: created, merged: merged);
+      return SummaryCompactionResult(
+        created: created,
+        merged: merged,
+        historyTokens: firstHistory ?? 0,
+        tailTokens: firstTail ?? 0,
+      );
     });
   }
 
@@ -883,6 +908,13 @@ class SummaryGenerationService {
       settings: settings,
     );
   }
+
+  /// The raw history "Compact history" keeps as written in [charId]'s chat
+  /// under [settings], in tokens — the manual tail as [compact] sizes it.
+  int manualTailTokens({
+    required String charId,
+    required SummaryCompactionSettings settings,
+  }) => settings.manualTailBudget(_contextSize(_promptBudget(charId)));
 
   /// What the main prompt may use, and how much of it is neither history nor
   /// summary. Taken from the last prompt build when there is one: it carries

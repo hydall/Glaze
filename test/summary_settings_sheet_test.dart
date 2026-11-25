@@ -352,32 +352,38 @@ void main() {
 
     expect(find.byType(SummarySettingsSheet), findsOneWidget);
     expect(find.text('label_enabled'.tr()), findsOneWidget);
-    // The master switch and the auto-compaction switch.
-    expect(find.byType(Switch), findsNWidgets(2));
-    expect(find.text('summary_auto_label'.tr()), findsOneWidget);
-    expect(find.text('summary_trigger_label'.tr()), findsOneWidget);
-    expect(find.text('summary_manual_tail_label'.tr()), findsOneWidget);
-    expect(find.text('summary_auto_floor_label'.tr()), findsOneWidget);
-    // The least fresh history and the manual tail are both shares of the
-    // context by default; the token fields show only once tokens are picked.
-    expect(
-      find.text('summary_manual_tail_unit_percent'.tr()),
-      findsNWidgets(2),
-    );
-    expect(
-      find.text('summary_manual_tail_percent_label'.tr()),
-      findsNWidgets(2),
-    );
-    expect(find.text('summary_manual_tail_tokens_label'.tr()), findsNothing);
-    expect(find.text('summary_block_target_label'.tr()), findsOneWidget);
-    expect(find.text('summary_merge_label'.tr()), findsOneWidget);
+    // The manual tail first, under the button it is for: a share of the
+    // context by default; the token field shows only once tokens are picked.
     // Summarizing runs on the Memory slot, so the settings say where that
-    // slot is bound rather than leaving the reader to find it.
+    // slot is bound, next to the master switch under General.
     expect(
       find.text('memory_books_generation_connection'.tr()),
       findsOneWidget,
     );
     expect(find.text('summary_connection_hint'.tr()), findsOneWidget);
+    await _scrollTo(
+      tester,
+      find.text('summary_manual_tail_percent_label'.tr()),
+    );
+    expect(find.text('summary_manual_section'.tr()), findsOneWidget);
+    expect(find.text('summary_manual_tail_label'.tr()), findsOneWidget);
+    expect(find.text('summary_manual_tail_unit_percent'.tr()), findsOneWidget);
+    expect(find.text('summary_manual_tail_percent_label'.tr()), findsOneWidget);
+    expect(find.text('summary_manual_tail_tokens_label'.tr()), findsNothing);
+    // Auto compaction is off by default, so only its switch shows; its lines
+    // appear once it is on.
+    await _scrollTo(tester, find.text('summary_auto_label'.tr()));
+    expect(find.text('summary_trigger_label'.tr()), findsNothing);
+    expect(find.text('summary_auto_floor_label'.tr()), findsNothing);
+    await tester.tap(find.byType(Switch).last);
+    await tester.pump();
+    expect(find.text('summary_trigger_label'.tr()), findsOneWidget);
+    expect(find.text('summary_compact_to_label'.tr()), findsOneWidget);
+    await _scrollTo(tester, find.text('summary_auto_floor_label'.tr()));
+    expect(find.text('summary_auto_floor_label'.tr()), findsOneWidget);
+    await _scrollTo(tester, find.text('summary_merge_label'.tr()));
+    expect(find.text('summary_block_target_label'.tr()), findsOneWidget);
+    expect(find.text('summary_merge_label'.tr()), findsOneWidget);
     await _scrollTo(tester, find.byKey(const Key('summary_manage_prompts')));
     // Prompts are picked from presets, as in Memory Books: one for retelling,
     // one for merging, one for shortening, a view of them and the saved-prompt
@@ -461,9 +467,7 @@ void main() {
       );
       // The summary itself is untouched by the switch.
       expect(
-        (await container
-                .read(summaryServiceProvider)
-                .getBlocks(_sessionId))
+        (await container.read(summaryServiceProvider).getBlocks(_sessionId))
             .single
             .content,
         'They reached the pass after dark.',

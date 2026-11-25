@@ -45,6 +45,7 @@ class MemoryApiSections {
     return [
       ApiSlotGroup(
         header: 'tab_api'.tr(),
+        helpTerm: 'memory-connection',
         description: 'memory_books_slot_desc'.tr(),
         apiConfigId: api.apiConfigId,
         onApiConfigChanged: (id) => onChanged(

@@ -52,6 +52,9 @@ class ApiSlotGroup extends ConsumerStatefulWidget {
   final String header;
   final String? description;
 
+  /// Glossary term the header's help button opens, if any.
+  final String? helpTerm;
+
   /// Empty means "use whichever connection the LLM tab is on".
   final String apiConfigId;
   final ValueChanged<String> onApiConfigChanged;
@@ -72,6 +75,7 @@ class ApiSlotGroup extends ConsumerStatefulWidget {
     super.key,
     required this.header,
     this.description,
+    this.helpTerm,
     required this.apiConfigId,
     required this.onApiConfigChanged,
     required this.modelRows,
@@ -97,6 +101,7 @@ class _ApiSlotGroupState extends ConsumerState<ApiSlotGroup> {
     final configs = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
     return MenuGroup(
       header: widget.header,
+      helpTerm: widget.helpTerm,
       description: widget.description,
       items: [
         ...widget.leadingItems,

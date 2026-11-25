@@ -34,6 +34,7 @@ class MemorySelectionSections {
     return [
         MenuGroup(
           header: 'memory_budget'.tr(),
+          helpTerm: 'memorybook-budget',
           items: [
             MenuRangeItem(
               label: 'memory_books_max_entries_prompt'.tr(),
@@ -74,6 +75,7 @@ class MemorySelectionSections {
         ),
         MenuGroup(
           header: 'memory_packing_mode'.tr(),
+          helpTerm: 'memorybook-budget',
           items: [
             MenuSwitchItem(
               label: 'memory_excerpting_enabled'.tr(),
@@ -183,6 +185,7 @@ class MemorySelectionSections {
               ),
             MenuSwitchItem(
               label: 'memory_selector_recency'.tr(),
+              helpTerm: 'memorybook-retrieval',
               description: 'memory_selector_recency_desc'.tr(),
               value: draft.recencyBoost,
               onChanged: (v) {
@@ -227,6 +230,7 @@ class MemorySelectionSections {
               ),
             MenuSwitchItem(
               label: 'memory_selector_exclude_visible'.tr(),
+              helpTerm: 'memorybook-retrieval',
               description: 'memory_selector_exclude_visible_desc'.tr(),
               value: draft.sourceWindowExclusion,
               onChanged: (v) {
@@ -247,6 +251,7 @@ class MemorySelectionSections {
         ),
         MenuGroup(
           header: 'memory_selector_query_section'.tr(),
+          helpTerm: 'memorybook-retrieval',
           items: [
             MenuSwitchItem(
               label: 'memory_selector_query_assistant'.tr(),

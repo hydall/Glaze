@@ -39,6 +39,21 @@ void main() {
     }
   });
 
+  test('every help button in the code opens a term that exists', () {
+    // A `helpTerm` naming a term that was renamed or never written opens the
+    // glossary on nothing: the reader taps "?" and gets no article.
+    final pattern = RegExp(r"(?:helpTerm|HelpTip\(term):\s*'([a-z0-9-]+)'");
+    final dangling = <String>[];
+    for (final file in Directory('lib').listSync(recursive: true)) {
+      if (file is! File || !file.path.endsWith('.dart')) continue;
+      for (final match in pattern.allMatches(file.readAsStringSync())) {
+        final term = match.group(1)!;
+        if (!en.termIds.contains(term)) dangling.add('${file.path}: $term');
+      }
+    }
+    expect(dangling, isEmpty);
+  });
+
   test('a term sits under the same categories in both languages', () {
     // The two files had drifted: EN cross-listed `chat-session` and
     // `connections` under Characters as well as Chat, and filed
