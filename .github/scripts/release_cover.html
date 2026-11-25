@@ -1,0 +1,66 @@
+<!doctype html>
+<!--
+  Link-preview cover of a release article (og.png, 1200×630), rendered by
+  headless Chrome in release_article.py. The {{…}} fields are filled in there,
+  already HTML-escaped. Paths are relative to site/articles/<slug>/, where the
+  filled copy is written for the screenshot and removed afterwards.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: Inter; src: url('../../assets/fonts/InterVariable.ttf'); font-weight: 100 900; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    font-family: Inter, sans-serif;
+    color: #ECECEE;
+    background:
+      radial-gradient(900px 520px at 0% 0%, rgba(196, 42, 74, 0.30), transparent 60%),
+      radial-gradient(700px 420px at 100% 100%, rgba(196, 42, 74, 0.16), transparent 60%),
+      #19191A;
+    padding: 84px 80px 56px;
+    display: flex;
+    flex-direction: column;
+  }
+  .brand { display: flex; align-items: center; gap: 22px; }
+  .brand img { width: 44px; height: 44px; }
+  .brand b { font-size: 26px; font-weight: 700; letter-spacing: -0.4px; }
+  .pill {
+    font-size: 20px; font-weight: 600; color: #E0566F;
+    padding: 9px 18px; border-radius: 999px;
+    background: rgba(196, 42, 74, 0.16); border: 1px solid rgba(224, 86, 111, 0.35);
+  }
+  h1 {
+    margin-top: 96px;
+    font-size: 96px; font-weight: 800; letter-spacing: -4px; line-height: 1;
+  }
+  h1 span { color: #E0566F; }
+  p.lead {
+    margin-top: 26px; max-width: 980px;
+    font-size: 24px; line-height: 1.5; color: #A3A3A8;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  footer { margin-top: auto; display: flex; align-items: center; font-size: 22px; color: #A3A3A8; }
+  footer img { width: 50px; height: 50px; border-radius: 50%; border: 2px solid #E0566F; object-fit: cover; }
+  footer b { margin-left: 16px; color: #ECECEE; font-weight: 600; }
+  footer .date { margin-left: 8px; }
+  footer .site { margin-left: auto; }
+</style>
+</head>
+<body>
+  <div class="brand">
+    <img src="../../assets/img/glaze.svg" alt="">
+    <b>Glaze</b>
+    <span class="pill">Changelog</span>
+  </div>
+  <h1>Glaze <span>{{VERSION}}</span></h1>
+  <p class="lead">{{LEAD}}</p>
+  <footer>
+    <img src="../../assets/img/{{AVATAR}}" alt="">
+    <b>{{AUTHOR}}</b>
+    <span class="date">· {{DATE}}</span>
+    <span class="site">hydall.github.io/Glaze</span>
+  </footer>
+</body>
+</html>

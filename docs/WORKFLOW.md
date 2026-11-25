@@ -219,6 +219,31 @@ the baseline for the "commits since last build" list in the next announcement.
 The developer DMs deliberately do not move it — an internal share is not an
 announcement.
 
+## Release article
+
+Once *Build Release (Publish)* finishes on `main`,
+`.github/workflows/release-article.yml` announces the release:
+
+- `.github/scripts/release_article.py` collects the PRs since the previous
+  stable release (with their descriptions) and has the DeepSeek model the
+  bug-triage bot uses write the article in Russian and English, in the style of
+  the previous one. It writes `site/articles/<version>.{ru,en}.md`, the
+  link-preview page with its cover (`og.png`, rendered by headless Chrome from
+  `.github/scripts/release_cover.html`), the roadmap entry and the download
+  fallback in `site/assets/data.js`.
+- The article is committed straight to `main` — the site only lives there — and
+  the Pages deploy is dispatched and awaited.
+- The link then goes to the Telegram group of the build posts and to the
+  Discord channel behind the `DISCORD_RELEASE_WEBHOOK` secret. The variable
+  `RELEASE_POST_LANG` picks the language of the posts: `ru` (default), `en`
+  or `both`.
+- It runs once per release. Pre-releases get nothing. To fix an article, edit
+  the files on `main`; to post the link again, run the workflow by hand with the
+  release tag.
+
+The text is the model's: read the article after a release and correct it on
+`main` if it got something wrong.
+
 ## Trello board
 
 - **Board URL:** https://trello.com/b/jRUaax0b/glazeflutter
