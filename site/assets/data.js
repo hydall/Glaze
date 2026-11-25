@@ -481,6 +481,8 @@ window.GLAZE = {
   // Who writes the articles: the name shown, an avatar in img/ and a link.
   authors: {
     hydall: { name: 'hydall', img: 'hydall.jpg', url: 'https://github.com/hydall' },
+    // Release articles written by .github/workflows/release-article.yml.
+    ai: { name: 'AI Generated', img: 'glaze.svg', url: 'https://github.com/hydall/Glaze/blob/main/.github/workflows/release-article.yml' },
   },
 
   // ── Info ───────────────────────────────────────────────────────────────────
@@ -604,7 +606,7 @@ window.GLAZE = {
       slug: '26.11.1',
       kind: 'changelog',
       date: '2026-11-25',
-      author: 'hydall',
+      author: 'ai',
       langs: ['ru', 'en'],
       download: 'v26.11.1',
       title: { ru: 'Glaze 26.11.1', en: 'Glaze 26.11.1' },

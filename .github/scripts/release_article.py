@@ -387,10 +387,11 @@ def reference_article(site: Path) -> dict[str, str]:
     return ref
 
 
-def author_avatar(site: Path, author: str) -> str:
+def author_info(site: Path, author: str) -> tuple[str, str]:
+    """(display name, avatar file) of a data.js `authors` key."""
     data = (site / "assets" / "data.js").read_text(encoding="utf-8")
-    m = re.search(rf"\b{re.escape(author)}: \{{[^}}]*img: '([^']+)'", data)
-    return m.group(1) if m else "glaze.svg"
+    m = re.search(rf"\b{re.escape(author)}: \{{ name: '([^']+)', img: '([^']+)'", data)
+    return (m.group(1), m.group(2)) if m else (author, "glaze.svg")
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
@@ -401,7 +402,8 @@ def main() -> None:
     ap.add_argument("--tag", required=True)
     ap.add_argument("--prev-tag")
     ap.add_argument("--date", default=dt.date.today().isoformat())
-    ap.add_argument("--author", default="hydall")
+    # Key in data.js `authors`; generated articles are signed "AI Generated".
+    ap.add_argument("--author", default="ai")
     ap.add_argument("--site", default="site", type=Path)
     ap.add_argument("--assets", type=Path, help="JSON list of {name, size}")
     ap.add_argument("--announce-out", type=Path, required=True)
@@ -440,10 +442,10 @@ def main() -> None:
         path.write_text(article["body"][lang], encoding="utf-8")
     page_dir = site / "articles" / version
     page_dir.mkdir(parents=True, exist_ok=True)
+    author_name, avatar = author_info(site, args.author)
     (page_dir / "index.html").write_text(
-        preview_page(version, args.date, args.author, article["lead"]["en"]), encoding="utf-8")
-    render_cover(page_dir, version, args.date, args.author,
-                 author_avatar(site, args.author), article["lead"]["en"])
+        preview_page(version, args.date, author_name, article["lead"]["en"]), encoding="utf-8")
+    render_cover(page_dir, version, args.date, author_name, avatar, article["lead"]["en"])
 
     write_announcement(args.announce_out, version, article["lead"], article["new"])
     print(f"release_article: wrote the {version} article")
