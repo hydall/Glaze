@@ -208,9 +208,9 @@ announces it (started by `auto-release.yml` for its releases, by its own
   fallback in `site/assets/data.js`.
 - The article is committed straight to `main` and the Pages deploy is
   dispatched and awaited.
-- Then `.github/scripts/post_release.sh` posts to the Telegram channel
-  (`TG_RELEASE_CHAT_ID`, the bot must be an admin there) and the Discord channel
-  (`DISCORD_RELEASE_WEBHOOK`):
+- Then `.github/scripts/post_release.sh` posts to the Telegram channel in
+  Russian (`TG_RELEASE_CHAT_ID`, the bot must be an admin there) and to the
+  Discord channel in English (`DISCORD_RELEASE_WEBHOOK`):
 
   ```
   **Glaze** `26.11.1`
@@ -222,7 +222,18 @@ announces it (started by `auto-release.yml` for its releases, by its own
   (за исключением изменений за последние 24 часа)   ← auto-releases only
   ```
 
-  In Discord the text goes in an embed with the article's cover, and the
+  ```
+  **Glaze** `26.11.1`
+
+  DOWNLOAD                     → the site's download page
+  RELEASE NOTES                → the article, whose card shows under the post
+
+  This release was made automatically from the main branch on GitHub
+  (leaving out the changes of the last 24 hours)    ← auto-releases only
+  ```
+
+  Both link to the same pages: the site sends Russian readers on to its Russian
+  page by itself. In Discord the text goes in an embed with the article's cover, and the
   message body pings the release role (`DISCORD_ROLE_ID` in
   `post_release.sh`, overridable by the env var of the same name).
 - It runs once per release. Pre-releases get nothing. To fix an article, edit
