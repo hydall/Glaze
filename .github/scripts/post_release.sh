@@ -10,6 +10,9 @@
 #   Релиз был сделан автоматически на основе ветки main с GitHub
 #   (за исключением изменений за последние 24 часа)        — only when AUTO=true
 #
+# In Discord the text is an embed with the article's cover, and the message
+# body pings the release role.
+#
 # Used by .github/workflows/release-article.yml once the article is deployed.
 #
 # Environment:
@@ -19,6 +22,8 @@
 #   TG_CHAT          Telegram channel: @username or numeric -100… id
 #   TG_TOPIC         message thread id, only for a forum group
 #   DISCORD_WEBHOOK  Discord channel webhook URL
+#   DISCORD_ROLE_ID  role pinged in the Discord post (default: the release
+#                    announcements role); empty = no ping
 #   SITE_URL         default https://hydall.github.io/Glaze
 #
 # A target with no credentials is skipped with a warning; a target that rejects
@@ -56,14 +61,21 @@ else
 fi
 
 # ── Discord ──────────────────────────────────────────────────────────────────
+# An embed carrying the same text, with the article's cover as its picture.
+# The role ping goes in the message body: a mention inside an embed notifies
+# nobody.
 if [ -z "${DISCORD_WEBHOOK:-}" ]; then
   echo "::warning::DISCORD_RELEASE_WEBHOOK is not set, Discord skipped."
 else
-  # <…> keeps the download link from drawing a card of its own: only the
-  # article's card shows.
-  content="**Glaze** \`$VERSION\`"$'\n\n'"[СКАЧАТЬ](<$DOWNLOAD_URL>)"$'\n\n'"[СТАТЬЯ С ОПИСАНИЕМ РЕЛИЗА]($ARTICLE_URL)"
-  [ "${AUTO:-false}" = "true" ] && content="$content"$'\n\n'"$AUTO_LINE"
-  payload=$(jq -n --arg c "$content" '{content: $c, username: "Glaze", allowed_mentions: {parse: []}}')
+  role="${DISCORD_ROLE_ID:-1485034784135708734}"
+  desc="**Glaze** \`$VERSION\`"$'\n\n'"[СКАЧАТЬ]($DOWNLOAD_URL)"$'\n\n'"[СТАТЬЯ С ОПИСАНИЕМ РЕЛИЗА]($ARTICLE_URL)"
+  [ "${AUTO:-false}" = "true" ] && desc="$desc"$'\n\n'"$AUTO_LINE"
+  payload=$(jq -n --arg role "$role" --arg desc "$desc" --arg url "$ARTICLE_URL" \
+    --arg img "${ARTICLE_URL}og.png" \
+    '{username: "Glaze",
+      content: (if $role == "" then "" else "<@&\($role)>" end),
+      allowed_mentions: {parse: [], roles: (if $role == "" then [] else [$role] end)},
+      embeds: [{description: $desc, url: $url, color: 12855882, image: {url: $img}}]}')
   out=$(mktemp)
   code=$(curl -sS -o "$out" -w '%{http_code}' -X POST "$DISCORD_WEBHOOK?wait=true" \
     -H 'Content-Type: application/json' -d "$payload")
