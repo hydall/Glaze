@@ -39,7 +39,8 @@ class BlockImageRenderer {
   final StreamingBlockPublisher publishStreamingBlockContent;
 
   /// Whether [content] has anything for this renderer to do.
-  static bool hasWork(String content) => ImageTagMarkup.hasImageGenTags(content);
+  static bool hasWork(String content) =>
+      ImageTagMarkup.hasImageGenTags(content);
 
   /// Returns [sourceContent] with its image tags resolved, or unchanged when
   /// there were none.
@@ -92,7 +93,11 @@ class BlockImageRenderer {
         formatError(e),
       );
     } catch (e) {
-      return ImageTagMarkup.replaceTagWithError(sourceContent, 0, formatError(e));
+      return ImageTagMarkup.replaceTagWithError(
+        sourceContent,
+        0,
+        formatError(e),
+      );
     }
   }
 
@@ -119,7 +124,9 @@ class BlockImageRenderer {
       content: pending,
       status: BlockRunStatus.running,
     );
-    ref.read(infoBlocksProvider(context.sessionId).notifier).addOrReplace(running);
+    ref
+        .read(infoBlocksProvider(context.sessionId).notifier)
+        .addOrReplace(running);
 
     final drawn = await render(context: context, sourceContent: pending);
 

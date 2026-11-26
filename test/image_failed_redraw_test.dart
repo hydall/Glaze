@@ -6,7 +6,10 @@ import 'package:glaze_flutter/features/image_gen/services/image_tag_markup.dart'
 void main() {
   const instruction = '{"prompt":"cat"}';
   final finished = ImageTagMarkup.encodeResultElement(
-    const ImageBlockPayload(paths: ['generated/a.png'], instruction: instruction),
+    const ImageBlockPayload(
+      paths: ['generated/a.png'],
+      instruction: instruction,
+    ),
   );
 
   String redrawFailed(String text, int blockIndex, String error) {
@@ -40,7 +43,10 @@ void main() {
 
   test('restores only the block that failed', () {
     final second = ImageTagMarkup.encodeResultElement(
-      const ImageBlockPayload(paths: ['generated/b.png'], instruction: instruction),
+      const ImageBlockPayload(
+        paths: ['generated/b.png'],
+        instruction: instruction,
+      ),
     );
     final before = '$finished text $second';
     final newSecond = ImageTagMarkup.encodeResultElement(
