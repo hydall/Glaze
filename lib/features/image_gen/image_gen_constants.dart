@@ -636,9 +636,18 @@ class NovelAIConstants {
   static bool _skipsNsfwGuard(String? model) =>
       normalizeModel(model).toLowerCase().contains('curated');
 
-  /// Precise Reference (Director Tools) images accepted per request. Every
-  /// reference adds 5 Anlas to the cost of each image, on every plan.
-  static const int maxReferences = 4;
+  /// Precise Reference (Director Tools) images accepted per request, as on
+  /// NovelAI's site.
+  static const int maxReferences = 16;
+
+  /// Anlas every Precise Reference adds to each image, on every plan.
+  static const int referenceAnlas = 5;
+
+  /// Opus generates without Anlas within all of these: an area of at most
+  /// 1024x1024, 28 steps or fewer, one image per request (Glaze always asks
+  /// for one).
+  static const int freeMaxPixels = 1024 * 1024;
+  static const int freeMaxSteps = 28;
 
   /// Precise Reference types, sent as the reference's `base_caption`
   /// (https://docs.novelai.net/en/image/precisereference/). Outfit

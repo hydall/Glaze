@@ -31,6 +31,7 @@ import 'comfyui_fields.dart';
 import 'comfyui_workflow_sheet.dart';
 import 'connection_fields.dart';
 import 'model_fields.dart';
+import 'novelai_anlas_hero.dart';
 import 'novelai_fields.dart';
 import 'novelai_reference_fields.dart';
 import 'openrouter_fields.dart';
@@ -281,6 +282,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                 child: GlazeErrorBlock(message: _modelFetchError),
               ),
+            if (s.apiType == ImageGenApiType.novelai)
+              NovelAiAnlasHero(settings: s),
             MenuGroup(
               header: 'imggen_connection'.tr(),
               items: _buildConnectionFields(s),

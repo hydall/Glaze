@@ -1404,7 +1404,11 @@ Fidelity on V4.5 or "Prefer same outfit" on V5; a library entry can override
 the type, so character and style references mix. V4.5 references are fitted on
 black into one of three canvases, V5 ones cut to one of 97 sizes with
 transparency kept, both following NovelAI's site as ported from
-[NovelAI-Krita-plugin](https://github.com/Guppy779/NovelAI-Krita-plugin).
+[NovelAI-Krita-plugin](https://github.com/Guppy779/NovelAI-Krita-plugin). Up to 16
+references go per request, 5 Anlas each on every plan. The NovelAI settings
+open with an Anlas hero card: the balance, plan and Opus V5 allowance read
+from `GET /user/subscription` on the image host, and what the next image will
+cost with the current settings (Opus is free within 1024x1024 and 28 steps).
 
 Protocol and capability tables are ported from
 [sillyimages](https://github.com/0xl0cal/sillyimages).
