@@ -9,21 +9,21 @@ window.GLAZE = {
 
   // Shown until the GitHub API answers (or when it is rate-limited).
   fallbackRelease: {
-    tag: 'v26.11.1',
-    date: '2026-11-25',
+    tag: 'v26.11.2',
+    date: '2026-11-26',
     assets: [
-      { name: 'v26.11.1-arm64-v8a.apk', size: 58171974 },
-      { name: 'v26.11.1-armeabi-v7a.apk', size: 57364152 },
-      { name: 'v26.11.1-linux.pkg.tar.zst', size: 26751459 },
-      { name: 'v26.11.1-linux.tar.zst', size: 25640731 },
-      { name: 'v26.11.1-windows-setup.exe', size: 42839528 },
-      { name: 'v26.11.1-windows.zip', size: 30441380 },
-      { name: 'v26.11.1.apk', size: 107399755 },
-      { name: 'v26.11.1.ipa', size: 27010385 },
+      { name: 'v26.11.2-arm64-v8a.apk', size: 58238002 },
+      { name: 'v26.11.2-armeabi-v7a.apk', size: 57430184 },
+      { name: 'v26.11.2-linux.pkg.tar.zst', size: 26772671 },
+      { name: 'v26.11.2-linux.tar.zst', size: 25661113 },
+      { name: 'v26.11.2-windows-setup.exe', size: 42856956 },
+      { name: 'v26.11.2-windows.zip', size: 30458874 },
+      { name: 'v26.11.2.apk', size: 107531323 },
+      { name: 'v26.11.2.ipa', size: 27037171 },
     ],
   },
 
-  devVersion: '26.11.1',
+  devVersion: '26.11.2',
 
   // Where the Download page's Nightly channel looks for builds.
   nightly: { workflow: 'build-branch.yml', branch: 'nightly' },
@@ -138,7 +138,7 @@ window.GLAZE = {
       },
       dl_all: 'Все релизы',
       dl_loading: 'Загружаем данные релиза…',
-      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v26.11.1.',
+      dl_api_failed: 'Не удалось связаться с GitHub. Показаны ссылки на v26.11.2.',
       dl_missing: 'В этом релизе нет',
       dl_how: {
         android: 'Скачайте APK и откройте его. Разрешите установку из этого источника, если система спросит. Есть универсальная сборка, а также отдельные под arm64 и arm32.',
@@ -290,7 +290,7 @@ window.GLAZE = {
       },
       dl_all: 'All releases',
       dl_loading: 'Loading release data…',
-      dl_api_failed: 'Could not reach GitHub. Showing links for v26.11.1.',
+      dl_api_failed: 'Could not reach GitHub. Showing links for v26.11.2.',
       dl_missing: 'Not in this release',
       dl_how: {
         android: 'Download the APK and open it. Allow installs from this source if the system asks. There is a universal build, plus separate arm64 and arm32 ones.',
@@ -603,6 +603,19 @@ window.GLAZE = {
   // languages it is written in; any other shows the first one with a notice.
   articles: [
     {
+      slug: '26.11.2',
+      kind: 'changelog',
+      date: '2026-11-26',
+      author: 'ai',
+      langs: ['ru', 'en'],
+      download: 'v26.11.2',
+      title: { ru: 'Glaze 26.11.2', en: 'Glaze 26.11.2' },
+      lead: {
+        ru: 'На экране эмбеддингов можно пересобрать индекс только для выбранных источников, в генерации картинок NovelAI появились настройки Precise Reference для V4.5 и V5, а перетаскивание по редактируемому сообщению снова плавно прокручивает чат.',
+        en: 'On the embeddings screen you can rebuild the index for selected sources only, NovelAI image generation gets Precise Reference settings for V4.5 and V5, and dragging over the message being edited scrolls the chat smoothly again.',
+      },
+    },
+    {
       slug: '26.11.1',
       kind: 'changelog',
       date: '2026-11-25',
@@ -761,9 +774,47 @@ window.GLAZE = {
       ],
     },
     {
+      version: '26.11.2',
+      date: '2026-11-26',
+      status: 'latest',
+      tag: 'v26.11.2',
+      article: '26.11.2',
+      title: { ru: 'Эмбеддинги, NovelAI и прокрутка', en: 'Embeddings, NovelAI and scrolling' },
+      groups: [
+        {
+          title: { ru: 'Новое', en: 'New' },
+          items: {
+            ru: [
+              'на экране эмбеддингов можно пересобрать индекс **выбранных источников**',
+              'в настройках картинок NovelAI для V4.5 и V5 появился раздел **Precise Reference**: тип референса, `Strength` и `Fidelity` (на V5 — `Prefer same outfit`)',
+              'у каждой записи библиотеки референсов можно выбрать **свой тип**, а недоступный для модели тип откатывается к типу по умолчанию',
+              'референсные картинки подгоняются под ближайший холст или размер: V4.5 — по соотношению сторон, V5 — под ближайший поддерживаемый размер',
+            ],
+            en: [
+              'on the embeddings screen you can rebuild the index for **selected sources**',
+              'NovelAI image settings for V4.5 and V5 get a **Precise Reference** section: reference type, `Strength` and `Fidelity` (on V5 — `Prefer same outfit`)',
+              'each reference library entry can pick **its own type**, and a type the model does not offer falls back to the default',
+              'reference images fit the closest canvas or size: V4.5 by aspect ratio, V5 to the closest supported size',
+            ],
+          },
+        },
+        {
+          title: { ru: 'Исправления', en: 'Fixes' },
+          items: {
+            ru: [
+              'перетаскивание по редактируемому сообщению больше не прокручивает чат рывками и не уводит его в другую сторону: он идёт за пальцем так же, как над остальными сообщениями',
+            ],
+            en: [
+              'dragging over the message being edited no longer scrolls the chat jerkily or the wrong way: it follows the finger like a drag over other messages',
+            ],
+          },
+        },
+      ],
+    },
+    {
       version: '26.11.1',
       date: '2026-11-25',
-      status: 'latest',
+      status: 'released',
       tag: 'v26.11.1',
       article: '26.11.1',
       title: { ru: 'Саммари, списки и векторы', en: 'Summary, lists and vectors' },
