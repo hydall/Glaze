@@ -74,4 +74,54 @@ void main() {
     expect(restored.text, after);
     expect(restored.errors, isEmpty);
   });
+
+  group('failedDrawErrors', () {
+    test('reports a block that failed again after an earlier failure', () {
+      final before = ImageTagMarkup.errorTag({
+        'error': 'HTTP 429',
+        'instruction': instruction,
+      });
+      final pending = ImageTagMarkup.resetImageBlockAt(before, 0);
+      final drawn = ImageTagMarkup.replaceTagWithError(pending, 0, 'HTTP 429');
+      // The card looks the same as before; the failure is still reported.
+      expect(ImageTagMarkup.failedDrawErrors(pending, drawn), ['HTTP 429']);
+    });
+
+    test('reports a failed redraw of a finished picture', () {
+      final pending = ImageTagMarkup.resetImageBlockAt(finished, 0);
+      final drawn = ImageTagMarkup.replaceTagWithError(pending, 0, 'boom');
+      expect(ImageTagMarkup.failedDrawErrors(pending, drawn), ['boom']);
+    });
+
+    test('ignores blocks that were not asked for or succeeded', () {
+      final failed = ImageTagMarkup.errorTag({
+        'error': 'old',
+        'instruction': instruction,
+      });
+      final text = '$finished $failed';
+      expect(ImageTagMarkup.failedDrawErrors(text, text), isEmpty);
+      final pending = ImageTagMarkup.resetImageBlockAt(text, 1);
+      final drawn = ImageTagMarkup.replaceTagWithResult(
+        pending,
+        0,
+        'generated/new.png',
+      );
+      expect(ImageTagMarkup.failedDrawErrors(pending, drawn), isEmpty);
+    });
+  });
+
+  test('a prompt with ] survives a reset of its error card', () {
+    const weighted = '{"prompt":"girl, [[masterpiece]], {smile}"}';
+    final element =
+        "Text <img data-iig-instruction='$weighted' src=\"[IMG:GEN]\"> more";
+    final failed = ImageTagMarkup.replaceTagWithError(element, 0, 'HTTP 429');
+    final pending = ImageTagMarkup.resetImageBlockAt(failed, 0);
+
+    expect(ImageTagMarkup.extractImageGenInstructions(pending), [
+      {'prompt': 'girl, [[masterpiece]], {smile}'},
+    ]);
+    expect(pending, startsWith('Text '));
+    expect(pending, endsWith(' more'));
+    expect(ImageTagMarkup.scanImageBlocks(pending), hasLength(1));
+  });
 }

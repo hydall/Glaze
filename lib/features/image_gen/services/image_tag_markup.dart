@@ -708,7 +708,11 @@ class ImageTagMarkup {
   }) {
     if (payload.presentation.isEmpty && !asElement) {
       final encoded = payload.encodePending();
-      return encoded.isEmpty ? '[IMG:GEN]' : '[IMG:GEN:$encoded]';
+      if (encoded.isEmpty) return '[IMG:GEN]';
+      // A `]` would end the bracket tag early and cut the prompt short (a
+      // NovelAI prompt weights tags with `[[…]]`), so such a payload keeps the
+      // element spelling, where the instruction sits in a quoted attribute.
+      if (!encoded.contains(']')) return '[IMG:GEN:$encoded]';
     }
     final buffer = StringBuffer('<img $instructionAttribute=')
       ..write("'${_escapeAttribute(payload.instruction, "'")}'");
@@ -1027,6 +1031,25 @@ class ImageTagMarkup {
       );
     }
     return (text: result, errors: errors.reversed.toList());
+  }
+
+  /// The error text of every block that was waiting for its picture in
+  /// [pending] and came back as an error card in [drawn], in document order.
+  ///
+  /// This is what a redraw reports: the failure of a block that was an error
+  /// card before is a failure too, even though the card it leaves looks the
+  /// same as the one the reader tapped. When the counts differ the texts are
+  /// not comparable and nothing is reported.
+  static List<String> failedDrawErrors(String pending, String drawn) {
+    final asked = scanImageBlocks(pending);
+    final current = scanImageBlocks(drawn);
+    if (asked.length != current.length) return const [];
+    return [
+      for (var i = 0; i < current.length; i++)
+        if (asked[i].kind == ImageBlockKind.pending &&
+            current[i].kind == ImageBlockKind.error)
+          _errorTextOf(drawn.substring(current[i].start, current[i].end)),
+    ];
   }
 
   /// The `error` field of one `[IMG:ERROR:…]` card, or empty when it has none.

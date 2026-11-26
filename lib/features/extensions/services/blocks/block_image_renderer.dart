@@ -128,13 +128,15 @@ class BlockImageRenderer {
       return running.copyWith(status: BlockRunStatus.stopped);
     }
 
-    // A picture that was already there stays when its redraw fails; the
-    // error goes to a toast instead of replacing it (issue #825).
-    final (text: rendered, :errors) = ImageTagMarkup.restoreFailedRedraws(
+    // A picture that was already there stays when its redraw fails (issue
+    // #825). Every failed picture goes to a toast: one that was an error card
+    // before comes back as an identical card, and without the toast the tap
+    // looks like it did nothing.
+    final (text: rendered, errors: _) = ImageTagMarkup.restoreFailedRedraws(
       existing,
       drawn,
     );
-    for (final error in errors) {
+    for (final error in ImageTagMarkup.failedDrawErrors(pending, drawn)) {
       GlazeToast.showWithoutContext(
         error.isEmpty ? 'Image gen failed' : 'Image gen: $error',
         isError: true,
