@@ -5,6 +5,7 @@
 /// labels sent alongside reference images.
 library;
 
+import '../image_gen_capabilities.dart';
 import '../image_gen_models.dart';
 
 final _styleBlockRegex = RegExp(
@@ -108,12 +109,15 @@ String buildAvatarDescriptionsBlock(List<Map<String, String>> references) {
 /// only characters whose avatar is *not* among [references] are described —
 /// the ones that are sent already carry their description next to the image.
 /// [CharacterDescriptionsMode.characterPrompt] describes both regardless and
-/// emits NovelAI character-prompt lines, persona first.
+/// emits NovelAI character-prompt lines, persona first. [plain] drops the
+/// heading and the `{{char}}:` labels in "as is" mode, for a model that reads
+/// the prompt as tags and would draw them.
 String buildCharacterDescriptionPromptBlock({
   required CharacterDescriptionsMode mode,
   required List<Map<String, String>> references,
   String charDescription = '',
   String userDescription = '',
+  bool plain = false,
 }) {
   if (mode == CharacterDescriptionsMode.none) return '';
 
@@ -136,6 +140,10 @@ String buildCharacterDescriptionPromptBlock({
       char,
     ].where((line) => line.isNotEmpty).map((line) => '\\| $line');
     return lines.join('\n');
+  }
+
+  if (plain) {
+    return [char, user].where((line) => line.isNotEmpty).join('\n');
   }
 
   final lines = <String>[
@@ -176,7 +184,9 @@ String withParticipantNames(
       );
 }
 
-/// Assembles style block + prompt + reference descriptions.
+/// Assembles style block + prompt + reference descriptions. The descriptions
+/// are left out for a provider that would draw them
+/// ([providerReadsReferenceText]).
 /// [wrapStyle] false keeps the style as a plain prefix — see
 /// [injectPlainStyle].
 String buildFinalGenerationPrompt({
@@ -190,7 +200,7 @@ String buildFinalGenerationPrompt({
   var fullPrompt = wrapStyle
       ? injectStyleBlock(prompt, style)
       : injectPlainStyle(prompt, style);
-  if (settings.sendRefDescriptions) {
+  if (settings.sendRefDescriptions && providerReadsReferenceText(settings)) {
     fullPrompt = appendPromptBlock(
       fullPrompt,
       buildReferenceDescriptionsBlock(references),
@@ -204,13 +214,14 @@ String buildFinalGenerationPrompt({
 }
 
 /// Prefixes the critical "copy these appearances" instruction when at least
-/// one reference image is attached and the instruction is enabled.
+/// one reference image is attached, the instruction is enabled and the
+/// provider reads it ([providerReadsReferenceText]).
 String withReferenceInstruction(
   String prompt,
   ImageGenSettings settings, {
   required bool hasReferences,
 }) {
-  if (!hasReferences) return prompt;
+  if (!hasReferences || !providerReadsReferenceText(settings)) return prompt;
   final instruction = settings.effectiveRefInstruction;
   if (instruction.isEmpty) return prompt;
   return '$instruction\n\n$prompt';

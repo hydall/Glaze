@@ -1409,6 +1409,13 @@ references go per request, 5 Anlas each on every plan. The NovelAI settings
 open with an Anlas hero card: the balance, plan and Opus V5 allowance read
 from `GET /user/subscription` on the image host, and what the next image will
 cost with the current settings (Opus is free within 1024x1024 and 28 steps).
+NovelAI gets none of the prose written about references for chat-style image
+models (reference and avatar captions, the "copy these appearances"
+instruction) and gets appearance text as bare lines: it reads the prompt as
+tags and would draw that text into the image (`providerReadsReferenceText`).
+In the sheet every reference setting sits in one References group, split into
+the character picker, the pictures sent as images and the text added to the
+prompt.
 
 Protocol and capability tables are ported from
 [sillyimages](https://github.com/0xl0cal/sillyimages).

@@ -250,6 +250,9 @@ class ImageGenReferenceRow extends StatefulWidget {
   final ValueChanged<String>? onNovelAiTypeChanged;
   final List<(String, String)> novelAiTypes;
 
+  /// Hint of the description field; says when the provider does not read it.
+  final String? descriptionHint;
+
   const ImageGenReferenceRow({
     super.key,
     required this.refItem,
@@ -261,6 +264,7 @@ class ImageGenReferenceRow extends StatefulWidget {
     required this.onRemove,
     this.onNovelAiTypeChanged,
     this.novelAiTypes = const [],
+    this.descriptionHint,
   });
 
   @override
@@ -335,12 +339,16 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                '${'imggen_nai_ref_type'.tr()}: ${_novelAiTypeLabel(current)}',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: context.cs.primary,
-                  fontWeight: FontWeight.w500,
+              Flexible(
+                child: Text(
+                  '${'imggen_nai_ref_type'.tr()}: ${_novelAiTypeLabel(current)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: context.cs.primary,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
               Icon(
@@ -361,7 +369,7 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
       child: GlazeTextField(
         controller: _descriptionController,
         onChanged: widget.onDescriptionChanged,
-        hint: 'imggen_ref_description_hint'.tr(),
+        hint: widget.descriptionHint ?? 'imggen_ref_description_hint'.tr(),
         isDense: true,
       ),
     );

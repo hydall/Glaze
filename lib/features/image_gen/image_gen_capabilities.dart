@@ -243,6 +243,20 @@ ImageModelCaps openRouterCapabilities(String? modelId) {
 
 // ───────────────────────── Active provider ─────────────────────────
 
+/// Whether the active provider reads the prose Glaze writes about references:
+/// the reference and avatar descriptions and the "copy these appearances"
+/// instruction. Chat-style image models need it to tell who is in which
+/// picture. NovelAI takes its references natively (Precise Reference) and
+/// reads the prompt as tags, so that text only gets drawn into the image.
+bool providerReadsReferenceText(ImageGenSettings settings) =>
+    settings.apiType != ImageGenApiType.novelai;
+
+/// Whether character appearance text goes into the prompt as bare lines
+/// instead of a "Character descriptions:" block — for NovelAI, which would
+/// draw the heading.
+bool providerTakesPlainAppearanceText(ImageGenSettings settings) =>
+    settings.apiType == ImageGenApiType.novelai;
+
 /// How many reference images the active provider/model accepts per request.
 /// 0 — references are unsupported and the UI hides the reference sections.
 int providerMaxReferences(ImageGenSettings settings) {
