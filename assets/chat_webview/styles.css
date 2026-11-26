@@ -1313,7 +1313,6 @@
   outline: none;
   line-height: 1.6;
   field-sizing: content;
-  overscroll-behavior: contain;
 }
 .edit-textarea:focus { border-color: var(--primary-color, #C42A4A); }
 .message-section.editing .msg-reasoning,

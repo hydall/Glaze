@@ -1855,39 +1855,12 @@ void main() {
       expect(wheelSection, contains('return;'));
     });
 
-    test('touch-drag on textarea scrolls the chat via scrollTopFn', () {
-      // The auto-growing textarea never scrolls itself, so a finger drag must
-      // be forwarded to the chat container instead of being swallowed.
-      expect(
-        editControllerJs,
-        contains("textarea.addEventListener('touchstart'"),
-      );
-      expect(
-        editControllerJs,
-        contains("textarea.addEventListener('touchmove'"),
-      );
-      // touchmove must be passive:false so preventDefault() can suppress the
-      // native caret/selection drag and hand the gesture to the chat scroll.
-      expect(editControllerJs, contains('scrollTopFn(scrollTopFn() - dy)'));
-    });
-
-    test('touch-drag on textarea keeps gliding with inertia after release', () {
-      // The manual scrollTop drive has no native momentum, so releasing the
-      // finger would stop the chat dead. touchend must launch a decaying glide.
-      expect(
-        editControllerJs,
-        contains("textarea.addEventListener('touchend'"),
-      );
-      expect(editControllerJs, contains('requestAnimationFrame(step)'));
-      // Velocity is tracked during the drag and decays each frame.
-      expect(editControllerJs, contains('touchVelocity'));
-      expect(editControllerJs, contains('Math.pow(0.95'));
-      // A fresh touch or a cancel must abort an in-flight glide.
-      expect(editControllerJs, contains('cancelInertia'));
-      expect(
-        editControllerJs,
-        contains("textarea.addEventListener('touchcancel'"),
-      );
+    test('touch-drag on textarea is left to the browser', () {
+      // The textarea never scrolls itself, so a drag over it chains to the
+      // chat natively. A hand-driven scroll on top of that moved the chat
+      // twice and threw it around (test/webview_js/specs/edit_touch_scroll).
+      expect(editControllerJs, isNot(contains("addEventListener('touchmove'")));
+      expect(editControllerJs, isNot(contains("addEventListener('touchend'")));
     });
 
     test(
@@ -2217,13 +2190,17 @@ void main() {
 
   // ─── edit textarea CSS (styles.css) ───────────────────────────────────────
   group('edit textarea CSS (styles.css)', () {
-    test('overscroll-behavior:contain prevents scroll bleed to parent', () {
+    test('the textarea lets a drag chain to the chat', () {
+      final rule = stylessCss.substring(
+        stylessCss.indexOf('.edit-textarea {'),
+        stylessCss.indexOf('}', stylessCss.indexOf('.edit-textarea {')),
+      );
       expect(
-        stylessCss,
-        contains('overscroll-behavior: contain'),
+        rule,
+        isNot(contains('overscroll-behavior')),
         reason:
-            'Without overscroll-behavior:contain, reaching the end of the textarea '
-            'causes the parent chat container to scroll',
+            'The textarea grows to fit and never scrolls itself; containing its '
+            'overscroll stops a touch drag over it from scrolling the chat',
       );
     });
 
