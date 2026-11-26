@@ -245,6 +245,108 @@ void main() {
       expect(params['director_reference_secondary_strength_values'], [2.0]);
     });
 
+    test('sends V5 references with outfit captions and no fidelity', () async {
+      final (server, _, bodies) = await _byteServer(
+        Uint8List.fromList(_zip('image.png', utf8.encode('png'))),
+      );
+      addTearDown(() => server.close(force: true));
+
+      await NovelAIImageProvider().generate(
+        settings: NovelAIImageSettings(
+          apiKey: 'tok',
+          endpoint: _endpoint(server),
+          model: 'nai-diffusion-5-full',
+          referenceType: 'character',
+          referenceSameOutfit: true,
+          referenceStrength: 3.5,
+          referenceFidelity: 0.2,
+        ),
+        prompt: 'Zoe waves',
+        references: const [
+          {'image': 'aW1n'},
+          {'image': 'cG5n', 'novelaiType': 'costume'},
+          {'image': 'anBn', 'novelaiType': 'style'},
+        ],
+      );
+
+      final body = jsonDecode(bodies.single) as Map<String, dynamic>;
+      final params = body['parameters'] as Map<String, dynamic>;
+      final captions = [
+        for (final d in params['director_reference_descriptions'] as List)
+          (d as Map)['caption']['base_caption'],
+      ];
+      expect(captions, ['character_mainoutfit', 'costume', 'style']);
+      expect(params['director_reference_strength_values'], [3.5, 3.5, 3.5]);
+      expect(params['director_reference_secondary_strength_values'], [
+        0.0,
+        0.0,
+        0.0,
+      ]);
+    });
+
+    test(
+      'maps V5 Character & Style without same outfit to anyoutfit',
+      () async {
+        final (server, _, bodies) = await _byteServer(
+          Uint8List.fromList(_zip('image.png', utf8.encode('png'))),
+        );
+        addTearDown(() => server.close(force: true));
+
+        await NovelAIImageProvider().generate(
+          settings: NovelAIImageSettings(
+            apiKey: 'tok',
+            endpoint: _endpoint(server),
+            model: 'nai-diffusion-5-curated',
+            referenceSameOutfit: false,
+          ),
+          prompt: 'Zoe waves',
+          references: const [
+            {'image': 'aW1n'},
+          ],
+        );
+
+        final body = jsonDecode(bodies.single) as Map<String, dynamic>;
+        final params = body['parameters'] as Map<String, dynamic>;
+        final description =
+            (params['director_reference_descriptions'] as List).single as Map;
+        expect(
+          description['caption']['base_caption'],
+          'character&style_anyoutfit',
+        );
+      },
+    );
+
+    test('caps Strength at 1 and drops Outfit on V4.5', () async {
+      final (server, _, bodies) = await _byteServer(
+        Uint8List.fromList(_zip('image.png', utf8.encode('png'))),
+      );
+      addTearDown(() => server.close(force: true));
+
+      await NovelAIImageProvider().generate(
+        settings: NovelAIImageSettings(
+          apiKey: 'tok',
+          endpoint: _endpoint(server),
+          model: 'nai-diffusion-4-5-full',
+          referenceType: 'costume',
+          referenceStrength: 4,
+        ),
+        prompt: 'Zoe waves',
+        references: const [
+          {'image': 'aW1n'},
+          {'image': 'cG5n', 'novelaiType': 'costume'},
+        ],
+      );
+
+      final body = jsonDecode(bodies.single) as Map<String, dynamic>;
+      final params = body['parameters'] as Map<String, dynamic>;
+      final captions = [
+        for (final d in params['director_reference_descriptions'] as List)
+          (d as Map)['caption']['base_caption'],
+      ];
+      expect(captions, ['character&style', 'character&style']);
+      expect(params['director_reference_strength_values'], [1.0, 1.0]);
+    });
+
     test('drops references on models without Director Tools', () async {
       final (server, _, bodies) = await _byteServer(
         Uint8List.fromList(_zip('image.png', utf8.encode('png'))),
@@ -389,9 +491,28 @@ void main() {
       expect(NovelAIConstants.isV4('nai-diffusion-4-5-full'), isTrue);
       expect(NovelAIConstants.isV5('nai-diffusion-5-curated'), isTrue);
       expect(NovelAIConstants.isV4('nai-diffusion-3'), isFalse);
-      expect(NovelAIConstants.supportsReferences('nai-diffusion-4-5-full'), isTrue);
-      expect(NovelAIConstants.supportsReferences('nai-diffusion-5-full'), isFalse);
+      expect(
+        NovelAIConstants.supportsReferences('nai-diffusion-4-5-full'),
+        isTrue,
+      );
+      expect(
+        NovelAIConstants.supportsReferences('nai-diffusion-5-full'),
+        isTrue,
+      );
+      expect(
+        NovelAIConstants.supportsReferences('nai-diffusion-4-full'),
+        isFalse,
+      );
       expect(NovelAIConstants.supportsReferences('nai-diffusion-3'), isFalse);
+      expect(NovelAIConstants.referenceIsCut('nai-diffusion-5-full'), isTrue);
+      expect(
+        NovelAIConstants.referenceSupportsFidelity('nai-diffusion-5-full'),
+        isFalse,
+      );
+      expect(
+        NovelAIConstants.referenceSupportsOutfit('nai-diffusion-4-5-full'),
+        isFalse,
+      );
     });
 
     test('ships the current model ids', () {

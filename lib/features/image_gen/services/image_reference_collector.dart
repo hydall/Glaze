@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
@@ -11,15 +10,17 @@ import '../../../core/utils/platform_paths.dart';
 import '../image_gen_capabilities.dart';
 import '../image_gen_models.dart';
 import 'image_tag_markup.dart';
+import 'novelai_reference_image.dart';
 import 'reference_matcher.dart';
 
 /// Per-provider preprocessing a collected reference needs before it is sent.
 ///
 /// - [none] — send the file bytes as they are.
 /// - [downscaleJpeg] — rout.my rejects oversized JSON, so it is shrunk first.
-/// - [novelAiPad] — NovelAI's Director Tools take only three canvas sizes with
-///   the image fitted and black-padded; a raw avatar is rejected with a 400.
-enum _ReferenceTransform { none, downscaleJpeg, novelAiPad }
+/// - [novelAiPad] — NovelAI V4.5 takes Precise References only at three canvas
+///   sizes with the image fitted and black-padded; a raw avatar is a 400.
+/// - [novelAiCut] — NovelAI V5 takes them cut to one of its 97 sizes.
+enum _ReferenceTransform { none, downscaleJpeg, novelAiPad, novelAiCut }
 
 /// Builds the reference-image list for one generation request.
 ///
@@ -110,10 +111,10 @@ class ImageReferenceCollector {
       if (stripped.isEmpty) continue;
       var image = stripped;
       var mime = _mimeFromDataUrl(ref.imageData);
-      if (transform == _ReferenceTransform.novelAiPad) {
-        final padded = await _padNovelAiBase64(stripped);
-        if (padded != null) {
-          image = padded;
+      if (_isNovelAi(transform)) {
+        final prepared = await _prepareNovelAiBase64(stripped, transform);
+        if (prepared != null) {
+          image = prepared;
           mime = 'image/png';
         }
       }
@@ -155,20 +156,41 @@ class ImageReferenceCollector {
         !isRoutmyGeminiModel(settings.routmyModel)) {
       return _ReferenceTransform.downscaleJpeg;
     }
+    final novelAiModel = settings.novelai.model;
     if (settings.apiType == ImageGenApiType.novelai &&
-        NovelAIConstants.supportsReferences(settings.novelai.model)) {
-      return _ReferenceTransform.novelAiPad;
+        NovelAIConstants.supportsReferences(novelAiModel)) {
+      return NovelAIConstants.referenceIsCut(novelAiModel)
+          ? _ReferenceTransform.novelAiCut
+          : _ReferenceTransform.novelAiPad;
     }
     return _ReferenceTransform.none;
   }
 
-  Future<String?> _padNovelAiBase64(String base64Image) async {
+  static bool _isNovelAi(_ReferenceTransform transform) =>
+      transform == _ReferenceTransform.novelAiPad ||
+      transform == _ReferenceTransform.novelAiCut;
+
+  /// Fits [bytes] for NovelAI V4.5 or V5; null when they cannot be decoded.
+  static Future<Uint8List?> _prepareNovelAi(
+    Uint8List bytes,
+    _ReferenceTransform transform,
+  ) => compute(
+    transform == _ReferenceTransform.novelAiCut
+        ? cutNovelAiReference
+        : padNovelAiReference,
+    bytes,
+  );
+
+  Future<String?> _prepareNovelAiBase64(
+    String base64Image,
+    _ReferenceTransform transform,
+  ) async {
     try {
-      final padded = await compute(
-        padNovelAiReference,
+      final prepared = await _prepareNovelAi(
         base64Decode(base64Image),
+        transform,
       );
-      return padded == null ? null : base64Encode(padded);
+      return prepared == null ? null : base64Encode(prepared);
     } catch (_) {
       return null;
     }
@@ -195,8 +217,9 @@ class ImageReferenceCollector {
               bytes;
           return (base64Encode(resized), 'image/jpeg');
         case _ReferenceTransform.novelAiPad:
-          final padded = await compute(padNovelAiReference, bytes) ?? bytes;
-          return (base64Encode(padded), 'image/png');
+        case _ReferenceTransform.novelAiCut:
+          final prepared = await _prepareNovelAi(bytes, transform) ?? bytes;
+          return (base64Encode(prepared), 'image/png');
       }
     } catch (_) {
       return null;
@@ -244,8 +267,9 @@ class ImageReferenceCollector {
               bytes;
           return (base64Encode(resized), 'image/jpeg');
         case _ReferenceTransform.novelAiPad:
-          final padded = await compute(padNovelAiReference, bytes) ?? bytes;
-          return (base64Encode(padded), 'image/png');
+        case _ReferenceTransform.novelAiCut:
+          final prepared = await _prepareNovelAi(bytes, transform) ?? bytes;
+          return (base64Encode(prepared), 'image/png');
       }
     } catch (_) {
       return null;
@@ -270,49 +294,6 @@ class ImageReferenceCollector {
     if (lower.endsWith('.webp')) return 'image/webp';
     if (lower.endsWith('.gif')) return 'image/gif';
     return 'image/png';
-  }
-}
-
-/// Fits [bytes] inside the NovelAI Character-Reference canvas for its
-/// orientation and re-encodes it as PNG on a black background.
-///
-/// Director Tools accept only 1024x1536, 1536x1024 or 1472x1472 with the image
-/// scaled to fit and black-padded (NovelAI image OpenAPI spec); a raw avatar of
-/// any other size is rejected with a 400. The image is never cropped — the
-/// whole character is the reference. Returns null when the bytes cannot be
-/// decoded, so the caller can fall back to sending them unchanged.
-Uint8List? padNovelAiReference(Uint8List bytes) {
-  try {
-    final src = img.decodeImage(bytes);
-    if (src == null) return null;
-
-    final (canvasWidth, canvasHeight) = NovelAIConstants.referenceCanvas(
-      src.width,
-      src.height,
-    );
-
-    final scale = min(canvasWidth / src.width, canvasHeight / src.height);
-    final targetWidth = (src.width * scale).round().clamp(1, canvasWidth);
-    final targetHeight = (src.height * scale).round().clamp(1, canvasHeight);
-
-    final resized = img.copyResize(
-      src,
-      width: targetWidth,
-      height: targetHeight,
-      interpolation: img.Interpolation.linear,
-    );
-
-    final canvas = img.Image(width: canvasWidth, height: canvasHeight);
-    img.fill(canvas, color: img.ColorRgb8(0, 0, 0));
-    img.compositeImage(
-      canvas,
-      resized,
-      dstX: (canvasWidth - targetWidth) ~/ 2,
-      dstY: (canvasHeight - targetHeight) ~/ 2,
-    );
-    return Uint8List.fromList(img.encodePng(canvas));
-  } catch (_) {
-    return null;
   }
 }
 

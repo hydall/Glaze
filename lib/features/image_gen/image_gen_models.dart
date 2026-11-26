@@ -224,8 +224,11 @@ abstract class NovelAIImageSettings with _$NovelAIImageSettings {
     @Default(true) bool qualityToggle,
     @Default(false) bool varietyBoost,
     // Precise Reference: the type applies to every reference whose library
-    // entry does not pick its own; strength and fidelity apply to all.
+    // entry does not pick its own; the rest applies to all. Outfit,
+    // [referenceSameOutfit] and Strength above 1 are V5 only, Fidelity is
+    // V4.5 only.
     @Default('character&style') String referenceType,
+    @Default(true) bool referenceSameOutfit,
     @Default(1.0) double referenceStrength,
     @Default(1.0) double referenceFidelity,
   }) = _NovelAIImageSettings;

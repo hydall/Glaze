@@ -1398,9 +1398,13 @@ result to what the active model accepts (`providerMaxReferences`). Providers
 that cannot take references at all (AUTOMATIC1111, ComfyUI, `dall-e-3`,
 Naistera `novelai` / `grok-pro`) report 0 and the reference UI is hidden. The
 direct NovelAI provider takes references as Precise Reference (Director Tools)
-images, which only the V4.5 family supports. Its settings pick the default
-reference type (Character, Style or Character & Style), Strength and Fidelity;
-a library entry can override the type, so character and style references mix.
+images on the V4.5 and V5 families. Its settings pick the default reference
+type (Character, Style, Character & Style, and Outfit on V5), Strength, and
+Fidelity on V4.5 or "Prefer same outfit" on V5; a library entry can override
+the type, so character and style references mix. V4.5 references are fitted on
+black into one of three canvases, V5 ones cut to one of 97 sizes with
+transparency kept, both following NovelAI's site as ported from
+[NovelAI-Krita-plugin](https://github.com/Guppy779/NovelAI-Krita-plugin).
 
 Protocol and capability tables are ported from
 [sillyimages](https://github.com/0xl0cal/sillyimages).

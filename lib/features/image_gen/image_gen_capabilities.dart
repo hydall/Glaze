@@ -284,7 +284,7 @@ int providerMaxReferences(ImageGenSettings settings) {
       // txt2img only.
       return 0;
     case ImageGenApiType.novelai:
-      // Character Reference (Director Tools) is V4.5 only.
+      // Precise Reference (Director Tools) exists on V4.5 and V5.
       return NovelAIConstants.supportsReferences(settings.novelai.model)
           ? NovelAIConstants.maxReferences
           : 0;

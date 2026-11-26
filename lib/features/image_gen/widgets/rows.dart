@@ -244,9 +244,11 @@ class ImageGenReferenceRow extends StatefulWidget {
   final VoidCallback onPickImage;
   final VoidCallback onRemove;
 
-  /// Picks the entry's NovelAI Precise Reference type; null hides the picker
-  /// (any provider but NovelAI V4.5). '' follows the provider setting.
+  /// Picks the entry's NovelAI Precise Reference type out of
+  /// [novelAiTypes]; null hides the picker (a provider or model without
+  /// Precise Reference). '' follows the provider setting.
   final ValueChanged<String>? onNovelAiTypeChanged;
+  final List<(String, String)> novelAiTypes;
 
   const ImageGenReferenceRow({
     super.key,
@@ -258,6 +260,7 @@ class ImageGenReferenceRow extends StatefulWidget {
     required this.onPickImage,
     required this.onRemove,
     this.onNovelAiTypeChanged,
+    this.novelAiTypes = const [],
   });
 
   @override
@@ -310,7 +313,11 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
       : novelAiReferenceTypeLabel(id);
 
   Widget _novelAiTypeRow(BuildContext context) {
-    final current = widget.refItem.novelaiType;
+    // A type the model does not offer (Outfit on V4.5) follows the setting.
+    final stored = widget.refItem.novelaiType;
+    final current = widget.novelAiTypes.any((type) => type.$1 == stored)
+        ? stored
+        : '';
     return Padding(
       padding: const EdgeInsets.only(left: 48, bottom: 4),
       child: Align(
@@ -320,10 +327,7 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
           onTap: () => showImageGenOptions<String>(
             context,
             title: 'imggen_nai_ref_type'.tr(),
-            items: [
-              '',
-              for (final (id, _) in NovelAIConstants.referenceTypes) id,
-            ],
+            items: ['', for (final (id, _) in widget.novelAiTypes) id],
             labelBuilder: _novelAiTypeLabel,
             isSelected: (id) => id == current,
             onSelected: widget.onNovelAiTypeChanged!,

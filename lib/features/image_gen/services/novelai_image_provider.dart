@@ -14,7 +14,8 @@ import 'image_gen_http.dart';
 /// response is a ZIP attachment with the generated image; some proxies answer
 /// JSON with a base64 `image` instead, so both are accepted. V4 / V4.5 / V5
 /// models take the structured `v4_prompt` captions, while V3 keeps a plain
-/// `prompt` field. Precise Reference (Director Tools) images are V4.5 only.
+/// `prompt` field. Precise Reference (Director Tools) images are V4.5 and V5
+/// only.
 class NovelAIImageProvider {
   final ImageGenHttp _http = ImageGenHttp();
 
@@ -112,13 +113,14 @@ class NovelAIImageProvider {
 
   /// Attaches Precise Reference (Director Tools) images when the model takes
   /// them. NovelAI wants bare base64 — the collector already strips the data
-  /// URL and pads the image onto an accepted canvas — plus one entry per
+  /// URL and fits the image to the model's sizes — plus one entry per
   /// parallel array.
   ///
   /// The type travels as the reference's `base_caption`: a library entry's
-  /// own `novelaiType`, otherwise the provider setting. Strength goes as is;
-  /// Fidelity goes inverted, as the secondary strength, the way NovelAI's
-  /// client sends it.
+  /// own `novelaiType` when the model offers it, otherwise the provider
+  /// setting; on V5 "Prefer same outfit" picks the caption variant. Strength
+  /// goes as is. Fidelity goes inverted, as the secondary strength, the way
+  /// NovelAI's site sends it; V5 has no Fidelity and is sent 0, as if at 1.
   void _attachReferences(
     Map<String, dynamic> parameters,
     String model,
@@ -132,21 +134,36 @@ class NovelAIImageProvider {
         .toList();
     if (refs.isEmpty) return;
 
-    final defaultType = NovelAIConstants.normalizeReferenceType(
+    final defaultType = NovelAIConstants.effectiveReferenceType(
+      model,
       settings.referenceType,
     );
     final strength = settings.referenceStrength
         .clamp(
           NovelAIConstants.referenceValueMin,
-          NovelAIConstants.referenceValueMax,
+          NovelAIConstants.referenceStrengthMax(model),
         )
         .toDouble();
-    final fidelity = settings.referenceFidelity
-        .clamp(
-          NovelAIConstants.referenceValueMin,
-          NovelAIConstants.referenceValueMax,
-        )
-        .toDouble();
+    final secondary = NovelAIConstants.referenceSupportsFidelity(model)
+        ? 1.0 -
+              settings.referenceFidelity
+                  .clamp(
+                    NovelAIConstants.referenceValueMin,
+                    NovelAIConstants.referenceFidelityMax,
+                  )
+                  .toDouble()
+        : 0.0;
+
+    String caption(Map<String, String> ref) =>
+        NovelAIConstants.referenceCaption(
+          model: model,
+          type: NovelAIConstants.effectiveReferenceType(
+            model,
+            ref['novelaiType'],
+            fallback: defaultType,
+          ),
+          sameOutfit: settings.referenceSameOutfit,
+        );
 
     parameters['director_reference_images'] = [
       for (final ref in refs) ref['image']!,
@@ -154,13 +171,7 @@ class NovelAIImageProvider {
     parameters['director_reference_descriptions'] = [
       for (final ref in refs)
         {
-          'caption': {
-            'base_caption': NovelAIConstants.normalizeReferenceType(
-              ref['novelaiType'],
-              fallback: defaultType,
-            ),
-            'char_captions': <dynamic>[],
-          },
+          'caption': {'base_caption': caption(ref), 'char_captions': <dynamic>[]},
           'legacy_uc': false,
         },
     ];
@@ -170,7 +181,7 @@ class NovelAIImageProvider {
     );
     parameters['director_reference_secondary_strength_values'] = List.filled(
       refs.length,
-      1.0 - fidelity,
+      secondary,
     );
     parameters['director_reference_information_extracted'] = List.filled(
       refs.length,

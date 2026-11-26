@@ -7,6 +7,8 @@
 /// https://github.com/0xl0cal/sillyimages (`src/providers.js`, `src/settings.js`).
 library;
 
+import 'dart:math';
+
 const routmyMaxInjectedReferenceImages = 10;
 
 /// Upper bound on how many reference images any provider is asked to accept in
@@ -634,22 +636,43 @@ class NovelAIConstants {
   static bool _skipsNsfwGuard(String? model) =>
       normalizeModel(model).toLowerCase().contains('curated');
 
-  /// Precise Reference (Director Tools) images accepted per request. The
-  /// feature exists only on the V4.5 family; every reference adds 5 Anlas to
-  /// the cost of each image.
+  /// Precise Reference (Director Tools) images accepted per request. Every
+  /// reference adds 5 Anlas to the cost of each image, on every plan.
   static const int maxReferences = 4;
 
   /// Precise Reference types, sent as the reference's `base_caption`
-  /// (https://docs.novelai.net/en/image/precisereference/).
+  /// (https://docs.novelai.net/en/image/precisereference/). Outfit
+  /// (`costume`) exists on V5 only.
+  ///
+  /// V4.5 and V5 take references differently, as NovelAI's site sends them
+  /// (ported from https://github.com/Guppy779/NovelAI-Krita-plugin):
+  ///
+  /// |                   | V4.5                     | V5                         |
+  /// |-------------------|--------------------------|----------------------------|
+  /// | types             | the three below          | also Outfit, plus "Prefer  |
+  /// |                   |                          | same outfit"               |
+  /// | Strength          | up to 1                  | up to 5                    |
+  /// | Fidelity          | yes                      | no                         |
+  /// | the picture       | fitted on black into one | cut to one of 97 sizes,    |
+  /// |                   | of three sizes           | transparency kept          |
   static const referenceTypeCharacter = 'character';
   static const referenceTypeStyle = 'style';
   static const referenceTypeCharacterStyle = 'character&style';
+  static const referenceTypeOutfit = 'costume';
 
   /// (id, translation key) of every reference type, in NovelAI's UI order.
   static const referenceTypes = [
+    (referenceTypeCharacterStyle, 'imggen_nai_ref_type_character_style'),
     (referenceTypeCharacter, 'imggen_nai_ref_type_character'),
     (referenceTypeStyle, 'imggen_nai_ref_type_style'),
-    (referenceTypeCharacterStyle, 'imggen_nai_ref_type_character_style'),
+    (referenceTypeOutfit, 'imggen_nai_ref_type_outfit'),
+  ];
+
+  /// The reference types [model] offers.
+  static List<(String, String)> referenceTypesFor(String? model) => [
+    for (final type in referenceTypes)
+      if (type.$1 != referenceTypeOutfit || referenceSupportsOutfit(model))
+        type,
   ];
 
   /// [type] when it is a known reference type, otherwise [fallback].
@@ -663,19 +686,97 @@ class NovelAIConstants {
     return fallback;
   }
 
-  /// Bounds of the Strength and Fidelity values. NovelAI's sliders run 0..1,
-  /// but a typed value may go negative to steer away from a reference.
-  static const double referenceValueMin = -1;
-  static const double referenceValueMax = 1;
+  /// [type] when [model] offers it, otherwise [fallback] — an Outfit choice
+  /// saved on V5 does not exist on V4.5.
+  static String effectiveReferenceType(
+    String? model,
+    String? type, {
+    String fallback = referenceTypeCharacterStyle,
+  }) {
+    for (final (id, _) in referenceTypesFor(model)) {
+      if (id == type) return id;
+    }
+    return fallback;
+  }
 
-  /// The canvas a Director Tools reference has to be padded onto, chosen by the
-  /// source orientation. The API accepts only these three sizes with the image
-  /// fitted and black-padded (`image.RequestParameters.director_reference_images`
-  /// in the image OpenAPI spec); any other size is rejected with a 400.
+  /// The `base_caption` sent for a reference [type] on [model].
+  ///
+  /// V5 adds "Prefer same outfit": with it on, Character goes as
+  /// `character_mainoutfit`; with it off, Character & Style goes as
+  /// `character&style_anyoutfit`. V4.5 knows only the plain captions.
+  static String referenceCaption({
+    required String? model,
+    required String type,
+    required bool sameOutfit,
+  }) {
+    if (!referenceSupportsOutfit(model)) return type;
+    return switch (type) {
+      referenceTypeCharacter =>
+        sameOutfit ? 'character_mainoutfit' : referenceTypeCharacter,
+      referenceTypeCharacterStyle =>
+        sameOutfit ? referenceTypeCharacterStyle : 'character&style_anyoutfit',
+      _ => type,
+    };
+  }
+
+  /// Whether "Prefer same outfit" applies to [type] on [model].
+  static bool referenceHasOutfitChoice(String? model, String type) =>
+      referenceSupportsOutfit(model) &&
+      (type == referenceTypeCharacter || type == referenceTypeCharacterStyle);
+
+  /// Lower bound of Strength and Fidelity. NovelAI's sliders start at 0, but
+  /// its number field takes values below it to steer away from a reference.
+  static const double referenceValueMin = -1;
+
+  /// Upper bound of Strength: 1 on V4.5, 5 on V5.
+  static double referenceStrengthMax(String? model) => isV5(model) ? 5 : 1;
+
+  /// Upper bound of Fidelity.
+  static const double referenceFidelityMax = 1;
+
+  /// The three sizes a V4.5 reference is fitted into, on black. Any other size
+  /// is rejected with a 400.
+  static const referenceCanvases = [(1024, 1536), (1536, 1024), (1472, 1472)];
+
+  /// The V4.5 canvas closest to [width]x[height] in aspect ratio, as
+  /// NovelAI's site picks it.
   static (int, int) referenceCanvas(int width, int height) {
-    if (width > height) return (1536, 1024);
-    if (height > width) return (1024, 1536);
-    return (1472, 1472);
+    final ratio = width / height;
+    var best = referenceCanvases.first;
+    for (final canvas in referenceCanvases) {
+      if ((canvas.$1 / canvas.$2 - ratio).abs() <
+          (best.$1 / best.$2 - ratio).abs()) {
+        best = canvas;
+      }
+    }
+    return best;
+  }
+
+  /// The 97 sizes a V5 reference is cut to: about a megapixel each, sides in
+  /// multiples of 64, from 256x4096 through 1024x1024 to 4096x256.
+  static final List<(int, int)> referenceCutSizes = () {
+    final tall = [
+      for (var height = 4096; height >= 1024; height -= 64)
+        (1024 * 1024 ~/ height ~/ 64 * 64, height),
+    ];
+    return [
+      ...tall,
+      for (final (width, height) in tall.reversed.skip(1)) (height, width),
+    ];
+  }();
+
+  /// The V5 size closest to [width]x[height] in shape (log aspect ratio).
+  static (int, int) referenceCutSize(int width, int height) {
+    double shape(int w, int h) => log(w / h);
+    final target = shape(width, height);
+    var best = referenceCutSizes.first;
+    for (final size in referenceCutSizes) {
+      if ((target - shape(size.$1, size.$2)).abs() <
+          (target - shape(best.$1, best.$2)).abs()) {
+        best = size;
+      }
+    }
+    return best;
   }
 
   /// Maps a per-tag aspect ratio onto a preset resolution, or null when the
@@ -721,9 +822,23 @@ class NovelAIConstants {
   static bool isV5(String? model) =>
       normalizeModel(model).toLowerCase().contains('nai-diffusion-5');
 
-  /// Precise Reference (Director Tools) is V4.5 only.
-  static bool supportsReferences(String? model) =>
-      normalizeModel(model).toLowerCase().contains('nai-diffusion-4-5');
+  /// Precise Reference (Director Tools) exists on V4.5 and V5.
+  static bool supportsReferences(String? model) {
+    final id = normalizeModel(model).toLowerCase();
+    return id.contains('nai-diffusion-4-5') || id.contains('nai-diffusion-5');
+  }
+
+  /// V5 cuts references to [referenceCutSizes] instead of fitting them into
+  /// V4.5's three canvases.
+  static bool referenceIsCut(String? model) => isV5(model);
+
+  /// Fidelity exists on V4.5 only.
+  static bool referenceSupportsFidelity(String? model) =>
+      supportsReferences(model) && !isV5(model);
+
+  /// Outfit references and "Prefer same outfit" are V5 only.
+  static bool referenceSupportsOutfit(String? model) =>
+      supportsReferences(model) && isV5(model);
 
   /// Integer sent as `ucPreset`; unknown ids fall back to `light`.
   static int ucPresetIndex(String? id) {

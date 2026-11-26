@@ -102,8 +102,9 @@ void main() {
           ucPreset: 'heavy',
           qualityToggle: false,
           varietyBoost: true,
-          referenceType: 'character',
-          referenceStrength: 0.6,
+          referenceType: 'costume',
+          referenceSameOutfit: false,
+          referenceStrength: 3.5,
           referenceFidelity: -0.25,
         ),
       );

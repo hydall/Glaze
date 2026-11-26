@@ -499,6 +499,7 @@ class ImageGenSettingsCodec {
     'qualityToggle': s.qualityToggle,
     'varietyBoost': s.varietyBoost,
     'referenceType': s.referenceType,
+    'referenceSameOutfit': s.referenceSameOutfit,
     'referenceStrength': s.referenceStrength,
     'referenceFidelity': s.referenceFidelity,
   };
@@ -526,6 +527,7 @@ class ImageGenSettingsCodec {
       referenceType: NovelAIConstants.normalizeReferenceType(
         m['referenceType'] as String?,
       ),
+      referenceSameOutfit: castBool(m['referenceSameOutfit'], true),
       referenceStrength: castDouble(m['referenceStrength'], 1),
       referenceFidelity: castDouble(m['referenceFidelity'], 1),
     );

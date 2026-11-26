@@ -166,6 +166,9 @@ List<Widget> buildReferenceSections({
             onNovelAiTypeChanged: novelAiTypes
                 ? (v) => updateRef(i, (ref) => ref.copyWith(novelaiType: v))
                 : null,
+            novelAiTypes: novelAiTypes
+                ? NovelAIConstants.referenceTypesFor(settings.novelai.model)
+                : const [],
             onPickImage: () async {
               final imageData = await pickImage();
               if (imageData == null) return;

@@ -7,23 +7,30 @@ import 'rows.dart' as rows;
 
 /// NovelAI Precise Reference settings
 /// (https://docs.novelai.net/en/image/precisereference/): what the references
-/// carry over — the character, the style or both — and how strongly.
+/// carry over — the character, the style, both, or on V5 the outfit — and how
+/// strongly.
 ///
 /// The type is the default for every reference; a library entry can pick its
-/// own, so a character and a style reference can be mixed. Shown only when the
-/// model takes references (V4.5).
+/// own, so a character and a style reference can be mixed. The controls follow
+/// the model: V4.5 has Strength up to 1 and Fidelity, V5 has Strength up to 5,
+/// Outfit and "Prefer same outfit". Shown only when the model takes references.
 List<Widget> buildNovelAiPreciseReferenceSection({
   required BuildContext context,
   required ImageGenSettings settings,
   required ValueChanged<ImageGenSettings> onUpdate,
 }) {
   final config = settings.novelai;
-  if (!NovelAIConstants.supportsReferences(config.model)) return const [];
+  final model = config.model;
+  if (!NovelAIConstants.supportsReferences(model)) return const [];
 
   void update(NovelAIImageSettings next) =>
       onUpdate(settings.copyWith(novelai: next));
 
-  final type = NovelAIConstants.normalizeReferenceType(config.referenceType);
+  final types = NovelAIConstants.referenceTypesFor(model);
+  final type = NovelAIConstants.effectiveReferenceType(
+    model,
+    config.referenceType,
+  );
 
   return [
     MenuGroup(
@@ -36,24 +43,42 @@ List<Widget> buildNovelAiPreciseReferenceSection({
           onTap: () => rows.showImageGenOptions<String>(
             context,
             title: 'imggen_nai_ref_type'.tr(),
-            items: [for (final (id, _) in NovelAIConstants.referenceTypes) id],
+            items: [for (final (id, _) in types) id],
             labelBuilder: rows.novelAiReferenceTypeLabel,
             isSelected: (id) => id == type,
-            onSelected: (id) => update(config.copyWith(referenceType: id)),
+            // As on NovelAI's site, picking a type resets "Prefer same
+            // outfit" to on for Character & Style and off otherwise.
+            onSelected: (id) => update(
+              config.copyWith(
+                referenceType: id,
+                referenceSameOutfit:
+                    id == NovelAIConstants.referenceTypeCharacterStyle,
+              ),
+            ),
           ),
         ),
+        if (NovelAIConstants.referenceHasOutfitChoice(model, type))
+          MenuSwitchItem(
+            label: 'imggen_nai_ref_same_outfit'.tr(),
+            description: 'imggen_nai_ref_same_outfit_desc'.tr(),
+            value: config.referenceSameOutfit,
+            onChanged: (v) => update(config.copyWith(referenceSameOutfit: v)),
+          ),
         _valueSlider(
           label: 'imggen_nai_ref_strength'.tr(),
           description: 'imggen_nai_ref_strength_desc'.tr(),
           value: config.referenceStrength,
+          max: NovelAIConstants.referenceStrengthMax(model),
           onChanged: (v) => update(config.copyWith(referenceStrength: v)),
         ),
-        _valueSlider(
-          label: 'imggen_nai_ref_fidelity'.tr(),
-          description: 'imggen_nai_ref_fidelity_desc'.tr(),
-          value: config.referenceFidelity,
-          onChanged: (v) => update(config.copyWith(referenceFidelity: v)),
-        ),
+        if (NovelAIConstants.referenceSupportsFidelity(model))
+          _valueSlider(
+            label: 'imggen_nai_ref_fidelity'.tr(),
+            description: 'imggen_nai_ref_fidelity_desc'.tr(),
+            value: config.referenceFidelity,
+            max: NovelAIConstants.referenceFidelityMax,
+            onChanged: (v) => update(config.copyWith(referenceFidelity: v)),
+          ),
       ],
     ),
   ];
@@ -65,21 +90,18 @@ Widget _valueSlider({
   required String label,
   required String description,
   required double value,
+  required double max,
   required ValueChanged<double> onChanged,
 }) {
-  final clamped = value
-      .clamp(
-        NovelAIConstants.referenceValueMin,
-        NovelAIConstants.referenceValueMax,
-      )
-      .toDouble();
+  const min = NovelAIConstants.referenceValueMin;
+  final clamped = value.clamp(min, max).toDouble();
   return MenuRangeItem(
     label: label,
     description: description,
     value: clamped,
-    min: NovelAIConstants.referenceValueMin,
-    max: NovelAIConstants.referenceValueMax,
-    divisions: 200,
+    min: min,
+    max: max,
+    divisions: ((max - min) * 100).round(),
     editableValue: true,
     onChanged: onChanged,
     onReset: clamped == 1.0 ? null : () => onChanged(1.0),
