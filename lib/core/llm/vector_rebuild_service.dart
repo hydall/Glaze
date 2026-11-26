@@ -19,13 +19,29 @@ class VectorRebuildRequest {
   final int batchSize;
   final bool forceReindex;
 
+  /// Reindex rather than rebuild: every stored vector of the selected sources
+  /// is deleted before indexing starts. A forced rebuild only overwrites the
+  /// vectors of entries that are still indexable, so vectors left behind by
+  /// deleted lorebooks, chats or entries survive it; a reindex does not.
+  final bool clearExisting;
+
   const VectorRebuildRequest({
     required this.sources,
     this.vectorsPerMinute = 30,
     this.batchSize = 10,
     this.forceReindex = false,
+    this.clearExisting = false,
   });
+
+  bool get _force => forceReindex || clearExisting;
 }
+
+/// Embedding `sourceType` each rebuild source writes.
+const vectorRebuildSourceTypes = {
+  VectorRebuildSource.memoryBooks: 'memory_entry',
+  VectorRebuildSource.lorebooks: 'lorebook_entry',
+  VectorRebuildSource.rawChat: 'chat_message',
+};
 
 class VectorRebuildResult {
   final int total;
@@ -72,6 +88,13 @@ class VectorRebuildService {
     void Function(int current, String label, String sourceLabel)? onTaskStarted,
     void Function(int current, VectorRebuildResult result)? onTaskCompleted,
   }) async {
+    if (request.clearExisting) {
+      for (final source in request.sources) {
+        await _embeddingRepo.deleteBySourceType(
+          vectorRebuildSourceTypes[source]!,
+        );
+      }
+    }
     final tasks = await _buildTasks(request);
     onPrepared?.call(tasks.length);
     var indexed = 0;
@@ -160,7 +183,7 @@ class VectorRebuildService {
               sourceLabel: 'MemoryBook',
               label: entry.title.isNotEmpty ? entry.title : entry.id,
               run: () async {
-                if (request.forceReindex) {
+                if (request._force) {
                   await _embeddingRepo.deleteByEntryId(entry.id);
                 }
                 await _memoryEmbeddingService.indexMemoryEntry(
@@ -200,7 +223,7 @@ class VectorRebuildService {
                       lorebook.id,
                       [entry],
                       _config,
-                      forceReindex: request.forceReindex,
+                      forceReindex: request._force,
                       embeddingTarget:
                           lorebook.settings?.embeddingTarget ??
                           LorebookEmbeddingTarget.content,
@@ -233,7 +256,7 @@ class VectorRebuildService {
             sourceLabel: 'Raw chat',
             label: 'Session ${session.sessionIndex}',
             run: () async {
-              if (request.forceReindex) {
+              if (request._force) {
                 await _embeddingRepo.deleteBySourceId(session.id);
               }
               await _chatMessageEmbeddingService.indexSessionMessages(
