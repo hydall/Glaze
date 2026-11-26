@@ -1348,7 +1348,7 @@
   "imggen_nai_anlas_reason_plan": "Бесплатно генерирует только активная подписка Opus",
   "imggen_nai_anlas_reason_v5": "Лимит V5 на Opus исчерпан",
   "imggen_nai_anlas_reason_size": "{} больше 1024×1024",
-  "imggen_nai_anlas_reason_steps": "{} шагов, бесплатно до {}",
+  "imggen_nai_anlas_reason_steps": "Шагов: {}, бесплатно до {}",
   "imggen_nai_anlas_reason_refs": "Precise Reference: {} Anlas за каждый, {} Anlas за картинку",
   "imggen_nai_ref_title": "Precise Reference",
   "imggen_nai_ref_desc": "Как NovelAI использует каждую картинку выше. Каждая картинка добавляет 5 Anlas к стоимости любой генерации. Несколько картинок с типом «Персонаж» смешиваются в одного персонажа.",

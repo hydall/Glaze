@@ -1337,7 +1337,7 @@
   "imggen_nai_anlas_reason_plan": "Free images need an active Opus plan",
   "imggen_nai_anlas_reason_v5": "Your Opus V5 allowance is used up",
   "imggen_nai_anlas_reason_size": "{} is larger than 1024×1024",
-  "imggen_nai_anlas_reason_steps": "{} steps, free up to {}",
+  "imggen_nai_anlas_reason_steps": "Steps: {}, free up to {}",
   "imggen_nai_anlas_reason_refs": "Precise Reference: {} Anlas each, {} Anlas per image",
   "imggen_nai_ref_title": "Precise Reference",
   "imggen_nai_ref_desc": "How NovelAI uses every picture above. Each picture adds 5 Anlas to every image. Several Character pictures blend into one character.",
