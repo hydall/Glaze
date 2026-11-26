@@ -23,6 +23,13 @@ class ImageTagStage {
   }) async {
     final targetMessageId = result.session?.messages.lastOrNull?.id;
     if (targetMessageId == null) return;
+    // A redraw the reader started while post-gen was running may still hold
+    // the image token. Taking it over would orphan that redraw mid-flight, so
+    // this stage waits for it to finish.
+    while (ctx.abortHandler.isGeneratingImage) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
+    }
     final imgCancelToken = CancelToken();
     ctx.abortHandler.imgGenCancelToken = imgCancelToken;
 

@@ -39,7 +39,8 @@ class BlockImageRenderer {
   final StreamingBlockPublisher publishStreamingBlockContent;
 
   /// Whether [content] has anything for this renderer to do.
-  static bool hasWork(String content) => ImageTagMarkup.hasImageGenTags(content);
+  static bool hasWork(String content) =>
+      ImageTagMarkup.hasImageGenTags(content);
 
   /// Returns [sourceContent] with its image tags resolved, or unchanged when
   /// there were none.
@@ -92,7 +93,11 @@ class BlockImageRenderer {
         formatError(e),
       );
     } catch (e) {
-      return ImageTagMarkup.replaceTagWithError(sourceContent, 0, formatError(e));
+      return ImageTagMarkup.replaceTagWithError(
+        sourceContent,
+        0,
+        formatError(e),
+      );
     }
   }
 
@@ -119,7 +124,9 @@ class BlockImageRenderer {
       content: pending,
       status: BlockRunStatus.running,
     );
-    ref.read(infoBlocksProvider(context.sessionId).notifier).addOrReplace(running);
+    ref
+        .read(infoBlocksProvider(context.sessionId).notifier)
+        .addOrReplace(running);
 
     final drawn = await render(context: context, sourceContent: pending);
 
@@ -128,13 +135,15 @@ class BlockImageRenderer {
       return running.copyWith(status: BlockRunStatus.stopped);
     }
 
-    // A picture that was already there stays when its redraw fails; the
-    // error goes to a toast instead of replacing it (issue #825).
-    final (text: rendered, :errors) = ImageTagMarkup.restoreFailedRedraws(
+    // A picture that was already there stays when its redraw fails (issue
+    // #825). Every failed picture goes to a toast: one that was an error card
+    // before comes back as an identical card, and without the toast the tap
+    // looks like it did nothing.
+    final (text: rendered, errors: _) = ImageTagMarkup.restoreFailedRedraws(
       existing,
       drawn,
     );
-    for (final error in errors) {
+    for (final error in ImageTagMarkup.failedDrawErrors(pending, drawn)) {
       GlazeToast.showWithoutContext(
         error.isEmpty ? 'Image gen failed' : 'Image gen: $error',
         isError: true,

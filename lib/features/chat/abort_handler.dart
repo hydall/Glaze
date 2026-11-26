@@ -64,6 +64,14 @@ class AbortHandler {
   }
 
   int nextGenId() => ++_activeGenId;
+
+  /// The generation now running or last run, without starting a new one.
+  ///
+  /// An image redraw binds to it rather than taking a new id: a new id would
+  /// tell the post-gen work still running for that generation (cleaner,
+  /// ExtBlocks, image tags) that it was superseded, so it would stop early
+  /// and never clear `isPostGenRunning`.
+  int get currentGenId => _activeGenId;
   bool isCurrentGen(int genId) => _activeGenId == genId;
 
   // ignore: unnecessary_getters_setters

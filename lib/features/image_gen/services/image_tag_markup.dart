@@ -59,9 +59,8 @@ class ImageBlockPayload {
   static const String _pendingMarker = '@';
 
   /// The image on screen, or empty when the block has none yet.
-  String get activePath => paths.isEmpty
-      ? ''
-      : paths[activeIndex.clamp(0, paths.length - 1)];
+  String get activePath =>
+      paths.isEmpty ? '' : paths[activeIndex.clamp(0, paths.length - 1)];
 
   bool get hasVariants => paths.length > 1;
 
@@ -592,7 +591,6 @@ class ImageTagMarkup {
         .replaceAll('&amp;', '&');
   }
 
-
   /// How many image tags of [text] are still waiting for their image.
   static int pendingImageGenTagCount(String text) =>
       scanPendingTags(text).length;
@@ -630,7 +628,9 @@ class ImageTagMarkup {
     final instructionJson = jsonEncode(_decodeInstruction(tag));
     // The path list rides along as a plain string: the error payload is JSON,
     // and a JSON array would close the tag on its own `]`.
-    final carried = ImageBlockPayload.parsePending(tag.payload).encodePathList();
+    final carried = ImageBlockPayload.parsePending(
+      tag.payload,
+    ).encodePathList();
     return text.replaceRange(
       tag.start,
       tag.end,
@@ -708,7 +708,11 @@ class ImageTagMarkup {
   }) {
     if (payload.presentation.isEmpty && !asElement) {
       final encoded = payload.encodePending();
-      return encoded.isEmpty ? '[IMG:GEN]' : '[IMG:GEN:$encoded]';
+      if (encoded.isEmpty) return '[IMG:GEN]';
+      // A `]` would end the bracket tag early and cut the prompt short (a
+      // NovelAI prompt weights tags with `[[…]]`), so such a payload keeps the
+      // element spelling, where the instruction sits in a quoted attribute.
+      if (!encoded.contains(']')) return '[IMG:GEN:$encoded]';
     }
     final buffer = StringBuffer('<img $instructionAttribute=')
       ..write("'${_escapeAttribute(payload.instruction, "'")}'");
@@ -726,8 +730,7 @@ class ImageTagMarkup {
   /// coming back from a tap addresses exactly one image of the message.
   static List<ImageBlock> scanImageBlocks(String text) {
     final blocks = <ImageBlock>[
-      for (final tag in scanPendingTags(text))
-        _pendingBlock(tag),
+      for (final tag in scanPendingTags(text)) _pendingBlock(tag),
     ];
 
     // A resolved token can never sit inside a block already collected; the
@@ -1029,6 +1032,25 @@ class ImageTagMarkup {
     return (text: result, errors: errors.reversed.toList());
   }
 
+  /// The error text of every block that was waiting for its picture in
+  /// [pending] and came back as an error card in [drawn], in document order.
+  ///
+  /// This is what a redraw reports: the failure of a block that was an error
+  /// card before is a failure too, even though the card it leaves looks the
+  /// same as the one the reader tapped. When the counts differ the texts are
+  /// not comparable and nothing is reported.
+  static List<String> failedDrawErrors(String pending, String drawn) {
+    final asked = scanImageBlocks(pending);
+    final current = scanImageBlocks(drawn);
+    if (asked.length != current.length) return const [];
+    return [
+      for (var i = 0; i < current.length; i++)
+        if (asked[i].kind == ImageBlockKind.pending &&
+            current[i].kind == ImageBlockKind.error)
+          _errorTextOf(drawn.substring(current[i].start, current[i].end)),
+    ];
+  }
+
   /// The `error` field of one `[IMG:ERROR:…]` card, or empty when it has none.
   static String _errorTextOf(String card) {
     final json = ImgGenPatterns.imgErrorRegex.firstMatch(card)?.group(1);
@@ -1071,7 +1093,9 @@ class ImageTagMarkup {
         ImageBlockPayload.parseResult(match.group(1) ?? ''),
         resolve,
       );
-      return rewritten == null ? '' : '[IMG:RESULT:${rewritten.encodeResult()}]';
+      return rewritten == null
+          ? ''
+          : '[IMG:RESULT:${rewritten.encodeResult()}]';
     });
     // Scanned after the tag pass, so the spans are the ones of `result`, and
     // walked right to left so replacing one element leaves the rest in place.

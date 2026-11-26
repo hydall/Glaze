@@ -28,7 +28,10 @@ class ImageRecoveryService {
   final String _charId;
   final void Function(CancelToken?) _setImgGenCancelToken;
   final CancelToken? Function() getImgGenCancelToken;
-  final int Function() startImageOperation;
+
+  /// The generation an image redraw binds to. A new send or a Stop moves past
+  /// it, which ends the redraw's ownership; the redraw itself never does.
+  final int Function() currentGeneration;
   final bool Function(int genId) isCurrentGeneration;
   final void Function(AsyncValue<ChatState>) _setState;
   final AsyncValue<ChatState> Function() _getState;
@@ -38,7 +41,7 @@ class ImageRecoveryService {
     required this._charId,
     required this._setImgGenCancelToken,
     required this.getImgGenCancelToken,
-    required this.startImageOperation,
+    required this.currentGeneration,
     required this.isCurrentGeneration,
     required this._setState,
     required this._getState,
@@ -327,7 +330,6 @@ class ImageRecoveryService {
     if (current == null ||
         current.session == null ||
         current.isGenerating ||
-        current.isPostGenRunning ||
         current.isGeneratingImage) {
       return;
     }
@@ -373,7 +375,7 @@ class ImageRecoveryService {
     ChatSessionService.updateCache(resetSession);
     final liveState = _getState().value;
     if (liveState?.session?.id != resetSession.id) return;
-    final genId = startImageOperation();
+    final genId = currentGeneration();
     final imgCancelToken = CancelToken();
     _setImgGenCancelToken(imgCancelToken);
     _setState(
@@ -446,16 +448,29 @@ class ImageRecoveryService {
     }
 
     var current = _getState().value;
-    if (current == null || current.session == null || current.isGenerating) {
+    if (current == null || current.session == null) return;
+
+    // A picture of an ExtBlock shown in the message lives in the block's row,
+    // which has its own redraw queue: it goes ahead whatever the chat is busy
+    // with.
+    final tapped = current.messages.where((m) => m.id == messageId).firstOrNull;
+    if (tapped == null || tapped.role != 'assistant') return;
+    final inline = _inlineImage(current.session!.id, tapped, blockIndex);
+    if (inline != null) {
+      await _redrawInlineImage(current.session!.id, tapped, inline);
       return;
     }
 
-    // The error card appears before the originating post-gen operation has
-    // fully unwound. Queue an immediate tap instead of silently dropping it.
+    if (current.isGenerating) return;
+
+    // Post-gen work (cleaner, ExtBlocks, memory) does not hold the redraw up.
+    // Another image run of this chat does: both rewrite message text and share
+    // the one image cancel token, so a tap made while one is drawing waits for
+    // it instead of being dropped.
     final originalSessionId = current.session!.id;
     while (current != null &&
         current.session?.id == originalSessionId &&
-        (current.isGeneratingImage || current.isPostGenRunning)) {
+        current.isGeneratingImage) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
       current = _getState().value;
       if (current?.isGenerating == true) return;
@@ -464,7 +479,6 @@ class ImageRecoveryService {
         current.session == null ||
         current.session!.id != originalSessionId ||
         current.isGenerating ||
-        current.isPostGenRunning ||
         current.isGeneratingImage) {
       return;
     }
@@ -473,12 +487,6 @@ class ImageRecoveryService {
 
     final msg = current.messages[messageIndex];
     if (msg.role != 'assistant') return;
-
-    final inline = _inlineImage(current.session!.id, msg, blockIndex);
-    if (inline != null) {
-      await _redrawInlineImage(current.session!.id, msg, inline);
-      return;
-    }
 
     final resetContent = reset(msg.content);
     if (resetContent == msg.content) return;
@@ -501,7 +509,7 @@ class ImageRecoveryService {
     final liveState = _getState().value;
     if (liveState?.session?.id != resetSession.id) return;
 
-    final genId = startImageOperation();
+    final genId = currentGeneration();
     final imgCancelToken = CancelToken();
     _setImgGenCancelToken(imgCancelToken);
     _setState(

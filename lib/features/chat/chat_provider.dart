@@ -285,7 +285,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       _abortHandler.imgGenCancelToken = t;
     },
     getImgGenCancelToken: () => _abortHandler.imgGenCancelToken,
-    startImageOperation: _abortHandler.nextGenId,
+    currentGeneration: () => _abortHandler.currentGenId,
     isCurrentGeneration: _abortHandler.isCurrentGen,
     setState: (s) {
       state = s;
