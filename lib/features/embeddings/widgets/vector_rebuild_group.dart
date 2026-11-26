@@ -8,6 +8,7 @@ import '../../../core/llm/vector_rebuild_service.dart';
 import '../../../core/state/vector_rebuild_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_action_button.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/menu_group.dart';
 
@@ -36,7 +37,9 @@ class _VectorRebuildGroupState extends ConsumerState<VectorRebuildGroup> {
     super.dispose();
   }
 
-  Future<void> _start() async {
+  /// [clearExisting] turns the run into a reindex: the selected sources'
+  /// vectors are deleted first, so it asks before starting.
+  Future<void> _start({bool clearExisting = false}) async {
     final sources = <VectorRebuildSource>{
       if (_memoryBooks) VectorRebuildSource.memoryBooks,
       if (_lorebooks) VectorRebuildSource.lorebooks,
@@ -46,6 +49,8 @@ class _VectorRebuildGroupState extends ConsumerState<VectorRebuildGroup> {
       GlazeToast.show(context, 'vector_error_select_source'.tr());
       return;
     }
+    if (clearExisting && !await _confirmReindex()) return;
+    if (!mounted) return;
     await ref
         .read(vectorRebuildControllerProvider.notifier)
         .start(
@@ -54,8 +59,34 @@ class _VectorRebuildGroupState extends ConsumerState<VectorRebuildGroup> {
             vectorsPerMinute: int.tryParse(_vectorsPerMinuteCtrl.text) ?? 30,
             batchSize: int.tryParse(_batchSizeCtrl.text) ?? 10,
             forceReindex: _force,
+            clearExisting: clearExisting,
           ),
         );
+  }
+
+  Future<bool> _confirmReindex() async {
+    final confirmed = await GlazeBottomSheet.show<bool>(
+      context,
+      title: 'vector_reindex_start'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.delete_sweep_outlined,
+        description: 'vector_reindex_confirm'.tr(),
+      ),
+      items: [
+        BottomSheetItem(
+          label: 'vector_reindex_start'.tr(),
+          isDestructive: true,
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
+        ),
+        BottomSheetItem(
+          label: 'btn_cancel'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
+        ),
+      ],
+    );
+    return confirmed == true;
   }
 
   @override
@@ -204,12 +235,30 @@ class _VectorRebuildGroupState extends ConsumerState<VectorRebuildGroup> {
   Widget _buildActions(VectorRebuildState state, bool running) {
     final controller = ref.read(vectorRebuildControllerProvider.notifier);
     if (!running) {
-      return GlazeActionButton(
-        icon: Icons.sync_rounded,
-        label: 'vector_rebuild_start'.tr(),
-        tone: GlazeActionTone.primary,
-        expand: true,
-        onTap: _start,
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GlazeActionButton(
+            icon: Icons.sync_rounded,
+            label: 'vector_rebuild_start'.tr(),
+            tone: GlazeActionTone.primary,
+            expand: true,
+            onTap: _start,
+          ),
+          const SizedBox(height: 8),
+          GlazeActionButton(
+            icon: Icons.delete_sweep_outlined,
+            label: 'vector_reindex_start'.tr(),
+            tone: GlazeActionTone.neutral,
+            expand: true,
+            onTap: () => _start(clearExisting: true),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'vector_reindex_desc'.tr(),
+            style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
+          ),
+        ],
       );
     }
     return Row(

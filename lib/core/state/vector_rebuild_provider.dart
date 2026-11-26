@@ -146,6 +146,8 @@ class VectorRebuildController extends Notifier<VectorRebuildState> {
           );
 
       if (result.cancelled) {
+        // A cancelled reindex already deleted the old vectors.
+        if (request.clearExisting) ref.invalidate(embeddingStaleStatsProvider);
         state = state.copyWith(
           status: VectorRebuildStatus.cancelled,
           message: 'vector_error_rebuild_cancelled'.tr(),
@@ -159,7 +161,9 @@ class VectorRebuildController extends Notifier<VectorRebuildState> {
             ? 'No vector rebuild work found.'
             : 'Vector rebuild complete.',
       );
-      if (result.total > 0) ref.invalidate(embeddingStaleStatsProvider);
+      if (result.total > 0 || request.clearExisting) {
+        ref.invalidate(embeddingStaleStatsProvider);
+      }
     } catch (e) {
       state = state.copyWith(
         status: VectorRebuildStatus.error,

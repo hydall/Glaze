@@ -65,6 +65,65 @@ void main() {
     },
   );
 
+  test("clearExisting deletes only the selected sources' vectors", () async {
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final container = ProviderContainer(
+      overrides: [appDbProvider.overrideWithValue(db)],
+    );
+    addTearDown(container.dispose);
+    final embeddingRepo = EmbeddingRepo(db);
+    final embeddingService = EmbeddingService();
+    const config = EmbeddingConfig(endpoint: 'http://localhost/v1', model: 't');
+    final service = VectorRebuildService(
+      ChatRepo(db),
+      container.read(memoryBookRepoProvider),
+      LorebookRepo(db),
+      embeddingRepo,
+      MemoryEmbeddingService(embeddingRepo, embeddingService),
+      LorebookEmbeddingService(embeddingRepo, embeddingService),
+      ChatMessageEmbeddingService(embeddingRepo, embeddingService),
+      config,
+    );
+    // Orphans: their lorebook and memory book no longer exist.
+    for (final (id, type) in [
+      ('orphan_lore', 'lorebook_entry'),
+      ('orphan_mem', 'memory_entry'),
+    ]) {
+      await embeddingRepo.putEmbeddingVector(
+        entryId: id,
+        sourceType: type,
+        vectors: const [
+          [0.1, 0.2],
+        ],
+        textHash: 'h',
+        retrievalMetadata: embeddingMetadataForConfig(config, const [
+          [0.1, 0.2],
+        ]),
+      );
+    }
+
+    // A forced rebuild keeps vectors it has no entry for.
+    await service.rebuild(
+      const VectorRebuildRequest(
+        sources: {VectorRebuildSource.lorebooks},
+        vectorsPerMinute: 0,
+        forceReindex: true,
+      ),
+    );
+    expect(await embeddingRepo.getByEntryId('orphan_lore'), isNotNull);
+
+    await service.rebuild(
+      const VectorRebuildRequest(
+        sources: {VectorRebuildSource.lorebooks},
+        vectorsPerMinute: 0,
+        clearExisting: true,
+      ),
+    );
+    expect(await embeddingRepo.getByEntryId('orphan_lore'), isNull);
+    expect(await embeddingRepo.getByEntryId('orphan_mem'), isNotNull);
+  });
+
   group('embedding stale metadata', () {
     test(
       'counts rows whose embedding signature differs from current config',
