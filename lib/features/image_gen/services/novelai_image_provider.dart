@@ -14,7 +14,8 @@ import 'image_gen_http.dart';
 /// response is a ZIP attachment with the generated image; some proxies answer
 /// JSON with a base64 `image` instead, so both are accepted. V4 / V4.5 / V5
 /// models take the structured `v4_prompt` captions, while V3 keeps a plain
-/// `prompt` field. Character Reference (Director Tools) images are V4.5 only.
+/// `prompt` field. Precise Reference (Director Tools) images are V4.5 and V5
+/// only.
 class NovelAIImageProvider {
   final ImageGenHttp _http = ImageGenHttp();
 
@@ -75,7 +76,7 @@ class NovelAIImageProvider {
       parameters['prompt'] = positive;
     }
 
-    _attachReferences(parameters, model, references);
+    _attachReferences(parameters, model, settings, references);
 
     final bytes = await _http.postForBytes(
       url: '${NovelAIConstants.normalizeEndpoint(settings.endpoint)}'
@@ -110,43 +111,80 @@ class NovelAIImageProvider {
     return condition;
   }
 
-  /// Attaches Character Reference (Director Tools) images when the model takes
+  /// Attaches Precise Reference (Director Tools) images when the model takes
   /// them. NovelAI wants bare base64 — the collector already strips the data
-  /// URL — plus one entry per parallel array.
+  /// URL and fits the image to the model's sizes — plus one entry per
+  /// parallel array.
+  ///
+  /// The type travels as the reference's `base_caption`: a library entry's
+  /// own `novelaiType` when the model offers it, otherwise the provider
+  /// setting; on V5 "Prefer same outfit" picks the caption variant. Strength
+  /// goes as is. Fidelity goes inverted, as the secondary strength, the way
+  /// NovelAI's site sends it; V5 has no Fidelity and is sent 0, as if at 1.
   void _attachReferences(
     Map<String, dynamic> parameters,
     String model,
+    NovelAIImageSettings settings,
     List<Map<String, String>>? references,
   ) {
     if (!NovelAIConstants.supportsReferences(model)) return;
-    final images = (references ?? const <Map<String, String>>[])
-        .map((ref) => ref['image'] ?? '')
-        .where((image) => image.isNotEmpty)
+    final refs = (references ?? const <Map<String, String>>[])
+        .where((ref) => (ref['image'] ?? '').isNotEmpty)
         .take(NovelAIConstants.maxReferences)
         .toList();
-    if (images.isEmpty) return;
+    if (refs.isEmpty) return;
 
-    parameters['director_reference_images'] = images;
-    parameters['director_reference_descriptions'] = List.generate(
-      images.length,
-      (_) => {
-        'caption': {
-          'base_caption': 'character&style',
-          'char_captions': <dynamic>[],
-        },
-        'legacy_uc': false,
-      },
+    final defaultType = NovelAIConstants.effectiveReferenceType(
+      model,
+      settings.referenceType,
     );
+    final strength = settings.referenceStrength
+        .clamp(
+          NovelAIConstants.referenceValueMin,
+          NovelAIConstants.referenceStrengthMax(model),
+        )
+        .toDouble();
+    final secondary = NovelAIConstants.referenceSupportsFidelity(model)
+        ? 1.0 -
+              settings.referenceFidelity
+                  .clamp(
+                    NovelAIConstants.referenceValueMin,
+                    NovelAIConstants.referenceFidelityMax,
+                  )
+                  .toDouble()
+        : 0.0;
+
+    String caption(Map<String, String> ref) =>
+        NovelAIConstants.referenceCaption(
+          model: model,
+          type: NovelAIConstants.effectiveReferenceType(
+            model,
+            ref['novelaiType'],
+            fallback: defaultType,
+          ),
+          sameOutfit: settings.referenceSameOutfit,
+        );
+
+    parameters['director_reference_images'] = [
+      for (final ref in refs) ref['image']!,
+    ];
+    parameters['director_reference_descriptions'] = [
+      for (final ref in refs)
+        {
+          'caption': {'base_caption': caption(ref), 'char_captions': <dynamic>[]},
+          'legacy_uc': false,
+        },
+    ];
     parameters['director_reference_strength_values'] = List.filled(
-      images.length,
-      1.0,
+      refs.length,
+      strength,
     );
     parameters['director_reference_secondary_strength_values'] = List.filled(
-      images.length,
-      0.0,
+      refs.length,
+      secondary,
     );
     parameters['director_reference_information_extracted'] = List.filled(
-      images.length,
+      refs.length,
       1.0,
     );
   }

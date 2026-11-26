@@ -119,16 +119,22 @@ void main() {
       );
     });
 
-    test('NovelAI accepts references only on V4.5', () {
-      expect(
-        providerMaxReferences(
-          const ImageGenSettings(
-            apiType: ImageGenApiType.novelai,
-            novelai: NovelAIImageSettings(model: 'nai-diffusion-4-5-full'),
+    test('NovelAI accepts references only on V4.5 and V5', () {
+      for (final model in [
+        'nai-diffusion-4-5-full',
+        'nai-diffusion-5-curated',
+      ]) {
+        expect(
+          providerMaxReferences(
+            ImageGenSettings(
+              apiType: ImageGenApiType.novelai,
+              novelai: NovelAIImageSettings(model: model),
+            ),
           ),
-        ),
-        greaterThan(0),
-      );
+          greaterThan(0),
+          reason: model,
+        );
+      }
       expect(
         providerMaxReferences(
           const ImageGenSettings(

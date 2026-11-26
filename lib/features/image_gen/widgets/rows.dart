@@ -227,6 +227,14 @@ class _ImageGenTextFieldItemState extends State<ImageGenTextFieldItem> {
   }
 }
 
+/// Display name of a Precise Reference type id.
+String novelAiReferenceTypeLabel(String id) {
+  for (final (typeId, key) in NovelAIConstants.referenceTypes) {
+    if (typeId == id) return key.tr();
+  }
+  return id;
+}
+
 class ImageGenReferenceRow extends StatefulWidget {
   final ReferenceImage refItem;
   final ValueChanged<String> onNameChanged;
@@ -235,6 +243,12 @@ class ImageGenReferenceRow extends StatefulWidget {
   final ValueChanged<bool> onEnabledChanged;
   final VoidCallback onPickImage;
   final VoidCallback onRemove;
+
+  /// Picks the entry's NovelAI Precise Reference type out of
+  /// [novelAiTypes]; null hides the picker (a provider or model without
+  /// Precise Reference). '' follows the provider setting.
+  final ValueChanged<String>? onNovelAiTypeChanged;
+  final List<(String, String)> novelAiTypes;
 
   const ImageGenReferenceRow({
     super.key,
@@ -245,6 +259,8 @@ class ImageGenReferenceRow extends StatefulWidget {
     required this.onEnabledChanged,
     required this.onPickImage,
     required this.onRemove,
+    this.onNovelAiTypeChanged,
+    this.novelAiTypes = const [],
   });
 
   @override
@@ -282,7 +298,60 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Column(children: [_topRow(context), _descriptionField(context)]),
+      child: Column(
+        children: [
+          _topRow(context),
+          _descriptionField(context),
+          if (widget.onNovelAiTypeChanged != null) _novelAiTypeRow(context),
+        ],
+      ),
+    );
+  }
+
+  String _novelAiTypeLabel(String id) => id.isEmpty
+      ? 'imggen_nai_ref_type_default'.tr()
+      : novelAiReferenceTypeLabel(id);
+
+  Widget _novelAiTypeRow(BuildContext context) {
+    // A type the model does not offer (Outfit on V4.5) follows the setting.
+    final stored = widget.refItem.novelaiType;
+    final current = widget.novelAiTypes.any((type) => type.$1 == stored)
+        ? stored
+        : '';
+    return Padding(
+      padding: const EdgeInsets.only(left: 48, bottom: 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: InkWell(
+          mouseCursor: SystemMouseCursors.click,
+          onTap: () => showImageGenOptions<String>(
+            context,
+            title: 'imggen_nai_ref_type'.tr(),
+            items: ['', for (final (id, _) in widget.novelAiTypes) id],
+            labelBuilder: _novelAiTypeLabel,
+            isSelected: (id) => id == current,
+            onSelected: widget.onNovelAiTypeChanged!,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${'imggen_nai_ref_type'.tr()}: ${_novelAiTypeLabel(current)}',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: context.cs.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 18,
+                color: context.cs.primary,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
