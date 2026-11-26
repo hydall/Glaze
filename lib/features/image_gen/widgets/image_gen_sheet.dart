@@ -33,7 +33,6 @@ import 'connection_fields.dart';
 import 'model_fields.dart';
 import 'novelai_anlas_hero.dart';
 import 'novelai_fields.dart';
-import 'novelai_reference_fields.dart';
 import 'openrouter_fields.dart';
 import 'reference_library_section.dart';
 import 'rows.dart' as rows;
@@ -311,75 +310,13 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 ),
               ],
             ),
-            ...buildCharacterAppearanceSection(
+            ...buildReferencesGroup(
               context: context,
               settings: s,
               maxReferences: providerMaxReferences(s),
               onUpdate: _update,
+              pickImage: _pickReferenceImage,
             ),
-            if (providerMaxReferences(s) == 0)
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: context.cs.surfaceContainerHighest.withValues(
-                    alpha: 0.5,
-                  ),
-                  border: Border.all(color: context.cs.outlineVariant),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(
-                  child: Text(
-                    'imggen_no_refs_hint'.tr(),
-                    style: TextStyle(
-                      color: context.cs.onSurfaceVariant,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              )
-            else ...[
-              if (s.apiType == ImageGenApiType.novelai)
-                ...buildNovelAiPreciseReferenceSection(
-                  context: context,
-                  settings: s,
-                  onUpdate: _update,
-                ),
-              ...buildReferenceSections(
-                context: context,
-                settings: s,
-                maxReferences: providerMaxReferences(s),
-                onUpdate: _update,
-                pickImage: _pickReferenceImage,
-              ),
-              MenuGroup(
-                header: 'Image Context',
-                items: [
-                  MenuSwitchItem(
-                    label: 'Send previous images as context',
-                    description: 'imggen_image_context_desc'.tr(),
-                    value: s.imageContextEnabled,
-                    onChanged: (v) =>
-                        _update(s.copyWith(imageContextEnabled: v)),
-                  ),
-                  if (s.imageContextEnabled)
-                    MenuSelectorItem(
-                      label: 'Context image count',
-                      currentValue: s.imageContextCount.toString(),
-                      onTap: () {
-                        _showOptions<int>(
-                          title: 'Context image count',
-                          items: [1, 2, 3],
-                          labelBuilder: (i) => i.toString(),
-                          isSelected: (i) => s.imageContextCount == i,
-                          onSelected: (i) =>
-                              _update(s.copyWith(imageContextCount: i)),
-                        );
-                      },
-                    ),
-                ],
-              ),
-            ],
             MenuGroup(
               header: 'imggen_tag_hint_title'.tr(),
               description: 'imggen_tag_hint_desc'.tr(),

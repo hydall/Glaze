@@ -3,18 +3,19 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
+import 'reference_library_section.dart' show referenceCaption;
 import 'rows.dart' as rows;
 
 /// NovelAI Precise Reference settings
-/// (https://docs.novelai.net/en/image/precisereference/): what the references
+/// (https://docs.novelai.net/en/image/precisereference/): what the pictures
 /// carry over — the character, the style, both, or on V5 the outfit — and how
-/// strongly.
+/// strongly. Rows of the References group, under their own sub-header.
 ///
-/// The type is the default for every reference; a library entry can pick its
+/// The type is the default for every picture; a library entry can pick its
 /// own, so a character and a style reference can be mixed. The controls follow
 /// the model: V4.5 has Strength up to 1 and Fidelity, V5 has Strength up to 5,
-/// Outfit and "Prefer same outfit". Shown only when the model takes references.
-List<Widget> buildNovelAiPreciseReferenceSection({
+/// Outfit and "Prefer same outfit". Empty when the model takes no references.
+List<Widget> buildNovelAiPreciseReferenceItems({
   required BuildContext context,
   required ImageGenSettings settings,
   required ValueChanged<ImageGenSettings> onUpdate,
@@ -33,54 +34,50 @@ List<Widget> buildNovelAiPreciseReferenceSection({
   );
 
   return [
-    MenuGroup(
-      header: 'imggen_nai_ref_title'.tr(),
-      description: 'imggen_nai_ref_desc'.tr(),
-      items: [
-        MenuSelectorItem(
-          label: 'imggen_nai_ref_type'.tr(),
-          currentValue: rows.novelAiReferenceTypeLabel(type),
-          onTap: () => rows.showImageGenOptions<String>(
-            context,
-            title: 'imggen_nai_ref_type'.tr(),
-            items: [for (final (id, _) in types) id],
-            labelBuilder: rows.novelAiReferenceTypeLabel,
-            isSelected: (id) => id == type,
-            // As on NovelAI's site, picking a type resets "Prefer same
-            // outfit" to on for Character & Style and off otherwise.
-            onSelected: (id) => update(
-              config.copyWith(
-                referenceType: id,
-                referenceSameOutfit:
-                    id == NovelAIConstants.referenceTypeCharacterStyle,
-              ),
-            ),
+    MenuSubHeader('imggen_nai_ref_title'.tr()),
+    referenceCaption(context, 'imggen_nai_ref_desc'.tr()),
+    MenuSelectorItem(
+      label: 'imggen_nai_ref_type'.tr(),
+      currentValue: rows.novelAiReferenceTypeLabel(type),
+      onTap: () => rows.showImageGenOptions<String>(
+        context,
+        title: 'imggen_nai_ref_type'.tr(),
+        items: [for (final (id, _) in types) id],
+        labelBuilder: rows.novelAiReferenceTypeLabel,
+        isSelected: (id) => id == type,
+        // As on NovelAI's site, picking a type resets "Prefer same outfit"
+        // to on for Character & Style and off otherwise.
+        onSelected: (id) => update(
+          config.copyWith(
+            referenceType: id,
+            referenceSameOutfit:
+                id == NovelAIConstants.referenceTypeCharacterStyle,
           ),
         ),
-        if (NovelAIConstants.referenceHasOutfitChoice(model, type))
-          MenuSwitchItem(
-            label: 'imggen_nai_ref_same_outfit'.tr(),
-            description: 'imggen_nai_ref_same_outfit_desc'.tr(),
-            value: config.referenceSameOutfit,
-            onChanged: (v) => update(config.copyWith(referenceSameOutfit: v)),
-          ),
-        _valueSlider(
-          label: 'imggen_nai_ref_strength'.tr(),
-          description: 'imggen_nai_ref_strength_desc'.tr(),
-          value: config.referenceStrength,
-          max: NovelAIConstants.referenceStrengthMax(model),
-          onChanged: (v) => update(config.copyWith(referenceStrength: v)),
-        ),
-        if (NovelAIConstants.referenceSupportsFidelity(model))
-          _valueSlider(
-            label: 'imggen_nai_ref_fidelity'.tr(),
-            description: 'imggen_nai_ref_fidelity_desc'.tr(),
-            value: config.referenceFidelity,
-            max: NovelAIConstants.referenceFidelityMax,
-            onChanged: (v) => update(config.copyWith(referenceFidelity: v)),
-          ),
-      ],
+      ),
     ),
+    if (NovelAIConstants.referenceHasOutfitChoice(model, type))
+      MenuSwitchItem(
+        label: 'imggen_nai_ref_same_outfit'.tr(),
+        description: 'imggen_nai_ref_same_outfit_desc'.tr(),
+        value: config.referenceSameOutfit,
+        onChanged: (v) => update(config.copyWith(referenceSameOutfit: v)),
+      ),
+    _valueSlider(
+      label: 'imggen_nai_ref_strength'.tr(),
+      description: 'imggen_nai_ref_strength_desc'.tr(),
+      value: config.referenceStrength,
+      max: NovelAIConstants.referenceStrengthMax(model),
+      onChanged: (v) => update(config.copyWith(referenceStrength: v)),
+    ),
+    if (NovelAIConstants.referenceSupportsFidelity(model))
+      _valueSlider(
+        label: 'imggen_nai_ref_fidelity'.tr(),
+        description: 'imggen_nai_ref_fidelity_desc'.tr(),
+        value: config.referenceFidelity,
+        max: NovelAIConstants.referenceFidelityMax,
+        onChanged: (v) => update(config.copyWith(referenceFidelity: v)),
+      ),
   ];
 }
 

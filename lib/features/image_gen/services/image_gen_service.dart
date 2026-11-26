@@ -272,6 +272,7 @@ class ImageGenService {
           references: references,
           charDescription: charDescription,
           userDescription: userAppearanceText,
+          plain: providerTakesPlainAppearanceText(settings),
         ),
       );
     }
