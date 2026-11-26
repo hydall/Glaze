@@ -32,6 +32,7 @@ import 'comfyui_workflow_sheet.dart';
 import 'connection_fields.dart';
 import 'model_fields.dart';
 import 'novelai_fields.dart';
+import 'novelai_reference_fields.dart';
 import 'openrouter_fields.dart';
 import 'reference_library_section.dart';
 import 'rows.dart' as rows;
@@ -335,6 +336,12 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 ),
               )
             else ...[
+              if (s.apiType == ImageGenApiType.novelai)
+                ...buildNovelAiPreciseReferenceSection(
+                  context: context,
+                  settings: s,
+                  onUpdate: _update,
+                ),
               ...buildReferenceSections(
                 context: context,
                 settings: s,

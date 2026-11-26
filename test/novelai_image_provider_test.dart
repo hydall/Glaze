@@ -180,6 +180,71 @@ void main() {
       expect(params['director_reference_information_extracted'], [1.0, 1.0]);
     });
 
+    test('sends the Precise Reference type, strength and fidelity', () async {
+      final (server, _, bodies) = await _byteServer(
+        Uint8List.fromList(_zip('image.png', utf8.encode('png'))),
+      );
+      addTearDown(() => server.close(force: true));
+
+      await NovelAIImageProvider().generate(
+        settings: NovelAIImageSettings(
+          apiKey: 'tok',
+          endpoint: _endpoint(server),
+          model: 'nai-diffusion-4-5-curated',
+          referenceType: 'character',
+          referenceStrength: 0.6,
+          referenceFidelity: 0.25,
+        ),
+        prompt: 'Zoe waves',
+        references: const [
+          {'image': 'aW1n'},
+          {'image': 'cG5n', 'novelaiType': 'style'},
+          {'image': 'anBn', 'novelaiType': 'bogus'},
+        ],
+      );
+
+      final body = jsonDecode(bodies.single) as Map<String, dynamic>;
+      final params = body['parameters'] as Map<String, dynamic>;
+      final captions = [
+        for (final d in params['director_reference_descriptions'] as List)
+          (d as Map)['caption']['base_caption'],
+      ];
+      expect(captions, ['character', 'style', 'character']);
+      expect(params['director_reference_strength_values'], [0.6, 0.6, 0.6]);
+      // Fidelity travels inverted, as the secondary strength.
+      expect(params['director_reference_secondary_strength_values'], [
+        0.75,
+        0.75,
+        0.75,
+      ]);
+    });
+
+    test('keeps negative Precise Reference values within bounds', () async {
+      final (server, _, bodies) = await _byteServer(
+        Uint8List.fromList(_zip('image.png', utf8.encode('png'))),
+      );
+      addTearDown(() => server.close(force: true));
+
+      await NovelAIImageProvider().generate(
+        settings: NovelAIImageSettings(
+          apiKey: 'tok',
+          endpoint: _endpoint(server),
+          model: 'nai-diffusion-4-5-full',
+          referenceStrength: -0.5,
+          referenceFidelity: -3,
+        ),
+        prompt: 'Zoe waves',
+        references: const [
+          {'image': 'aW1n'},
+        ],
+      );
+
+      final body = jsonDecode(bodies.single) as Map<String, dynamic>;
+      final params = body['parameters'] as Map<String, dynamic>;
+      expect(params['director_reference_strength_values'], [-0.5]);
+      expect(params['director_reference_secondary_strength_values'], [2.0]);
+    });
+
     test('drops references on models without Director Tools', () async {
       final (server, _, bodies) = await _byteServer(
         Uint8List.fromList(_zip('image.png', utf8.encode('png'))),

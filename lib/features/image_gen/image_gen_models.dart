@@ -118,7 +118,8 @@ abstract class XaiImageSettings with _$XaiImageSettings {
 ///
 /// [name] is a comma-separated alias list. [description] is sent to the
 /// provider next to the image when `sendRefDescriptions` is on, so the model
-/// knows *who* the picture shows.
+/// knows *who* the picture shows. [novelaiType] is the NovelAI Precise
+/// Reference type of this entry; empty follows the provider setting.
 @freezed
 abstract class ReferenceImage with _$ReferenceImage {
   const factory ReferenceImage({
@@ -127,6 +128,7 @@ abstract class ReferenceImage with _$ReferenceImage {
     @Default('match') String matchMode,
     @Default('') String description,
     @Default(true) bool enabled,
+    @Default('') String novelaiType,
   }) = _ReferenceImage;
 }
 
@@ -221,6 +223,11 @@ abstract class NovelAIImageSettings with _$NovelAIImageSettings {
     @Default('light') String ucPreset,
     @Default(true) bool qualityToggle,
     @Default(false) bool varietyBoost,
+    // Precise Reference: the type applies to every reference whose library
+    // entry does not pick its own; strength and fidelity apply to all.
+    @Default('character&style') String referenceType,
+    @Default(1.0) double referenceStrength,
+    @Default(1.0) double referenceFidelity,
   }) = _NovelAIImageSettings;
 }
 

@@ -159,6 +159,7 @@ class ImageGenSettingsCodec {
     'matchMode': r.matchMode,
     'description': r.description,
     'enabled': r.enabled,
+    if (r.novelaiType.isNotEmpty) 'novelaiType': r.novelaiType,
   };
 
   static ReferenceImage refFromJson(Map<String, dynamic> m) => ReferenceImage(
@@ -167,6 +168,10 @@ class ImageGenSettingsCodec {
     matchMode: m['matchMode'] as String? ?? 'match',
     description: m['description'] as String? ?? '',
     enabled: castBool(m['enabled'], true),
+    novelaiType: NovelAIConstants.normalizeReferenceType(
+      m['novelaiType'] as String?,
+      fallback: '',
+    ),
   );
 
   static List<ReferenceImage> parseRefs(dynamic value) {
@@ -493,6 +498,9 @@ class ImageGenSettingsCodec {
     'ucPreset': s.ucPreset,
     'qualityToggle': s.qualityToggle,
     'varietyBoost': s.varietyBoost,
+    'referenceType': s.referenceType,
+    'referenceStrength': s.referenceStrength,
+    'referenceFidelity': s.referenceFidelity,
   };
 
   static NovelAIImageSettings _novelAiFromJson(dynamic value) {
@@ -515,6 +523,11 @@ class ImageGenSettingsCodec {
       ucPreset: m['ucPreset'] as String? ?? 'light',
       qualityToggle: castBool(m['qualityToggle'], true),
       varietyBoost: castBool(m['varietyBoost'], false),
+      referenceType: NovelAIConstants.normalizeReferenceType(
+        m['referenceType'] as String?,
+      ),
+      referenceStrength: castDouble(m['referenceStrength'], 1),
+      referenceFidelity: castDouble(m['referenceFidelity'], 1),
     );
   }
 

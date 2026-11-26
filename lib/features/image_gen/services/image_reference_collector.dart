@@ -29,8 +29,9 @@ enum _ReferenceTransform { none, downscaleJpeg, novelAiPad }
 /// accepts ([providerMaxReferences]).
 ///
 /// Every entry is a flat map so the provider clients can stay independent of
-/// this class: `name`, `image` (bare base64), `mime`, `description` and
-/// `source` (`char` | `user` | `additional` | `context`).
+/// this class: `name`, `image` (bare base64), `mime`, `description`,
+/// `source` (`char` | `user` | `additional` | `context`) and, for a library
+/// entry that picks one, its NovelAI Precise Reference `novelaiType`.
 class ImageReferenceCollector {
   const ImageReferenceCollector();
 
@@ -124,6 +125,7 @@ class ImageReferenceCollector {
             ? ref.name.trim()
             : ref.description.trim(),
         'source': 'additional',
+        if (ref.novelaiType.isNotEmpty) 'novelaiType': ref.novelaiType,
       });
     }
 

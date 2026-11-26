@@ -634,9 +634,39 @@ class NovelAIConstants {
   static bool _skipsNsfwGuard(String? model) =>
       normalizeModel(model).toLowerCase().contains('curated');
 
-  /// Character Reference (Director Tools) images accepted per request. The
-  /// feature exists only on the V4.5 family.
+  /// Precise Reference (Director Tools) images accepted per request. The
+  /// feature exists only on the V4.5 family; every reference adds 5 Anlas to
+  /// the cost of each image.
   static const int maxReferences = 4;
+
+  /// Precise Reference types, sent as the reference's `base_caption`
+  /// (https://docs.novelai.net/en/image/precisereference/).
+  static const referenceTypeCharacter = 'character';
+  static const referenceTypeStyle = 'style';
+  static const referenceTypeCharacterStyle = 'character&style';
+
+  /// (id, translation key) of every reference type, in NovelAI's UI order.
+  static const referenceTypes = [
+    (referenceTypeCharacter, 'imggen_nai_ref_type_character'),
+    (referenceTypeStyle, 'imggen_nai_ref_type_style'),
+    (referenceTypeCharacterStyle, 'imggen_nai_ref_type_character_style'),
+  ];
+
+  /// [type] when it is a known reference type, otherwise [fallback].
+  static String normalizeReferenceType(
+    String? type, {
+    String fallback = referenceTypeCharacterStyle,
+  }) {
+    for (final (id, _) in referenceTypes) {
+      if (id == type) return id;
+    }
+    return fallback;
+  }
+
+  /// Bounds of the Strength and Fidelity values. NovelAI's sliders run 0..1,
+  /// but a typed value may go negative to steer away from a reference.
+  static const double referenceValueMin = -1;
+  static const double referenceValueMax = 1;
 
   /// The canvas a Director Tools reference has to be padded onto, chosen by the
   /// source orientation. The API accepts only these three sizes with the image
@@ -691,7 +721,7 @@ class NovelAIConstants {
   static bool isV5(String? model) =>
       normalizeModel(model).toLowerCase().contains('nai-diffusion-5');
 
-  /// Director Tools character references are V4.5 only.
+  /// Precise Reference (Director Tools) is V4.5 only.
   static bool supportsReferences(String? model) =>
       normalizeModel(model).toLowerCase().contains('nai-diffusion-4-5');
 

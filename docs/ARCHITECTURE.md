@@ -1397,8 +1397,10 @@ avatar, the entries whose aliases match the prompt (or that are set to
 result to what the active model accepts (`providerMaxReferences`). Providers
 that cannot take references at all (AUTOMATIC1111, ComfyUI, `dall-e-3`,
 Naistera `novelai` / `grok-pro`) report 0 and the reference UI is hidden. The
-direct NovelAI provider takes references as Director Tools (Character
-Reference) images, which only the V4.5 family supports.
+direct NovelAI provider takes references as Precise Reference (Director Tools)
+images, which only the V4.5 family supports. Its settings pick the default
+reference type (Character, Style or Character & Style), Strength and Fidelity;
+a library entry can override the type, so character and style references mix.
 
 Protocol and capability tables are ported from
 [sillyimages](https://github.com/0xl0cal/sillyimages).

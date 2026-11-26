@@ -91,6 +91,9 @@ List<Widget> buildReferenceSections({
   required Future<String?> Function() pickImage,
 }) {
   final references = settings.references;
+  final novelAiTypes =
+      settings.apiType == ImageGenApiType.novelai &&
+      NovelAIConstants.supportsReferences(settings.novelai.model);
 
   void updateRef(int index, ReferenceImage Function(ReferenceImage) mutate) {
     final copy = List<ReferenceImage>.from(references);
@@ -160,6 +163,9 @@ List<Widget> buildReferenceSections({
                 updateRef(i, (ref) => ref.copyWith(matchMode: v)),
             onEnabledChanged: (v) =>
                 updateRef(i, (ref) => ref.copyWith(enabled: v)),
+            onNovelAiTypeChanged: novelAiTypes
+                ? (v) => updateRef(i, (ref) => ref.copyWith(novelaiType: v))
+                : null,
             onPickImage: () async {
               final imageData = await pickImage();
               if (imageData == null) return;

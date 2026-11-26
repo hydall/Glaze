@@ -55,6 +55,7 @@ void main() {
             description: 'red-haired mage',
             matchMode: 'always',
             enabled: false,
+            novelaiType: 'style',
           ),
         ],
       );
@@ -101,6 +102,9 @@ void main() {
           ucPreset: 'heavy',
           qualityToggle: false,
           varietyBoost: true,
+          referenceType: 'character',
+          referenceStrength: 0.6,
+          referenceFidelity: -0.25,
         ),
       );
 
